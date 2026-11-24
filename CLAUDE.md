@@ -29,7 +29,7 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 - Game tables (road events, market shocks, town tables) are roll tables in `tables/`. CI validates them and computes their exact odds with roll 2.1.1, pinned, through roll's library API (its 2.1.1 command line reads only the older loot format). Node is CI-only, never in the game.
 - `league-core` reads the same JSON in Rust. Every draw's value comes from `league-core`'s turn beacon, never from a local RNG.
 - Do not write the roll conformance test, or depend on anything newer than roll 2.1.1, until the conformance fixture ships. Whether roll becomes a Rust crate (roll 3.0.0) is decided after M2.
-- roll changes go to R&D as tickets (`rnd-local/projects/antigravity/tickets/`), never straight to the roll repo. Credit roll (MIT, same org) in the notes wherever its code or design is used.
+- roll changes go to R&D as internal tickets, never straight to the roll repo. Credit roll (MIT, same org) in the notes wherever its code or design is used.
 
 ## Workflow
 

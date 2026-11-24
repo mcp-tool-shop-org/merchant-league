@@ -14,7 +14,7 @@ use league_core::{
     ClubBot, EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION, EvalActSubmission, EvalHost, Seat,
     TableId, ToStructuredError as _,
 };
-use league_scorer::cli::run_cli_with_build_id;
+use league_scorer::cli::{run_cli_with_build_id, run_cli_with_build_id_and_state_hook};
 use league_scorer::{
     CRATE_GIT_SHA, EXIT_OK, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, ScorerConfig, ScorerError,
     ScorerFreezeBlindView, VERIFIED_CHECKPOINTS_SCHEMA_VERSION, VerifiedCheckpointEntry,
@@ -1041,14 +1041,23 @@ fn post_batch_refuses_mid_batch_save_or_seal_mutation_and_deletion() -> TestResu
     Ok(())
 }
 
-#[test]
-fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_checkpoint_change()
--> TestResult {
-    let tmp = TmpDir::new("cli_multi_state")?;
-    let mut host =
-        EvalHost::from_standard_setup(TableId(940_002), 4, 11, 21)?.with_engine_commit(COMMIT_A)?;
+struct TwoStateCliFixture {
+    ckpts_dir: PathBuf,
+    blind_dir: PathBuf,
+    cfg_path: PathBuf,
+    vc_path: PathBuf,
+    pairs: Vec<(String, String, Vec<u8>, Vec<u8>)>,
+}
+
+fn setup_two_state_cli_fixture(
+    tmp: &Path,
+    table_id: u64,
+) -> Result<TwoStateCliFixture, Box<dyn Error>> {
+    let mut host = EvalHost::from_standard_setup(TableId(table_id), 4, 11, 21)?
+        .with_engine_commit(COMMIT_A)?;
 
     let mut pairs = Vec::new();
+    let mut manifest_entries = Vec::new();
     for day_idx in 0..2_u8 {
         let mut subs = BTreeMap::new();
         for s in 0..host.seat_count() {
@@ -1067,10 +1076,22 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         }
         host.apply_act_submissions(&subs)?;
         host.sweep_turn()?;
-        let raw_dir = tmp.path.join(format!("raw_{day_idx}"));
+        let raw_dir = tmp.join(format!("raw_{day_idx}"));
         let (raw_save, raw_seal) = host.write_pre_act_checkpoint(&raw_dir)?;
         let save_bytes = fs::read(&raw_save)?;
         let seal_bytes = fs::read(&raw_seal)?;
+        let (_, summary) = verify_checkpoint_causal(&save_bytes, &seal_bytes)?;
+        manifest_entries.push(VerifiedCheckpointEntry {
+            pre_act_pair_sha256: summary.pre_act_pair_sha256,
+            pre_act_save_sha256: summary.pre_act_save_sha256,
+            pre_act_seal_sha256: summary.pre_act_seal_sha256,
+            engine_commit: summary.engine_commit,
+            turn: summary.turn,
+            seat_count: summary.seat_count,
+            expected_state_digest: summary.expected_state_digest,
+            turn_chain_digest: summary.turn_chain_digest,
+            post_probe_state_digest: summary.post_probe_state_digest,
+        });
         pairs.push((
             sha256_hex(&save_bytes),
             sha256_hex(&seal_bytes),
@@ -1079,8 +1100,19 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         ));
     }
 
-    let ckpts_dir = tmp.path.join("checkpoints");
-    let blind_dir = tmp.path.join("blind_inputs");
+    manifest_entries.sort_by(|a, b| a.pre_act_pair_sha256.cmp(&b.pre_act_pair_sha256));
+    let manifest = VerifiedCheckpointsManifest {
+        schema_version: VERIFIED_CHECKPOINTS_SCHEMA_VERSION,
+        engine_build_id: BUILD_B.to_owned(),
+        save_format_version: EVAL_SAVE_FORMAT_VERSION,
+        seal_format_version: EVAL_SEAL_FORMAT_VERSION,
+        entries: manifest_entries,
+    };
+    let vc_path = tmp.join("verified_checkpoints.json");
+    fs::write(&vc_path, to_sorted_pretty_json(&manifest)?)?;
+
+    let ckpts_dir = tmp.join("checkpoints");
+    let blind_dir = tmp.join("blind_inputs");
     fs::create_dir_all(&ckpts_dir)?;
     fs::create_dir_all(&blind_dir)?;
     let cfg = ScorerConfig {
@@ -1088,7 +1120,7 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         scenarios_m: 2,
         ..ScorerConfig::default()
     };
-    let cfg_path = tmp.path.join("cfg.json");
+    let cfg_path = tmp.join("cfg.json");
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
 
     for (idx, (save_sha, seal_sha, save_bytes, seal_bytes)) in pairs.iter().enumerate() {
@@ -1096,7 +1128,7 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         let cas_seal = ckpts_dir.join(format!("{seal_sha}.seal"));
         fs::write(&cas_save, save_bytes)?;
         fs::write(&cas_seal, seal_bytes)?;
-        let state_id = format!("game940002-day-0{}-seat-0", idx + 2);
+        let state_id = format!("game{table_id}-day-0{}-seat-0", idx + 2);
         let req = build_arm_independent_request(
             &cas_save, &cas_seal, save_sha, seal_sha, 0, &state_id, &cfg, 77,
         )?;
@@ -1106,6 +1138,21 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         )?;
     }
 
+    Ok(TwoStateCliFixture {
+        ckpts_dir,
+        blind_dir,
+        cfg_path,
+        vc_path,
+        pairs,
+    })
+}
+
+#[test]
+fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_checkpoint_change()
+-> TestResult {
+    let tmp = TmpDir::new("cli_multi_state")?;
+    let fix = setup_two_state_cli_fixture(&tmp.path, 940_002)?;
+
     // 1. Clean 2-state CLI batch writes both score files and re-verifies prior checkpoint pairs.
     let ok_out = tmp.path.join("out_ok");
     let mut stdout = Vec::new();
@@ -1114,11 +1161,11 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         [
             "score",
             "--blind-inputs",
-            blind_dir.to_str().ok_or("utf8")?,
+            fix.blind_dir.to_str().ok_or("utf8")?,
             "--checkpoints",
-            ckpts_dir.to_str().ok_or("utf8")?,
+            fix.ckpts_dir.to_str().ok_or("utf8")?,
             "--config",
-            cfg_path.to_str().ok_or("utf8")?,
+            fix.cfg_path.to_str().ok_or("utf8")?,
             "--out",
             ok_out.to_str().ok_or("utf8")?,
         ],
@@ -1145,8 +1192,8 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
     );
 
     // 2. Corrupting the second state's seal fails the whole batch with zero partial files written.
-    let second_seal_path = ckpts_dir.join(format!("{}.seal", pairs[1].1));
-    let mut tampered = pairs[1].3.clone();
+    let second_seal_path = fix.ckpts_dir.join(format!("{}.seal", fix.pairs[1].1));
+    let mut tampered = fix.pairs[1].3.clone();
     tampered[0] ^= 0x01;
     fs::write(&second_seal_path, &tampered)?;
 
@@ -1157,11 +1204,11 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         [
             "score",
             "--blind-inputs",
-            blind_dir.to_str().ok_or("utf8")?,
+            fix.blind_dir.to_str().ok_or("utf8")?,
             "--checkpoints",
-            ckpts_dir.to_str().ok_or("utf8")?,
+            fix.ckpts_dir.to_str().ok_or("utf8")?,
             "--config",
-            cfg_path.to_str().ok_or("utf8")?,
+            fix.cfg_path.to_str().ok_or("utf8")?,
             "--out",
             fail_out.to_str().ok_or("utf8")?,
         ],
@@ -1176,6 +1223,123 @@ fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_chec
         "failed multi-state batch must emit zero partial score files, found {}",
         written.len()
     );
+
+    Ok(())
+}
+
+#[test]
+fn cli_score_cross_state_recheck_refuses_earlier_pair_mutated_after_own_batch() -> TestResult {
+    let tmp = TmpDir::new("cli_cross_state_recheck")?;
+    let fix = setup_two_state_cli_fixture(&tmp.path, 940_003)?;
+
+    let first_save_path = fix.ckpts_dir.join(format!("{}.save.json", fix.pairs[0].0));
+    let first_seal_path = fix.ckpts_dir.join(format!("{}.seal", fix.pairs[0].1));
+    let orig_first_save = fix.pairs[0].2.clone();
+    let orig_first_seal = fix.pairs[0].3.clone();
+
+    // 1. Unverified CLI run: mutate state 0's `.save.json` right after state 0 finishes its own
+    //    batch (while state 1 is about to score). Only the CLI cross-state re-check inspects
+    //    earlier pairs before emitting `<out>/scores/*.json`.
+    let out_save = tmp.path.join("out_mutated_save");
+    let mut seen_states = Vec::new();
+    let mut hook_save = |state_idx: usize, state_id: &str| {
+        seen_states.push((state_idx, state_id.to_owned()));
+        if state_idx == 0 {
+            let mut tampered = orig_first_save.clone();
+            tampered[0] ^= 0x01;
+            if let Err(err) = fs::write(&first_save_path, &tampered) {
+                panic!("failed to tamper state 0 save: {err}");
+            }
+        }
+    };
+    let mut stdout_save = Vec::new();
+    let mut stderr_save = Vec::new();
+    let code_save = run_cli_with_build_id_and_state_hook(
+        [
+            "score",
+            "--blind-inputs",
+            fix.blind_dir.to_str().ok_or("utf8")?,
+            "--checkpoints",
+            fix.ckpts_dir.to_str().ok_or("utf8")?,
+            "--config",
+            fix.cfg_path.to_str().ok_or("utf8")?,
+            "--out",
+            out_save.to_str().ok_or("utf8")?,
+        ],
+        BUILD_B,
+        Some(&mut hook_save),
+        &mut stdout_save,
+        &mut stderr_save,
+    );
+    assert_eq!(seen_states.len(), 2, "both states must have scored first");
+    assert_eq!(code_save, EXIT_RUNTIME_ERROR);
+    let err_save_text = String::from_utf8_lossy(&stderr_save);
+    assert!(
+        err_save_text.contains("CHECKPOINT_CHANGED_DURING_BATCH"),
+        "stderr={err_save_text}"
+    );
+    assert!(
+        !err_save_text.contains(tmp.path.to_string_lossy().as_ref()),
+        "temp path leaked in CLI error: {err_save_text}"
+    );
+    assert!(stdout_save.is_empty());
+    let written_save: Vec<_> = fs::read_dir(out_save.join("scores"))?.collect();
+    assert!(
+        written_save.is_empty(),
+        "cross-state re-check refusal must emit zero output files, found {}",
+        written_save.len()
+    );
+
+    // Restore state 0's `.save.json` before testing `--verified-checkpoints` + `.seal` deletion.
+    fs::write(&first_save_path, &orig_first_save)?;
+
+    // 2. Verified CLI run: remove state 0's `.seal` right after state 0 finishes its own batch.
+    let out_seal = tmp.path.join("out_removed_seal");
+    let mut removed = false;
+    let mut hook_seal = |state_idx: usize, _state_id: &str| {
+        if state_idx == 0 && !removed {
+            removed = true;
+            if let Err(err) = fs::remove_file(&first_seal_path) {
+                panic!("failed to remove state 0 seal: {err}");
+            }
+        }
+    };
+    let mut stdout_seal = Vec::new();
+    let mut stderr_seal = Vec::new();
+    let code_seal = run_cli_with_build_id_and_state_hook(
+        [
+            "score",
+            "--blind-inputs",
+            fix.blind_dir.to_str().ok_or("utf8")?,
+            "--checkpoints",
+            fix.ckpts_dir.to_str().ok_or("utf8")?,
+            "--config",
+            fix.cfg_path.to_str().ok_or("utf8")?,
+            "--verified-checkpoints",
+            fix.vc_path.to_str().ok_or("utf8")?,
+            "--out",
+            out_seal.to_str().ok_or("utf8")?,
+        ],
+        BUILD_B,
+        Some(&mut hook_seal),
+        &mut stdout_seal,
+        &mut stderr_seal,
+    );
+    assert!(removed);
+    assert_eq!(code_seal, EXIT_RUNTIME_ERROR);
+    let err_seal_text = String::from_utf8_lossy(&stderr_seal);
+    assert!(
+        err_seal_text.contains("CHECKPOINT_CHANGED_DURING_BATCH"),
+        "stderr={err_seal_text}"
+    );
+    assert!(stdout_seal.is_empty());
+    let written_seal: Vec<_> = fs::read_dir(out_seal.join("scores"))?.collect();
+    assert!(
+        written_seal.is_empty(),
+        "verified cross-state re-check refusal must emit zero output files, found {}",
+        written_seal.len()
+    );
+    fs::write(&first_seal_path, &orig_first_seal)?;
 
     Ok(())
 }

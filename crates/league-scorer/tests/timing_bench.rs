@@ -11,7 +11,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use league_core::{ClubBot, EvalActSubmission, EvalHost, PrivateMandate, Seat, TableId, TurnPhase};
 use league_scorer::{
@@ -139,50 +139,55 @@ fn check_stage_sum_tolerance(
 }
 
 struct StageClock {
-    start: Instant,
-    cursor: Instant,
+    wall_start: Instant,
     stages: StageBreakdownMs,
 }
 
 impl StageClock {
     fn new() -> Self {
-        let now = Instant::now();
         Self {
-            start: now,
-            cursor: now,
+            wall_start: Instant::now(),
             stages: StageBreakdownMs::default(),
         }
     }
 
-    fn lap(&mut self) -> f64 {
-        let now = Instant::now();
-        let delta = now.duration_since(self.cursor).as_secs_f64() * 1000.0;
-        self.cursor = now;
-        delta
+    fn time_file_read<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
+        let t0 = Instant::now();
+        let out = f();
+        self.stages.file_read_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        out
     }
 
-    fn mark_file_read(&mut self) {
-        self.stages.file_read_ms += self.lap();
+    fn time_sha256_verify<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
+        let t0 = Instant::now();
+        let out = f();
+        self.stages.sha256_verify_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        out
     }
 
-    fn mark_sha256_verify(&mut self) {
-        self.stages.sha256_verify_ms += self.lap();
+    fn time_strict_decode_parse<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
+        let t0 = Instant::now();
+        let out = f();
+        self.stages.strict_decode_parse_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        out
     }
 
-    fn mark_strict_decode_parse(&mut self) {
-        self.stages.strict_decode_parse_ms += self.lap();
+    fn time_policy_and_candidates<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
+        let t0 = Instant::now();
+        let out = f();
+        self.stages.policy_and_candidates_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        out
     }
 
-    fn mark_policy_and_candidates(&mut self) {
-        self.stages.policy_and_candidates_ms += self.lap();
-    }
-
-    fn mark_engine_steps_to_close(&mut self) {
-        self.stages.engine_steps_to_close_ms += self.lap();
+    fn time_engine_steps_to_close<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
+        let t0 = Instant::now();
+        let out = f();
+        self.stages.engine_steps_to_close_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        out
     }
 
     fn finish(self) -> Result<(StageBreakdownMs, f64, StageToleranceCheck), String> {
-        let total_ms = self.cursor.duration_since(self.start).as_secs_f64() * 1000.0;
+        let total_ms = self.wall_start.elapsed().as_secs_f64() * 1000.0;
         let check = check_stage_sum_tolerance(&self.stages, total_ms)?;
         Ok((self.stages, total_ms, check))
     }
@@ -539,56 +544,64 @@ fn step_timed_rollout(
     posture: PostureKind,
     cfg: &ScorerConfig,
 ) -> Result<ScenarioRolloutOutcome, Box<dyn Error>> {
-    let mut host = base_host.clone();
+    let mut host = clock.time_engine_steps_to_close(|| -> Result<EvalHost, Box<dyn Error>> {
+        let mut host = base_host.clone();
+        let mut day_subs = peer_day_subs.clone();
+        day_subs.insert(focal_seat, focal_submission.clone());
+        host.apply_act_submissions(&day_subs)?;
+        host.sweep_turn()?;
+        Ok(host)
+    })?;
     let seat_count = host.seat_count();
-    let mut day_subs = peer_day_subs.clone();
-    day_subs.insert(focal_seat, focal_submission.clone());
-    host.apply_act_submissions(&day_subs)?;
-    host.sweep_turn()?;
-    clock.mark_engine_steps_to_close();
 
     while host.phase() == TurnPhase::TalkAndMarket {
-        let mut subs = BTreeMap::new();
-        for s in 0..seat_count {
-            let obs = host.observe_seat(Seat(s))?;
-            let seed = scenario.bot_base_seed.wrapping_add(u64::from(s));
-            let sub = if s == focal_seat {
-                let dec = ClubBot::new(seed).decide_full_turn(&obs, &focal_mandate);
-                EvalActSubmission {
-                    market_actions: dec.pass_a_actions,
-                    pass_b_actions: dec.pass_b_actions,
-                    bundle: dec.bundle,
+        let subs = clock.time_policy_and_candidates(
+            || -> Result<BTreeMap<u8, EvalActSubmission>, Box<dyn Error>> {
+                let mut subs = BTreeMap::new();
+                for s in 0..seat_count {
+                    let obs = host.observe_seat(Seat(s))?;
+                    let seed = scenario.bot_base_seed.wrapping_add(u64::from(s));
+                    let sub = if s == focal_seat {
+                        let dec = ClubBot::new(seed).decide_full_turn(&obs, &focal_mandate);
+                        EvalActSubmission {
+                            market_actions: dec.pass_a_actions,
+                            pass_b_actions: dec.pass_b_actions,
+                            bundle: dec.bundle,
+                        }
+                    } else {
+                        let mandate = *scenario
+                            .peer_mandates
+                            .get(&s)
+                            .ok_or("missing peer mandate")?;
+                        decide_peer_turn(posture, seed, &obs, &mandate, cfg)?
+                    };
+                    subs.insert(s, sub);
                 }
-            } else {
-                let mandate = *scenario
-                    .peer_mandates
-                    .get(&s)
-                    .ok_or("missing peer mandate")?;
-                decide_peer_turn(posture, seed, &obs, &mandate, cfg)?
-            };
-            subs.insert(s, sub);
-        }
-        clock.mark_policy_and_candidates();
+                Ok(subs)
+            },
+        )?;
 
-        host.apply_act_submissions(&subs)?;
-        host.sweep_turn()?;
-        clock.mark_engine_steps_to_close();
+        clock.time_engine_steps_to_close(|| -> Result<(), Box<dyn Error>> {
+            host.apply_act_submissions(&subs)?;
+            host.sweep_turn()?;
+            Ok(())
+        })?;
     }
 
-    let (scoreboard, _, _, _) = host.finalize_eval_season()?;
-    let entry = scoreboard
-        .standings
-        .iter()
-        .find(|e| e.seat == focal_seat)
-        .ok_or("focal seat missing from FinalScoreboard")?;
-    let outcome = ScenarioRolloutOutcome {
-        mandate_bonus: entry.mandate_bonus,
-        net_asset_equity: entry.net_asset_equity,
-        project_equity: entry.project_equity,
-        total_equity: entry.total_equity,
-    };
-    clock.mark_engine_steps_to_close();
-    Ok(outcome)
+    clock.time_engine_steps_to_close(|| -> Result<ScenarioRolloutOutcome, Box<dyn Error>> {
+        let (scoreboard, _, _, _) = host.finalize_eval_season()?;
+        let entry = scoreboard
+            .standings
+            .iter()
+            .find(|e| e.seat == focal_seat)
+            .ok_or("focal seat missing from FinalScoreboard")?;
+        Ok(ScenarioRolloutOutcome {
+            mandate_bonus: entry.mandate_bonus,
+            net_asset_equity: entry.net_asset_equity,
+            project_equity: entry.project_equity,
+            total_equity: entry.total_equity,
+        })
+    })
 }
 
 fn build_peer_day_subs_by_m(
@@ -636,34 +649,47 @@ fn time_cold_first_rollout(
     spec: &CheckpointSpec,
     cfg: &ScorerConfig,
 ) -> Result<ColdRolloutRecord, Box<dyn Error>> {
+    time_cold_first_rollout_with_untimed_gap(spec, cfg, None)
+}
+
+fn time_cold_first_rollout_with_untimed_gap(
+    spec: &CheckpointSpec,
+    cfg: &ScorerConfig,
+    untimed_gap: Option<Duration>,
+) -> Result<ColdRolloutRecord, Box<dyn Error>> {
     let save_path = Path::new(&spec.save_path);
     let seal_path = Path::new(&spec.seal_path);
     let mut clock = StageClock::new();
 
-    let save_bytes = fs::read(save_path)?;
-    let seal_bytes = fs::read(seal_path)?;
-    clock.mark_file_read();
+    let (save_bytes, seal_bytes) =
+        clock.time_file_read(|| -> Result<(Vec<u8>, Vec<u8>), Box<dyn Error>> {
+            Ok((fs::read(save_path)?, fs::read(seal_path)?))
+        })?;
 
-    verify_checkpoint_bytes_for_bench(&save_bytes, &seal_bytes, spec)?;
-    clock.mark_sha256_verify();
+    clock
+        .time_sha256_verify(|| verify_checkpoint_bytes_for_bench(&save_bytes, &seal_bytes, spec))?;
 
-    let base_host = EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes)?;
-    clock.mark_strict_decode_parse();
+    let base_host = clock.time_strict_decode_parse(|| {
+        EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes)
+    })?;
 
-    let day = base_host.turn();
-    let (req, focal_mandate) = build_request_from_host(&base_host, spec, cfg, "passive_1")?;
-    let focal_obs = base_host.observe_seat(Seat(BENCH_FOCAL_SEAT))?;
-    let scenarios = draw_scenarios(
-        &focal_obs.spec,
-        focal_mandate,
-        req.focal_seat,
-        req.scorer_seed,
-        &req.pre_act_pair_sha256,
-        day,
-        cfg.scenarios_m,
-    )?;
-    let peer_day_subs_by_m = build_peer_day_subs_by_m(&base_host, &req, &scenarios, cfg)?;
-    clock.mark_policy_and_candidates();
+    let (req, focal_mandate, scenarios, peer_day_subs_by_m) =
+        clock.time_policy_and_candidates(|| -> Result<_, Box<dyn Error>> {
+            let day = base_host.turn();
+            let (req, focal_mandate) = build_request_from_host(&base_host, spec, cfg, "passive_1")?;
+            let focal_obs = base_host.observe_seat(Seat(BENCH_FOCAL_SEAT))?;
+            let scenarios = draw_scenarios(
+                &focal_obs.spec,
+                focal_mandate,
+                req.focal_seat,
+                req.scorer_seed,
+                &req.pre_act_pair_sha256,
+                day,
+                cfg.scenarios_m,
+            )?;
+            let peer_day_subs_by_m = build_peer_day_subs_by_m(&base_host, &req, &scenarios, cfg)?;
+            Ok((req, focal_mandate, scenarios, peer_day_subs_by_m))
+        })?;
 
     let posture = posture_for_scenario(cfg, 0);
     let outcome = step_timed_rollout(
@@ -677,6 +703,10 @@ fn time_cold_first_rollout(
         posture,
         cfg,
     )?;
+
+    if let Some(gap) = untimed_gap {
+        std::thread::sleep(gap);
+    }
 
     let (stages, total_ms, tol) = clock.finish()?;
     Ok(ColdRolloutRecord {
@@ -708,34 +738,44 @@ fn time_decision_point_once(
     let seal_path = Path::new(&spec.seal_path);
     let mut clock = StageClock::new();
 
-    let save_bytes = fs::read(save_path)?;
-    let seal_bytes = fs::read(seal_path)?;
-    clock.mark_file_read();
+    let (save_bytes, seal_bytes) =
+        clock.time_file_read(|| -> Result<(Vec<u8>, Vec<u8>), Box<dyn Error>> {
+            Ok((fs::read(save_path)?, fs::read(seal_path)?))
+        })?;
 
-    verify_checkpoint_bytes_for_bench(&save_bytes, &seal_bytes, spec)?;
-    clock.mark_sha256_verify();
+    clock
+        .time_sha256_verify(|| verify_checkpoint_bytes_for_bench(&save_bytes, &seal_bytes, spec))?;
 
-    let base_host = EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes)?;
-    clock.mark_strict_decode_parse();
+    let base_host = clock.time_strict_decode_parse(|| {
+        EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes)
+    })?;
 
     let day = base_host.turn();
-    let pre_digest = base_host.canonical_state_digest_hex()?;
-    let pre_save = base_host.public_save_snapshot()?;
-    clock.mark_engine_steps_to_close();
+    let (pre_digest, pre_save) =
+        clock.time_engine_steps_to_close(|| -> Result<_, Box<dyn Error>> {
+            Ok((
+                base_host.canonical_state_digest_hex()?,
+                base_host.public_save_snapshot()?,
+            ))
+        })?;
 
-    let (req, focal_mandate) = build_request_from_host(&base_host, spec, cfg, candidate_mode)?;
-    let focal_obs = base_host.observe_seat(Seat(BENCH_FOCAL_SEAT))?;
-    let scenarios = draw_scenarios(
-        &focal_obs.spec,
-        focal_mandate,
-        req.focal_seat,
-        req.scorer_seed,
-        &req.pre_act_pair_sha256,
-        day,
-        cfg.scenarios_m,
-    )?;
-    let peer_day_subs_by_m = build_peer_day_subs_by_m(&base_host, &req, &scenarios, cfg)?;
-    clock.mark_policy_and_candidates();
+    let (req, focal_mandate, scenarios, peer_day_subs_by_m) =
+        clock.time_policy_and_candidates(|| -> Result<_, Box<dyn Error>> {
+            let (req, focal_mandate) =
+                build_request_from_host(&base_host, spec, cfg, candidate_mode)?;
+            let focal_obs = base_host.observe_seat(Seat(BENCH_FOCAL_SEAT))?;
+            let scenarios = draw_scenarios(
+                &focal_obs.spec,
+                focal_mandate,
+                req.focal_seat,
+                req.scorer_seed,
+                &req.pre_act_pair_sha256,
+                day,
+                cfg.scenarios_m,
+            )?;
+            let peer_day_subs_by_m = build_peer_day_subs_by_m(&base_host, &req, &scenarios, cfg)?;
+            Ok((req, focal_mandate, scenarios, peer_day_subs_by_m))
+        })?;
 
     let mut outcomes = Vec::with_capacity(req.candidates.len());
     for candidate in &req.candidates {
@@ -758,26 +798,32 @@ fn time_decision_point_once(
         outcomes.push(row);
     }
 
-    let post_digest = base_host.canonical_state_digest_hex()?;
-    let post_save = base_host.public_save_snapshot()?;
-    if post_digest != pre_digest || post_save != pre_save {
-        return Err("in-memory base_host diverged during timed decision-point batch".into());
-    }
-    clock.mark_engine_steps_to_close();
+    clock.time_engine_steps_to_close(|| -> Result<(), Box<dyn Error>> {
+        let post_digest = base_host.canonical_state_digest_hex()?;
+        let post_save = base_host.public_save_snapshot()?;
+        if post_digest != pre_digest || post_save != pre_save {
+            return Err("in-memory base_host diverged during timed decision-point batch".into());
+        }
+        Ok(())
+    })?;
 
-    let post_save_bytes = fs::read(save_path)?;
-    let post_seal_bytes = fs::read(seal_path)?;
-    clock.mark_file_read();
+    let (post_save_bytes, post_seal_bytes) =
+        clock.time_file_read(|| -> Result<(Vec<u8>, Vec<u8>), Box<dyn Error>> {
+            Ok((fs::read(save_path)?, fs::read(seal_path)?))
+        })?;
 
-    verify_checkpoint_bytes_for_bench(&post_save_bytes, &post_seal_bytes, spec)?;
-    if post_save_bytes != save_bytes || post_seal_bytes != seal_bytes {
-        return Err("checkpoint bytes changed during timed decision-point batch".into());
-    }
-    clock.mark_sha256_verify();
+    clock.time_sha256_verify(|| -> Result<(), Box<dyn Error>> {
+        verify_checkpoint_bytes_for_bench(&post_save_bytes, &post_seal_bytes, spec)?;
+        if post_save_bytes != save_bytes || post_seal_bytes != seal_bytes {
+            return Err("checkpoint bytes changed during timed decision-point batch".into());
+        }
+        Ok(())
+    })?;
 
-    let score_out = score_outcomes(&req, cfg, day, &outcomes)?;
-    let score_json = to_sorted_pretty_json(&score_out)?;
-    clock.mark_engine_steps_to_close();
+    let score_json = clock.time_engine_steps_to_close(|| -> Result<String, Box<dyn Error>> {
+        let score_out = score_outcomes(&req, cfg, day, &outcomes)?;
+        Ok(to_sorted_pretty_json(&score_out)?)
+    })?;
 
     let (stages, total_ms, _tol) = clock.finish()?;
     Ok(SingleDecisionPointSample {
@@ -1555,6 +1601,50 @@ fn stage_times_sum_to_total_within_stated_tolerance() -> Result<(), Box<dyn Erro
         engine_steps_to_close_ms: 1.0,
     };
     assert!(check_stage_sum_tolerance(&bad_stages, 50.0).is_err());
+    Ok(())
+}
+
+#[test]
+fn stage_sum_check_fails_on_untimed_gap() -> Result<(), Box<dyn Error>> {
+    // 1. Direct StageClock span: an untimed sleep inside the independent outer timer makes
+    //    `finish()` reject the stage sum against `wall_start.elapsed()`.
+    let gap_clock = StageClock::new();
+    std::thread::sleep(Duration::from_millis(25));
+    let clock_err = gap_clock
+        .finish()
+        .err()
+        .ok_or("expected untimed sleep in StageClock to fail stage-sum check")?;
+    assert!(
+        clock_err.contains("differed from total"),
+        "clock_err={clock_err}"
+    );
+
+    // 2. Real timed rollout: an untimed 200 ms gap inside `StageClock` exceeds the
+    //    `max(2%, 1.0 ms)` tolerance even under unoptimized/coverage builds.
+    let tmp = BenchTmpDir::new("stage_untimed_gap")?;
+    let manifest = generate_bench_fixture(tmp.path())?;
+    let late_spec = manifest
+        .checkpoints
+        .last()
+        .ok_or("missing late checkpoint")?;
+    let cfg = ScorerConfig {
+        k_synth_max: 1,
+        scenarios_m: 2,
+        ..ScorerConfig::default()
+    };
+
+    let clean = time_cold_first_rollout(late_spec, &cfg)?;
+    assert!(clean.within_tolerance);
+
+    let rollout_gap_err =
+        time_cold_first_rollout_with_untimed_gap(late_spec, &cfg, Some(Duration::from_millis(200)))
+            .err()
+            .ok_or("expected untimed gap inside rollout to fail stage-sum check")?;
+    let rollout_gap_msg = rollout_gap_err.to_string();
+    assert!(
+        rollout_gap_msg.contains("differed from total"),
+        "rollout_gap_msg={rollout_gap_msg}"
+    );
     Ok(())
 }
 

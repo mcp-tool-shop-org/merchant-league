@@ -229,7 +229,7 @@ fn check_post_batch_pair_bytes(
 }
 
 /// Re-verifies after a batch that the on-disk `.save.json` and `.seal` pair still matches the
-/// digests and bytes verified before the batch ran, refusing any mid-batch change.
+/// digests and bytes verified before the batch ran, refusing any pair that differs at the post-batch check.
 #[doc(hidden)]
 pub fn verify_checkpoint_pair_unchanged_after_batch(
     save_path: &Path,

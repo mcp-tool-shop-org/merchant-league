@@ -74,6 +74,10 @@ where
     run_cli_with_build_id(args, crate::CRATE_GIT_SHA, stdout, stderr)
 }
 
+/// Hook invoked after each state finishes scoring inside `score` (test seam for fault injection).
+#[doc(hidden)]
+pub type AfterStateHook<'a> = &'a mut dyn FnMut(usize, &str);
+
 /// Testable entrypoint for [`run_cli`] accepting an explicit `scorer_build_id` seam.
 pub fn run_cli_with_build_id<I, S>(
     args: I,
@@ -85,9 +89,27 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
+    run_cli_with_build_id_and_state_hook(args, scorer_build_id, None, stdout, stderr)
+}
+
+/// Fault-injection entrypoint invoking `after_each_state_hook(state_index, state_id)` right
+/// after each state finishes scoring in `score` (before the cross-state post-batch re-check
+/// and before any output file is written).
+#[doc(hidden)]
+pub fn run_cli_with_build_id_and_state_hook<I, S>(
+    args: I,
+    scorer_build_id: &str,
+    after_each_state_hook: Option<AfterStateHook<'_>>,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
     let args_vec: Vec<OsString> = args.into_iter().map(Into::into).collect();
     let err_fmt = peek_error_format(&args_vec);
-    match run_cli_args(&args_vec, scorer_build_id, stdout) {
+    match run_cli_args(&args_vec, scorer_build_id, after_each_state_hook, stdout) {
         Ok(()) => EXIT_OK,
         Err(err) => {
             write_cli_error(&err, err_fmt, stderr);
@@ -175,6 +197,7 @@ struct CandidatesCliArgs {
 fn run_cli_args(
     args: &[OsString],
     scorer_build_id: &str,
+    after_each_state_hook: Option<AfterStateHook<'_>>,
     stdout: &mut dyn Write,
 ) -> Result<(), ScorerError> {
     let mut iter = args.iter().cloned().peekable();
@@ -209,7 +232,7 @@ fn run_cli_args(
     match command.as_deref() {
         Some("score") => {
             let parsed = parse_score_flags(iter)?;
-            execute_score_command(&parsed, scorer_build_id, stdout)
+            execute_score_command(&parsed, scorer_build_id, after_each_state_hook, stdout)
         }
         Some("candidates") => {
             let parsed = parse_candidates_flags(iter)?;
@@ -589,6 +612,7 @@ fn execute_candidates_command(
 fn execute_score_command(
     args: &ScoreCliArgs,
     scorer_build_id: &str,
+    mut after_each_state_hook: Option<AfterStateHook<'_>>,
     stdout: &mut dyn Write,
 ) -> Result<(), ScorerError> {
     let config = load_and_validate_config(&args.config_path)?;
@@ -695,7 +719,7 @@ fn execute_score_command(
     })?;
 
     let mut pending_outputs = Vec::with_capacity(requests.len());
-    for (req, req_sha256) in &requests {
+    for (state_idx, (req, req_sha256)) in requests.iter().enumerate() {
         let save_path = args
             .checkpoints_dir
             .join(format!("{}.save.json", req.pre_act_save_sha256));
@@ -717,6 +741,9 @@ fn execute_score_command(
         let json_text = to_sorted_pretty_json(&output)?;
         let out_path = scores_dir.join(format!("{}.json", req.state_id));
         pending_outputs.push((out_path, json_text.into_bytes()));
+        if let Some(hook) = after_each_state_hook.as_deref_mut() {
+            hook(state_idx, &req.state_id);
+        }
     }
 
     if let Some((last_req, _)) = requests.last() {

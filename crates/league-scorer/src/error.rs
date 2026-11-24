@@ -142,7 +142,7 @@ pub enum ScorerError {
         /// Number of non-focal peers requiring distinct mandates.
         needed: usize,
     },
-    /// On-disk checkpoint `.save.json` or `.seal` changed, vanished, or was replaced while a scoring batch ran (`exit 2`).
+    /// On-disk checkpoint `.save.json` or `.seal` differs (or is missing) at the post-batch check (`exit 2`).
     CheckpointChangedDuringBatch(String),
     /// Underlying `league-core` engine failure during fork/step/finalize (`exit 2`).
     Engine(String),

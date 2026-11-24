@@ -48,8 +48,9 @@ Arm-blind, deterministic CPU decision-scoring kernel for Merchant League v2 eval
   digest and public snapshot after the `K * M` batch (`InMemoryBaseStateCorrupted`), and re-read
   and re-verify the on-disk `.save.json` and `.seal` pair once after the batch against the kept bytes
   and SHA-256 digests (`CHECKPOINT_CHANGED_DURING_BATCH`, while `league-scorer score` stages outputs
-  in memory and re-verifies prior checkpoint pairs so a mid-batch file change refuses the whole
-  batch with zero partial files written). Standalone
+  in memory and re-verifies prior checkpoint pairs so if any pair differs at the post-batch check,
+  the whole batch is refused with zero partial files written; rollouts use the verified in-memory
+  bytes either way). Standalone
   `run_single_rollout` / `run_single_rollout_with_replay_log` likewise uses single-read
   `EvalHost::fork_from_verified_checkpoint_bytes`. Both paths strip directory components from
   error output (`sanitize_error_text`), advance to natural close using counterfactual peer
