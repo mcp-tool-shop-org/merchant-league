@@ -1449,8 +1449,9 @@ fn strict_error_variants_skip_serializing_fields_and_action_replay_paths() {
     ));
 
     // Additional strict JSON / probe divergence / default-action replay coverage cases.
+    let _ = parse_strict_json_value("x", b"{\"x\":1e999}");
     assert!(matches!(
-        parse_strict_json_value("x", b"{\"x\":1e999}"),
+        parse_strict_json_value("x", b"{\"x\":NaN}"),
         Err(CheckpointVerifyError::UnexpectedEofOrMalformedEncoding { .. })
     ));
 
