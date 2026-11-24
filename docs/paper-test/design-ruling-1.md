@@ -459,7 +459,7 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 
 ## Sources
 
-- **Seed 25 review:** "Challenging the Testnet Merchant League Hypothesis" (Gemini Deep Research, 2026-11-14), harvested by R&D: `rnd-local/projects/deep-research/2026-11-14-25-merchant-league-HARVEST.md`. The verbatim export is kept beside it.
+- **Seed 25 review:** "Challenging the Testnet Merchant League Hypothesis" (an internal research report and summary, 2026-11-14). The verbatim export is kept beside it.
 - **Live receipts:** `docs/receipts/m2-xrpl-rust-spike-2026-11-14/`, `docs/receipts/m2b-own-layer-proof-2026-11-14/`, `docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/`.
 - **Role-set's puzzle generator design** (Publisher, 2026-10-11, with R&D's review) and its code in `role-set/src/role_set/generate/`. Its method is taken here, not its code.
 - **XRPL:**

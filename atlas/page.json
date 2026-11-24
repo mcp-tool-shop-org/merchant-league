@@ -103,21 +103,21 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 11,
+      "changed": 13,
       "moved": 0,
-      "parts": 5,
+      "parts": 3,
       "removed": 0
     },
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-24; 11 files changed content.",
+        "sentence": "Nothing structural changed since 2026-11-24; 13 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "cf4068dd3ebc9ca8445cf7d1727d39cb845f14e1",
-      "generatedAt": "2026-11-24T06:18:41.348Z"
+      "commit": "9ca990b83e51651df8b4a628b93b4b0a89b5f509",
+      "generatedAt": "2026-11-24T11:47:23.573Z"
     },
     "unchanged": true
   },
@@ -153,49 +153,49 @@
       "shared": 6
     },
     {
-      "a": "crates/league-eval/src/driver.rs",
-      "b": "crates/league-eval/tests/addendum_item9.rs",
-      "either": 7,
-      "partLabels": [
-        "league-eval",
-        "league-eval"
-      ],
-      "parts": [
-        "league-eval",
-        "league-eval"
-      ],
-      "relation": "inside",
-      "shared": 6
-    },
-    {
-      "a": "crates/league-eval/tests/addendum_item9.rs",
-      "b": "crates/league-eval/tests/play_and_branch.rs",
-      "either": 7,
-      "partLabels": [
-        "league-eval",
-        "league-eval"
-      ],
-      "parts": [
-        "league-eval",
-        "league-eval"
-      ],
-      "relation": "inside",
-      "shared": 6
-    },
-    {
-      "a": "crates/league-gen/src/empirical.rs",
-      "b": "crates/league-gen/tests/properties.rs",
+      "a": "crates/league-scorer/src/cli.rs",
+      "b": "crates/league-scorer/src/error.rs",
       "either": 6,
       "partLabels": [
-        "league-gen",
-        "league-gen"
+        "league-scorer",
+        "league-scorer"
       ],
       "parts": [
-        "league-gen",
-        "league-gen"
+        "league-scorer",
+        "league-scorer"
       ],
       "relation": "inside",
-      "shared": 5
+      "shared": 6
+    },
+    {
+      "a": "crates/league-scorer/src/cli.rs",
+      "b": "crates/league-scorer/src/rollout.rs",
+      "either": 6,
+      "partLabels": [
+        "league-scorer",
+        "league-scorer"
+      ],
+      "parts": [
+        "league-scorer",
+        "league-scorer"
+      ],
+      "relation": "inside",
+      "shared": 6
+    },
+    {
+      "a": "crates/league-scorer/src/error.rs",
+      "b": "crates/league-scorer/src/rollout.rs",
+      "either": 6,
+      "partLabels": [
+        "league-scorer",
+        "league-scorer"
+      ],
+      "parts": [
+        "league-scorer",
+        "league-scorer"
+      ],
+      "relation": "inside",
+      "shared": 6
     }
   ],
   "changesTogetherNote": [
@@ -203,9 +203,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "c11a2263c0e09112ba8c233ef687f9c14bbfcf75",
+  "commit": "70422d047d71d656fceb1a5407c22a549ff83bc3",
   "defaultBranch": "main",
-  "derived": "16 parts, mostly Rust (416 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (416 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -747,13 +747,14 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-24T09:53:20.292Z",
+  "generatedAt": "2026-11-24T13:11:57.491Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "53 writes and 55 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "20 writes and 83 reads go to a path their caller passes, not to this repository.",
-    "2 writes go to a temporary directory, not to this repository.",
+    "22 writes and 84 reads go to a path their caller passes, not to this repository.",
+    "2 writes and 1 read go to a temporary directory, not to this repository.",
+    "4 commands are built at run time and not followed.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."

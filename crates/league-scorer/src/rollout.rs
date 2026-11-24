@@ -126,14 +126,15 @@ fn verify_checkpoint_byte_digests(
 }
 
 /// Reads the checkpoint pair once, verifies outer SHA-256 digests, and forks `EvalHost` directly
-/// from the verified bytes without re-reading disk (closing double-read TOCTOU).
-pub(crate) fn verify_and_fork_checkpoint(
+/// from the verified bytes without re-reading disk (closing double-read TOCTOU), returning the
+/// verified byte buffers alongside `(host, pair_sha)` for post-batch verification.
+fn verify_and_fork_checkpoint_with_bytes(
     save_path: &Path,
     seal_path: &Path,
     expected_save_sha256: &str,
     expected_seal_sha256: &str,
     expected_pair_sha256: Option<&str>,
-) -> Result<(EvalHost, String), ScorerError> {
+) -> Result<(EvalHost, String, Vec<u8>, Vec<u8>), ScorerError> {
     let (save_bytes, seal_bytes) = read_checkpoint_pair_once(
         save_path,
         seal_path,
@@ -151,7 +152,100 @@ pub(crate) fn verify_and_fork_checkpoint(
         EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes).map_err(|e| {
             ScorerError::Engine(sanitize_error_text(&e.to_string(), &[save_path, seal_path]))
         })?;
+    Ok((host, pair_sha, save_bytes, seal_bytes))
+}
+
+/// Reads the checkpoint pair once, verifies outer SHA-256 digests, and forks `EvalHost` directly
+/// from the verified bytes without re-reading disk (closing double-read TOCTOU).
+pub(crate) fn verify_and_fork_checkpoint(
+    save_path: &Path,
+    seal_path: &Path,
+    expected_save_sha256: &str,
+    expected_seal_sha256: &str,
+    expected_pair_sha256: Option<&str>,
+) -> Result<(EvalHost, String), ScorerError> {
+    let (host, pair_sha, _, _) = verify_and_fork_checkpoint_with_bytes(
+        save_path,
+        seal_path,
+        expected_save_sha256,
+        expected_seal_sha256,
+        expected_pair_sha256,
+    )?;
     Ok((host, pair_sha))
+}
+
+struct KeptCheckpointPair<'a> {
+    save_path: &'a Path,
+    seal_path: &'a Path,
+    save_bytes: Vec<u8>,
+    seal_bytes: Vec<u8>,
+    expected_save_sha256: &'a str,
+    expected_seal_sha256: &'a str,
+    expected_pair_sha256: &'a str,
+}
+
+fn read_post_batch_file(path: &Path, role: &str) -> Result<Vec<u8>, ScorerError> {
+    fs::read(path).map_err(|err| {
+        ScorerError::CheckpointChangedDuringBatch(sanitize_error_text(
+            &format!("post-batch checkpoint {role} read failed: {err}"),
+            &[path],
+        ))
+    })
+}
+
+fn check_post_batch_pair_bytes(
+    save_path: &Path,
+    seal_path: &Path,
+    expected_save_sha256: &str,
+    expected_seal_sha256: &str,
+    expected_pair_sha256: &str,
+    kept_bytes: Option<(&[u8], &[u8])>,
+) -> Result<(), ScorerError> {
+    let post_save = read_post_batch_file(save_path, "save")?;
+    let post_seal = read_post_batch_file(seal_path, "seal")?;
+    let actual_save = sha256_hex(&post_save);
+    if actual_save != expected_save_sha256
+        || kept_bytes.is_some_and(|(kept_save, _)| post_save.as_slice() != kept_save)
+    {
+        return Err(ScorerError::CheckpointChangedDuringBatch(format!(
+            "save changed during batch: expected `{expected_save_sha256}`, got `{actual_save}`"
+        )));
+    }
+    let actual_seal = sha256_hex(&post_seal);
+    if actual_seal != expected_seal_sha256
+        || kept_bytes.is_some_and(|(_, kept_seal)| post_seal.as_slice() != kept_seal)
+    {
+        return Err(ScorerError::CheckpointChangedDuringBatch(format!(
+            "seal changed during batch: expected `{expected_seal_sha256}`, got `{actual_seal}`"
+        )));
+    }
+    let actual_pair = compute_pre_act_pair_sha256_hex(&post_save, &post_seal);
+    if actual_pair != expected_pair_sha256 {
+        return Err(ScorerError::CheckpointChangedDuringBatch(format!(
+            "pair changed during batch: expected `{expected_pair_sha256}`, got `{actual_pair}`"
+        )));
+    }
+    Ok(())
+}
+
+/// Re-verifies after a batch that the on-disk `.save.json` and `.seal` pair still matches the
+/// digests and bytes verified before the batch ran, refusing any pair that differs at the post-batch check.
+#[doc(hidden)]
+pub fn verify_checkpoint_pair_unchanged_after_batch(
+    save_path: &Path,
+    seal_path: &Path,
+    expected_save_sha256: &str,
+    expected_seal_sha256: &str,
+    expected_pair_sha256: &str,
+) -> Result<(), ScorerError> {
+    check_post_batch_pair_bytes(
+        save_path,
+        seal_path,
+        expected_save_sha256,
+        expected_seal_sha256,
+        expected_pair_sha256,
+        None,
+    )
 }
 
 /// Verifies that on-disk checkpoint bytes match `pre_act_save_sha256`, `pre_act_seal_sha256`,
@@ -326,31 +420,53 @@ pub fn run_single_rollout_from_host(
 }
 
 /// Loads the checkpoint once via single-read verification, clones `base_host` in memory across all
-/// `(c, m)` rollouts (`K * M`), checks the post-batch base-state canary, and computes deterministic
-/// scores (`§4.2`, `§4.3`, `§6.1`, `§7.1`).
+/// `(c, m)` rollouts (`K * M`), checks the post-batch base-state canary and post-batch on-disk pair
+/// digests/bytes, and computes deterministic scores (`§4.2`, `§4.3`, `§6.1`, `§7.1`).
 pub fn execute_blind_request(
     request: &BlindScoringRequest,
     config: &ScorerConfig,
     save_path: &Path,
     seal_path: &Path,
 ) -> Result<StateScoreOutput, ScorerError> {
+    execute_blind_request_with_mid_batch_hook(request, config, save_path, seal_path, None)
+}
+
+/// Variant of [`execute_blind_request`] exposing a per-rollout mid-batch hook for fault-injection testing.
+#[doc(hidden)]
+pub fn execute_blind_request_with_mid_batch_hook(
+    request: &BlindScoringRequest,
+    config: &ScorerConfig,
+    save_path: &Path,
+    seal_path: &Path,
+    mid_batch_hook: Option<&mut dyn FnMut(usize, usize)>,
+) -> Result<StateScoreOutput, ScorerError> {
     config.validate()?;
     request.validate(config)?;
 
-    let (base_host, _) = verify_and_fork_checkpoint(
+    let (base_host, _, save_bytes, seal_bytes) = verify_and_fork_checkpoint_with_bytes(
         save_path,
         seal_path,
         &request.pre_act_save_sha256,
         &request.pre_act_seal_sha256,
         Some(&request.pre_act_pair_sha256),
     )?;
-    execute_blind_request_on_loaded_host(request, config, base_host, None)
+    let kept = KeptCheckpointPair {
+        save_path,
+        seal_path,
+        save_bytes,
+        seal_bytes,
+        expected_save_sha256: &request.pre_act_save_sha256,
+        expected_seal_sha256: &request.pre_act_seal_sha256,
+        expected_pair_sha256: &request.pre_act_pair_sha256,
+    };
+    execute_blind_request_on_loaded_host(request, config, base_host, &kept, mid_batch_hook, None)
 }
 
 /// Executes Gate 3 verified scoring against `VerifiedCheckpointsManifest` and `scorer_build_id`:
 /// validates build-ID parity, checks outer file hashes on a single disk read, verifies tip canonical
 /// digest against the manifest, clones `base_host` in memory per rollout, and runs the post-batch
-/// base-state canary (`InMemoryBaseStateCorrupted`).
+/// base-state canary (`InMemoryBaseStateCorrupted`) and on-disk checkpoint check
+/// (`CheckpointChangedDuringBatch`).
 pub fn execute_blind_request_verified(
     request: &BlindScoringRequest,
     config: &ScorerConfig,
@@ -380,6 +496,31 @@ pub fn execute_blind_request_verified_with_hook(
     seal_path: &Path,
     verified_manifest: &VerifiedCheckpointsManifest,
     scorer_build_id: &str,
+    post_batch_hook: Option<fn(&mut EvalHost)>,
+) -> Result<StateScoreOutput, ScorerError> {
+    execute_blind_request_verified_with_mid_batch_hook(
+        request,
+        config,
+        save_path,
+        seal_path,
+        verified_manifest,
+        scorer_build_id,
+        None,
+        post_batch_hook,
+    )
+}
+
+/// Variant of [`execute_blind_request_verified`] exposing both per-rollout mid-batch and post-batch hooks.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn execute_blind_request_verified_with_mid_batch_hook(
+    request: &BlindScoringRequest,
+    config: &ScorerConfig,
+    save_path: &Path,
+    seal_path: &Path,
+    verified_manifest: &VerifiedCheckpointsManifest,
+    scorer_build_id: &str,
+    mid_batch_hook: Option<&mut dyn FnMut(usize, usize)>,
     post_batch_hook: Option<fn(&mut EvalHost)>,
 ) -> Result<StateScoreOutput, ScorerError> {
     config.validate()?;
@@ -428,13 +569,31 @@ pub fn execute_blind_request_verified_with_hook(
         Some(&entry.pre_act_pair_sha256),
         Some((entry.turn, entry.seat_count, &entry.expected_state_digest)),
     )?;
-    execute_blind_request_on_loaded_host(request, config, base_host, post_batch_hook)
+    let kept = KeptCheckpointPair {
+        save_path,
+        seal_path,
+        save_bytes,
+        seal_bytes,
+        expected_save_sha256: &entry.pre_act_save_sha256,
+        expected_seal_sha256: &entry.pre_act_seal_sha256,
+        expected_pair_sha256: &entry.pre_act_pair_sha256,
+    };
+    execute_blind_request_on_loaded_host(
+        request,
+        config,
+        base_host,
+        &kept,
+        mid_batch_hook,
+        post_batch_hook,
+    )
 }
 
 fn execute_blind_request_on_loaded_host(
     request: &BlindScoringRequest,
     config: &ScorerConfig,
     mut base_host: EvalHost,
+    kept: &KeptCheckpointPair<'_>,
+    mut mid_batch_hook: Option<&mut dyn FnMut(usize, usize)>,
     post_batch_hook: Option<fn(&mut EvalHost)>,
 ) -> Result<StateScoreOutput, ScorerError> {
     let seat_count = base_host.seat_count();
@@ -506,7 +665,7 @@ fn execute_blind_request_on_loaded_host(
     }
 
     let mut outcomes = Vec::with_capacity(request.candidates.len());
-    for candidate in &request.candidates {
+    for (c_idx, candidate) in request.candidates.iter().enumerate() {
         let mut row = Vec::with_capacity(scenarios.len());
         for (m_idx, scenario) in scenarios.iter().enumerate() {
             let posture = posture_for_scenario(config, m_idx);
@@ -521,6 +680,9 @@ fn execute_blind_request_on_loaded_host(
                 config,
             )?;
             row.push(outcome);
+            if let Some(hook) = mid_batch_hook.as_deref_mut() {
+                hook(c_idx, m_idx);
+            }
         }
         outcomes.push(row);
     }
@@ -542,6 +704,15 @@ fn execute_blind_request_on_loaded_host(
             },
         ));
     }
+
+    check_post_batch_pair_bytes(
+        kept.save_path,
+        kept.seal_path,
+        kept.expected_save_sha256,
+        kept.expected_seal_sha256,
+        kept.expected_pair_sha256,
+        Some((&kept.save_bytes, &kept.seal_bytes)),
+    )?;
 
     score_outcomes(request, config, day, &outcomes)
 }

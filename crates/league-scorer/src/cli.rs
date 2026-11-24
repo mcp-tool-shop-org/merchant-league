@@ -10,7 +10,10 @@ use league_core::{StructuredError, ToStructuredError as _};
 
 use crate::candidates::{build_arm_independent_request, build_arm_independent_request_verified};
 use crate::error::{EXIT_OK, ScorerError, sanitize_error_text};
-use crate::rollout::{execute_blind_request, execute_blind_request_verified};
+use crate::rollout::{
+    execute_blind_request, execute_blind_request_verified,
+    verify_checkpoint_pair_unchanged_after_batch,
+};
 use crate::types::{
     ScorerConfig, ScorerFreezeBlindView, VerifiedCheckpointsManifest,
     compute_blind_inputs_manifest_sha256, compute_scorer_tree_sha256, is_valid_sha256_hex,
@@ -71,6 +74,10 @@ where
     run_cli_with_build_id(args, crate::CRATE_GIT_SHA, stdout, stderr)
 }
 
+/// Hook invoked after each state finishes scoring inside `score` (test seam for fault injection).
+#[doc(hidden)]
+pub type AfterStateHook<'a> = &'a mut dyn FnMut(usize, &str);
+
 /// Testable entrypoint for [`run_cli`] accepting an explicit `scorer_build_id` seam.
 pub fn run_cli_with_build_id<I, S>(
     args: I,
@@ -82,9 +89,27 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
+    run_cli_with_build_id_and_state_hook(args, scorer_build_id, None, stdout, stderr)
+}
+
+/// Fault-injection entrypoint invoking `after_each_state_hook(state_index, state_id)` right
+/// after each state finishes scoring in `score` (before the cross-state post-batch re-check
+/// and before any output file is written).
+#[doc(hidden)]
+pub fn run_cli_with_build_id_and_state_hook<I, S>(
+    args: I,
+    scorer_build_id: &str,
+    after_each_state_hook: Option<AfterStateHook<'_>>,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
     let args_vec: Vec<OsString> = args.into_iter().map(Into::into).collect();
     let err_fmt = peek_error_format(&args_vec);
-    match run_cli_args(&args_vec, scorer_build_id, stdout) {
+    match run_cli_args(&args_vec, scorer_build_id, after_each_state_hook, stdout) {
         Ok(()) => EXIT_OK,
         Err(err) => {
             write_cli_error(&err, err_fmt, stderr);
@@ -172,6 +197,7 @@ struct CandidatesCliArgs {
 fn run_cli_args(
     args: &[OsString],
     scorer_build_id: &str,
+    after_each_state_hook: Option<AfterStateHook<'_>>,
     stdout: &mut dyn Write,
 ) -> Result<(), ScorerError> {
     let mut iter = args.iter().cloned().peekable();
@@ -206,7 +232,7 @@ fn run_cli_args(
     match command.as_deref() {
         Some("score") => {
             let parsed = parse_score_flags(iter)?;
-            execute_score_command(&parsed, scorer_build_id, stdout)
+            execute_score_command(&parsed, scorer_build_id, after_each_state_hook, stdout)
         }
         Some("candidates") => {
             let parsed = parse_candidates_flags(iter)?;
@@ -586,6 +612,7 @@ fn execute_candidates_command(
 fn execute_score_command(
     args: &ScoreCliArgs,
     scorer_build_id: &str,
+    mut after_each_state_hook: Option<AfterStateHook<'_>>,
     stdout: &mut dyn Write,
 ) -> Result<(), ScorerError> {
     let config = load_and_validate_config(&args.config_path)?;
@@ -691,7 +718,8 @@ fn execute_score_command(
         ))
     })?;
 
-    for (req, req_sha256) in &requests {
+    let mut pending_outputs = Vec::with_capacity(requests.len());
+    for (state_idx, (req, req_sha256)) in requests.iter().enumerate() {
         let save_path = args
             .checkpoints_dir
             .join(format!("{}.save.json", req.pre_act_save_sha256));
@@ -712,7 +740,45 @@ fn execute_score_command(
         output.blind_request_sha256 = req_sha256.clone();
         let json_text = to_sorted_pretty_json(&output)?;
         let out_path = scores_dir.join(format!("{}.json", req.state_id));
-        fs::write(&out_path, json_text.as_bytes()).map_err(|e| {
+        pending_outputs.push((out_path, json_text.into_bytes()));
+        if let Some(hook) = after_each_state_hook.as_deref_mut() {
+            hook(state_idx, &req.state_id);
+        }
+    }
+
+    if let Some((last_req, _)) = requests.last() {
+        let mut verified_pairs = BTreeSet::new();
+        verified_pairs.insert((
+            last_req.pre_act_save_sha256.as_str(),
+            last_req.pre_act_seal_sha256.as_str(),
+            last_req.pre_act_pair_sha256.as_str(),
+        ));
+        for (req, _) in &requests[..requests.len() - 1] {
+            let key = (
+                req.pre_act_save_sha256.as_str(),
+                req.pre_act_seal_sha256.as_str(),
+                req.pre_act_pair_sha256.as_str(),
+            );
+            if verified_pairs.insert(key) {
+                let save_path = args
+                    .checkpoints_dir
+                    .join(format!("{}.save.json", req.pre_act_save_sha256));
+                let seal_path = args
+                    .checkpoints_dir
+                    .join(format!("{}.seal", req.pre_act_seal_sha256));
+                verify_checkpoint_pair_unchanged_after_batch(
+                    &save_path,
+                    &seal_path,
+                    &req.pre_act_save_sha256,
+                    &req.pre_act_seal_sha256,
+                    &req.pre_act_pair_sha256,
+                )?;
+            }
+        }
+    }
+
+    for (out_path, bytes) in pending_outputs {
+        fs::write(&out_path, &bytes).map_err(|e| {
             ScorerError::Io(sanitize_error_text(
                 &format!("write score JSON: {e}"),
                 &[&out_path],

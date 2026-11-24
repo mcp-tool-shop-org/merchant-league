@@ -142,6 +142,8 @@ pub enum ScorerError {
         /// Number of non-focal peers requiring distinct mandates.
         needed: usize,
     },
+    /// On-disk checkpoint `.save.json` or `.seal` differs (or is missing) at the post-batch check (`exit 2`).
+    CheckpointChangedDuringBatch(String),
     /// Underlying `league-core` engine failure during fork/step/finalize (`exit 2`).
     Engine(String),
     /// Filesystem or stdout/stderr I/O failure (`exit 2`).
@@ -182,6 +184,7 @@ impl ScorerError {
             Self::InvalidCheckpointState(_) => "INVALID_CHECKPOINT_STATE",
             Self::FocalMandateNotInDeck => "FOCAL_MANDATE_NOT_IN_DECK",
             Self::InsufficientMandatePool { .. } => "INSUFFICIENT_MANDATE_POOL",
+            Self::CheckpointChangedDuringBatch(_) => "CHECKPOINT_CHANGED_DURING_BATCH",
             Self::Engine(_) => "ENGINE_ERROR",
             Self::Io(_) => "IO_ERROR",
         }
@@ -234,6 +237,7 @@ impl ScorerError {
             )
             | Self::FocalMandateNotInDeck
             | Self::InsufficientMandatePool { .. }
+            | Self::CheckpointChangedDuringBatch(_)
             | Self::Engine(_)
             | Self::Io(_) => EXIT_RUNTIME_ERROR,
         }
@@ -318,6 +322,9 @@ impl ScorerError {
             Self::FocalMandateNotInDeck | Self::InsufficientMandatePool { .. } => {
                 "Verify checkpoint spec.mandate_deck includes all dealt mandates and enough undealt entries."
             }
+            Self::CheckpointChangedDuringBatch(_) => {
+                "Keep --checkpoints immutable while scoring runs and re-score the entire batch from verified checkpoint files."
+            }
             Self::Engine(_) => "Inspect the checkpoint integrity and EvalHost phase prerequisites.",
             Self::Io(_) => "Verify filesystem paths and permissions for inputs and outputs.",
         }
@@ -348,6 +355,7 @@ impl fmt::Display for ScorerError {
             | Self::CheckpointNotFound(msg)
             | Self::CheckpointHashMismatch(msg)
             | Self::InvalidCheckpointState(msg)
+            | Self::CheckpointChangedDuringBatch(msg)
             | Self::Engine(msg)
             | Self::Io(msg) => write!(f, "{code}: {msg}"),
             Self::CheckpointVerify(err) => fmt::Display::fmt(err, f),

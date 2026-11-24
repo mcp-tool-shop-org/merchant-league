@@ -1,16 +1,16 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-24 from commit c11a226 by Atlas 1.26.0.
+Mapped at 2026-11-24 from commit 70422d0 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-16 parts, mostly Rust (416 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+16 parts, mostly Rust (416 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-24 (cf4068d)
+## What changed since 2026-11-24 (9ca990b)
 
-Nothing structural changed since 2026-11-24; 11 files changed content.
+Nothing structural changed since 2026-11-24; 13 files changed content.
 
 ## What comes in
 
@@ -69,9 +69,9 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 - **crates/league-eval/src/driver.rs** and **crates/league-eval/tests/play_and_branch.rs** changed together in 7 of 7 commits, inside the league-eval part.
 - **crates/league-eval/src/cli.rs** and **crates/league-eval/src/lib.rs** changed together in 6 of 6 commits, inside the league-eval part.
-- **crates/league-eval/src/driver.rs** and **crates/league-eval/tests/addendum_item9.rs** changed together in 6 of 7 commits, inside the league-eval part.
-- **crates/league-eval/tests/addendum_item9.rs** and **crates/league-eval/tests/play_and_branch.rs** changed together in 6 of 7 commits, inside the league-eval part.
-- **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
+- **crates/league-scorer/src/cli.rs** and **crates/league-scorer/src/error.rs** changed together in 6 of 6 commits, inside the league-scorer part.
+- **crates/league-scorer/src/cli.rs** and **crates/league-scorer/src/rollout.rs** changed together in 6 of 6 commits, inside the league-scorer part.
+- **crates/league-scorer/src/error.rs** and **crates/league-scorer/src/rollout.rs** changed together in 6 of 6 commits, inside the league-scorer part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
@@ -114,8 +114,9 @@ Read those in order to follow one run of league-eval end to end. This path follo
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
 - 53 writes and 55 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
-- 20 writes and 83 reads go to a path their caller passes, not to this repository.
-- 2 writes go to a temporary directory, not to this repository.
+- 22 writes and 84 reads go to a path their caller passes, not to this repository.
+- 2 writes and 1 read go to a temporary directory, not to this repository.
+- 4 commands are built at run time and not followed.
 - There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.
 - 378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.

@@ -127,9 +127,9 @@ Inside `execute_blind_request_verified` (`crates/league-scorer/src/rollout.rs`):
 
 `EvalHost` derives `Clone` (`crates/league-core/src/eval/host.rs`; every field of `EvalHost` contains owned value types and `BTreeMap`/`BTreeSet`/`Vec` collections). Inside the `K * M` rollout loop, `execute_blind_request_verified` clones the single verified `base_host: EvalHost` in RAM per rollout via `run_single_rollout_from_host(&base_host, ...)` (`crates/league-scorer/src/rollout.rs`), reducing disk reads and JSON parses per scored state from `1 + K * M` to `1`.
 
-### Post-Batch Base-State Canary Check
+### Post-Batch Base-State Canary and On-Disk Checkpoint Check
 
-Immediately after the `K * M` rollout loop completes and before returning `StateScoreOutput`, Gate 3 recomputes `base_host.canonical_state_digest_hex()?` and `base_host.public_save_snapshot()?` and asserts exact equality with `entry.expected_state_digest` and the pre-batch snapshot (`CheckpointVerifyError::InMemoryBaseStateCorrupted`).
+Immediately after the `K * M` rollout loop completes and before returning `StateScoreOutput`, Gate 3 recomputes `base_host.canonical_state_digest_hex()?` and `base_host.public_save_snapshot()?` and asserts exact equality with `entry.expected_state_digest` and the pre-batch snapshot (`CheckpointVerifyError::InMemoryBaseStateCorrupted`). Both `execute_blind_request` and `execute_blind_request_verified` also re-read `.save.json` and `.seal` once after the batch and verify byte and SHA-256 equality against the kept pre-batch buffers (`ScorerError::CheckpointChangedDuringBatch` / `CHECKPOINT_CHANGED_DURING_BATCH`), while `league-scorer score` stages `<out>/scores/*.json` in memory and re-verifies prior pairs in multi-state runs so if any checkpoint pair differs at the post-batch check, the entire batch is refused rather than writing partial files (rollouts execute strictly from the verified in-memory bytes either way).
 
 ### Fit with `league-scorer` Inputs and Freeze Binding
 
