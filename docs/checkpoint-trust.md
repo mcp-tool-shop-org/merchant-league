@@ -27,7 +27,7 @@ At Gate 1 (producer write time, internal research report `§5`), `EvalHost::to_s
 
 ## 2. Gate 2: Study-Preflight Causal Verification and Verified Manifest (`§2`, `§5`)
 
-Following an internal research report (`§2` "Full Deterministic Replay from the Start", "Merkle Structures and Incremental Hash Chains"; `§5` "Gate 2: Once at Study Preflight / First Load (Causal Gatekeeper)"), causal verification runs **once per distinct checkpoint** synchronously at study preflight inside the exact compiled engine revision used by scoring workers, with zero model calls.
+Following an internal research report (`§2` and `§5`), causal verification runs **once per distinct checkpoint** synchronously at study preflight inside the exact compiled engine revision used by scoring workers, with zero model calls.
 
 ### Where Gate 2 Runs
 
@@ -46,7 +46,7 @@ It runs once after `league-eval build-blind-inputs --out-checkpoints <dir>` expo
 1. **Single-read parse, strict canonical decode, outer digests, and shape bounds:**
    - Compute `pre_act_save_sha256`, `pre_act_seal_sha256`, and `pre_act_pair_sha256` (`compute_pre_act_pair_sha256_hex`).
    - Run verifier-side strict JSON checks (syntax/EOF, duplicate object keys at any depth, unknown fields with `skip_serializing_if` empty-default checking, and canonical round-trip byte equality) before accepting `EvalSaveSnapshot` and `EvalSealPayload`.
-   - Enforce `TableMode::Eval`, pre-act phase (`ensure_pre_act_state`), `seat_count == 4`, `turn >= 1 && turn <= HARD_TURN_CAP`, `logged_turns.len() == usize::from(turn - 1)`, and `live_state_digests.len() == usize::from(turn - 1)`.
+   - Enforce `TableMode::Eval`, pre-act phase (`ensure_pre_act_state`), `turn >= 1 && turn <= HARD_TURN_CAP`, `logged_turns.len() == usize::from(turn - 1)`, and `live_state_digests.len() == usize::from(turn - 1)` inside Gate 2 (`decode_strict_checkpoint_pair` / `verify_checkpoint_causal` in `crates/league-core/src/eval/checkpoint_verify.rs`). Separately, `seat_count == 4` (`EXPECTED_EVAL_SEAT_COUNT`) is checked in the `league-eval verify-checkpoints` caller (`crates/league-eval/src/verify_checkpoints.rs:413`) and at Gate 3 manifest/worker validation (`crates/league-scorer/src/types.rs:1080-1085`, `crates/league-scorer/src/rollout.rs:252-256, 441-445`).
 2. **Header, pair binding, and provenance format validation (`engine_commit` NOT equality-gated):**
    - Refuse `v1` or any non-`v2` format version with `INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION` (`IncompatibleEngineOrSchemaVersion`). Verify `save.format_version == EVAL_SAVE_FORMAT_VERSION` (`2`), `seal.format_version == EVAL_SEAL_FORMAT_VERSION` (`2`), and `seal.save_format_version == EVAL_SAVE_FORMAT_VERSION` (`2`).
    - Verify pair binding (`save.game_id == seal.game_id`, `seal.turn == save.turn`, `seal.save_sha256 == Some(SHA-256("league-core/eval-save/v2|" || save_bytes))`).
@@ -62,7 +62,7 @@ It runs once after `league-eval build-blind-inputs --out-checkpoints <dir>` expo
      - Assert `receipt.post_state_digest == loaded_host.live_state_digests[idx]`; divergence raises `CheckpointVerifyError::ReplayDigestMismatch { turn: k, .. }`.
      - Advance the cumulative chain digest:
        `C_k = SHA256("league-core/eval-turn-chain/v1|" || C_{k - 1} || (turn_json.len() as u64).to_le_bytes() || turn_json || receipt.post_state_digest)`
-       using compact serialized `LoggedTurn` bytes (`serde_json::to_vec(logged)`).
+       using compact serialized `LoggedTurn` bytes (`serde_json::to_vec(logged)`). In production, `verify_checkpoint_causal` computes and records `turn_chain_digest` (`C_{turn - 1}`) into `verified_checkpoints.json` without comparing it against an external reference; `verify_checkpoint_causal_against_chain` (`ChainHashMismatch`) is a library helper called only by tests.
 4. **Tip state equivalence at `turn`:**
    - When `turn > 1`, assert `loaded_host.engine.state_digest()? == loaded_host.live_state_digests[usize::from(turn - 2)]`.
    - Assert `replayed_engine.state_digest()? == loaded_host.engine.state_digest()?` and `serde_json::to_vec(&replayed_engine)? == serde_json::to_vec(&loaded_host.engine)?` (verifying both `EngineState` and `TurnEngine::public_receipts`, `crates/league-core/src/engine.rs:339-344`).
@@ -112,7 +112,7 @@ Gate 2 runs `turn - 1` historical sweeps (`0..=31`), one tip deserialization com
 
 ## 3. Gate 3: Scoring Worker Verification, In-Memory Cloning, and Post-Batch Canary (`§1`, `§2`, `§5`)
 
-Following an internal research report (`§1` ZFS RAM fault-injection findings; `§2` "Comparing the Loaded State to the Recorded Digest"; `§5` "Gate 3: On Scoring Worker Load (Amortized In-Memory Safety)"):
+Following an internal research report (`§1` ZFS RAM fault-injection findings; `§2` and `§5`):
 
 ### Single-Read Worker Verification and TOCTOU Closure
 
@@ -142,9 +142,9 @@ Immediately after the `K * M` rollout loop completes and before returning `State
 
 ## 4. Pair Binding Specification (`§4`, `§7` — Recorded Format v2 Active)
 
-Following an internal research report (`§4` "Hash vs. Keyed MAC vs. Signature for a Single-Producer File Pair" and `§7` "Are You Binding Model, Prompt, and Engine Provenance Inside Every Checkpoint?"), single-machine local workflows do not benefit from symmetric HMAC keys held by the same OS user that runs producer and worker binaries; domain-separated SHA-256 bound at write time plus a read-only preflight manifest suffices.
+Following an internal research report (`§4` and `§7`), single-machine local workflows do not benefit from symmetric HMAC keys held by the same OS user that runs producer and worker binaries; domain-separated SHA-256 bound at write time plus a read-only preflight manifest suffices.
 
-**Implementation status:** Recorded format v2 is active for Evaluation Mode checkpoints (`EVAL_SAVE_FORMAT_VERSION = 2`, `EVAL_SEAL_FORMAT_VERSION = 2`). Club Mode save/seal format versions (`CLUB_SAVE_FORMAT_VERSION` and `CLUB_SEAL_FORMAT_VERSION`) remain unchanged at `1`.
+**Implementation status:** Recorded format v2 is active for Evaluation Mode checkpoints (`EVAL_SAVE_FORMAT_VERSION = 2`, `EVAL_SEAL_FORMAT_VERSION = 2`). Club Mode persistence uses `CLUB_SAVE_FORMAT_VERSION = 1` and `CLUB_SEAL_FORMAT_VERSION = 2` (`crates/league-core/src/club/host.rs:46` and `:51`) and remains isolated from Evaluation Mode.
 
 ### Format Bump and Binding Fields
 
@@ -191,7 +191,7 @@ Adding `#[serde(deny_unknown_fields)]` directly onto structs in `engine.rs`, `ty
 
 1. **Streaming duplicate-key and truncation check (`StrictJsonValueVisitor`):** Parses raw `save_bytes` / `seal_bytes` with a custom `serde::de::DeserializeSeed` value walker (no new third-party crates) rejecting syntax/EOF truncation (`CheckpointVerifyError::UnexpectedEofOrMalformedEncoding`, `M02`) and **duplicate JSON object keys at any nesting depth** (`CheckpointVerifyError::NonCanonicalEncoding`, `M07`).
 2. **Recursive AST unknown-field and `skip_serializing_if` check (`check_unknown_and_skipped_fields`):** Re-serializes the decoded `EvalSaveSnapshot` / `EvalSealPayload` to `serde_json::Value` (`canonical_val`) and walks `(raw_val, canonical_val)`:
-   - Any object key present in `raw_val` and absent from `canonical_val` raises `CheckpointVerifyError::UnknownFieldRejected { file, field_path }` (`M08`), **except** the explicit allowlist of known `skip_serializing_if` optional fields (`EvalSealPayload::pre_act_checkpoint_sha256`, `EvalSealPayload::save_sha256`, `EvalSealPayload::engine_commit`, `EvalActSubmission::pass_b_actions`, `TurnEngine::public_receipts`, `LoggedTurn::cancel_lock_at`, and `TableSpec::shocks`), where an explicitly emitted empty/`null` default raises `CheckpointVerifyError::NonCanonicalEncoding` (`M07`) instead of `UnknownFieldRejected`.
+   - Any object key present in `raw_val` and absent from `canonical_val` raises `CheckpointVerifyError::UnknownFieldRejected { file, field_path }` (`M08`), **except** the explicit allowlist of six `skip_serializing_if` branches in `is_known_skip_serializing_field` (`crates/league-core/src/eval/checkpoint_verify.rs:548-582`): `.seal` top-level `pre_act_checkpoint_sha256`, `save_sha256`, and `engine_commit` when `null`; `.seal` `engine.public_receipts` when `[]`; `.seal` `logged_turns[i].cancel_lock_at` when `null`; and `.seal` `recorded_act_submissions.<seat>.pass_b_actions` when `[]` — where an explicitly emitted empty/`null` default raises `CheckpointVerifyError::NonCanonicalEncoding` (`M07`) instead of `UnknownFieldRejected`.
 3. **Canonical byte round-trip check (`verify_written_pair_round_trip`):** Asserts `serde_json::to_vec_pretty(&save)? == save_bytes` and `serde_json::to_vec(&seal)? == seal_bytes`, raising `CheckpointVerifyError::NonCanonicalEncoding` on whitespace, key reordering, trailing bytes, or non-minimal string escapes, and verified across two separate processes (`cross_process_round_trip_byte_equality` and `verify_checkpoints_cross_process_round_trip_and_blind_coverage_checks`).
 
 ---
@@ -227,7 +227,7 @@ Each test generates a deterministic 10-completed-turn synthetic golden checkpoin
 | `M03_cross_game_swap` | **(a)** Pair Game A's `.save.json` with Game B's `.seal`; **(b)** Pair Turn-1 D2 duplicate save and seal | Gate 2 & Gate 3 | `PairBindingMismatch` (`v2` `save.game_id` / `seal.save_sha256`) & `TipStateDigestMismatch` | Implemented (`v2`) |
 | `M04_turn_offset_pad` | Pair `day-10` `.save.json` with `day-11` `.seal`, or truncate/pad `live_state_digests` / `logged_turns` relative to `engine.state().turn` | Gate 2 & Gate 3 | `PairBindingMismatch` / `TipStateDigestMismatch` | Implemented |
 | `M05_co_written_bug` | Mutate seat state in `seal.engine`, regenerate `.save.json`, `save_sha256`, and `live_state_digests[9]` | **Gate 2** | `ReplayDigestMismatch` / `TipStateDigestMismatch` | Implemented |
-| `M06_mid_log_edit` | **(a)** Alter Turn-4 action or `live_state_digests[3]`; **(b)** Alter non-state field in `logged_turns[3]` while checking against sealed `turn_chain_digest` | **Gate 2** | **(a)** `ReplayDigestMismatch { turn: 4, .. }`; **(b)** `ChainHashMismatch { turn: 4, .. }` | Implemented |
+| `M06_mid_log_edit` | **(a)** Alter Turn-4 action or `live_state_digests[3]`; **(b)** Alter non-state field in `logged_turns[3]` while passing an external `turn_chain_digest` reference to `verify_checkpoint_causal_against_chain` | **Gate 2** (`verify_checkpoint_causal` for **(a)**; test-only `verify_checkpoint_causal_against_chain` helper for **(b)**) | **(a)** `ReplayDigestMismatch { turn: 4, .. }`; **(b)** `ChainHashMismatch { turn: 4, .. }` | **(a)** Enforced in production; **(b)** Not checked in production today (`turn_chain_digest` is computed and stored in `verified_checkpoints.json`, while `verify_checkpoint_causal_against_chain` is called only by tests) |
 | `M07_non_canonical` | Re-serialize `.seal` pretty, reorder keys, append trailing whitespace, inject duplicate JSON key at depth, or explicitly emit skipped empty/null optional field | Gate 1, Gate 2, Gate 3 | `NonCanonicalEncoding` | Implemented |
 | `M08_unknown_field` | Insert unknown key at top level of `.save.json`/`.seal` and nested inside `seal.engine.state` | Gate 1, Gate 2, Gate 3 | `UnknownFieldRejected` | Implemented |
 | `M09_engine_skew` | Downgrade `format_version` to `1` (`v1`), omit/malform `seal.engine_commit`, or skew Gate 3 `manifest.engine_build_id` | Gate 2 & Gate 3 | `IncompatibleEngineOrSchemaVersion` | Implemented (Gate 2 does not equality-gate `engine_commit`; separate `engine_commit_is_provenance_not_equality_gate` test verifies cross-commit provenance `COMMIT_A` -> `COMMIT_B`) |
@@ -235,13 +235,18 @@ Each test generates a deterministic 10-completed-turn synthetic golden checkpoin
 
 ### Save-Load-Step Commutativity & Cross-Process Tests (`§6`)
 
-Play a deterministic 4-seat `ClubBot` season through close (`save_load_step_commutativity_across_full_season`). At every pre-act turn `t`, serialize `(save_bytes, seal_bytes)` via `to_save_and_seal_bytes`, verify canonical round-trip bytes and reload `reloaded_host` via `EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes)`, compute identical `ClubBot` submissions (`bot_tie_seed`), advance at least one full turn (and run to season close on a sampled mid-season turn), and assert identical `to_save_and_seal_bytes`, `canonical_state_digest_hex`, and `PublicSweepReceipt`. A negative control (`probe_step_divergence_negative_control_caught_by_gate2`) asserts Gate 2 catches probe-step divergence with `CheckpointVerifyError::ProbeStepDivergence`, and two-process tests (`cross_process_round_trip_byte_equality` and `verify_checkpoints_cross_process_round_trip_and_blind_coverage_checks`) write a checkpoint in a child process and verify canonical byte equality in the parent process.
+Play a deterministic 4-seat `ClubBot` season through close (`save_load_step_commutativity_across_full_season`). At every pre-act turn `t`, serialize `(save_bytes, seal_bytes)` via `to_save_and_seal_bytes`, verify canonical round-trip bytes and reload `reloaded_host` via `EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes)`, compute identical `ClubBot` submissions (`bot_tie_seed`), advance at least one full turn (and run to season close on a sampled mid-season turn), and assert identical `to_save_and_seal_bytes`, `canonical_state_digest_hex`, and `PublicSweepReceipt`. Negative probe controls in `crates/league-core/tests/checkpoint_verify.rs` exercise two paths through `verify_checkpoint_causal_with_probe_fault_for_test`: `probe_step_divergence_negative_control_caught_by_gate2` (`:848-871`) calls `begin_cancel_lock()` on the loaded probe copy before the probe step (causing `apply_act_submissions` to fail on the loaded copy and map to `CheckpointVerifyError::ProbeStepDivergence`), while `strict_error_variants_skip_serializing_fields_and_action_replay_paths` (`:1458-1481`) injects an extra `RecordIntentPledge` market action onto the loaded probe copy so both copies complete `sweep_turn()` cleanly with distinct post-probe digests and return `CheckpointVerifyError::ProbeStepDivergence`. Two-process tests (`cross_process_round_trip_byte_equality` and `verify_checkpoints_cross_process_round_trip_and_blind_coverage_checks`) write a checkpoint in a child process and verify canonical byte equality in the parent process.
 
 Implemented test suites (respecting crate isolation boundaries in `raw_api_backdoor_guard.rs`):
 - `crates/league-core/tests/checkpoint_verify.rs` (`M01`–`M09`, cross-commit provenance vs replay divergence, Save-Load-Step commutativity, probe-step negative control, cross-process round-trip)
 - `crates/league-scorer/tests/checkpoint_gate3.rs` (Gate 3 manifest/hash/digest checks, `M10` shared-ref canary, freeze binding parity)
-- `crates/league-eval/tests/verify_checkpoints_cli.rs` (`league-eval verify-checkpoints`, read-only output/locks, `--allow-legacy-v1` and `v1` refusal, cross-commit provenance + replay divergence, cross-process verify, freeze/join binding & readout provenance/`scenario_randomness_scope`)
+- `crates/league-eval/tests/verify_checkpoints_cli.rs` (`league-eval verify-checkpoints`, read-only output/locks, `--allow-legacy-v1` flag rejection and `v1` refusal, cross-commit provenance + replay divergence, cross-process verify, freeze/join binding & readout provenance/`scenario_randomness_scope`)
 - `crates/league-core/tests/raw_api_backdoor_guard.rs` (allowlist updates for `eval/checkpoint_verify.rs` and new `EvalHost` pub methods)
+
+### Known Limits
+
+- **Unauthenticated `engine_commit` provenance:** `seal.engine_commit` is recorded provenance, not an authenticated build attestation (there is no cryptographic signature or MAC over `.save.json` or `.seal`). Gate 2 validates only `40`-lowercase-hex syntax and format-`v2` SHA-256 bindings without comparing `seal.engine_commit` against any expected commit, so a checkpoint whose `seal.engine_commit` is hand-edited to another 40-lowercase-hex SHA (with recomputed `save_sha256` / outer hashes when re-verified) passes `verify-checkpoints` and flows into `verified_checkpoints.json`, `joined_decisions.json`, and `per_arm_summary.json` (see also Known Limit 9 in [`docs/decision-scorer.md`](decision-scorer.md)).
+- **`turn_chain_digest` not verified in production:** As noted in `M06`, `verify_checkpoint_causal` computes and stores `turn_chain_digest` (`C_{turn - 1}`) in `verified_checkpoints.json`, whereas comparing against an expected chain digest via `verify_checkpoint_causal_against_chain` (`ChainHashMismatch`) is exercised only in tests today.
 
 ---
 
@@ -251,8 +256,11 @@ Inspection of `crates/league-core` and `crates/league-scorer` establishes how ra
 
 ### Randomness Scope Statement (Documented Here and in Readout JSON)
 
-1. **Counterfactual scenarios `m` in `0..M` share the base game's future environment draws (market shocks and season-close rolls) and vary only sampled peer mandates and talk-commitment honour draws.** That exact known limit is recorded directly in `scenario_randomness_scope` inside both `per_arm_summary.json` and `joined_decisions.json` (`SCENARIO_RANDOMNESS_SCOPE_STATEMENT` in `crates/league-eval/src/freeze_gate.rs`).
-2. **Within a fixed scenario `m`, candidate comparisons (`(c, m)` vs `(c', m)`) compare focal candidates under matched peer mandate and talk-honour draws without advancing a shared PRNG cursor** (`EngineState` carries no mutable PRNG state, and `draw_scenarios` / `draw_honour_commitment` are counter-indexed SHA-256 functions run outside the candidate loop). Choosing different focal actions that alter sweep state transitions (such as creating or settling different batch/tie situations on subsequent turns) can still shift downstream environment draws for those transitions.
+1. The verbatim `SCENARIO_RANDOMNESS_SCOPE_STATEMENT` recorded in `scenario_randomness_scope` inside both `per_arm_summary.json` and `joined_decisions.json` (`crates/league-eval/src/freeze_gate.rs:39`) is:
+
+> Counterfactual scenarios m in 0..M share the base game's future environment RNG stream (market shocks and season-close rolls) and vary only sampled peer hidden mandates and talk-commitment honour draws; within a fixed scenario m, distinct focal actions can change tie-break outcomes (batch matching, council elections, and standings ties) but cannot change market shocks or season-close rolls.
+
+2. **Within a fixed scenario `m`, candidate comparisons (`(c, m)` vs `(c', m)`) compare focal candidates under matched peer mandate and talk-honour draws without advancing a shared PRNG cursor** (`EngineState` carries no mutable PRNG state, and `draw_scenarios` / `draw_honour_commitment` are counter-indexed SHA-256 functions run outside the candidate loop). Market shocks and season-close rolls remain identical across focal candidates in `m` because both expand strictly from `(turn_beacon, table_id, Turn(t), domain)` via `HKDF-SHA256`; distinct focal actions can change tie-break outcomes (`RngDomain::BatchTie` keyed per `(good_kind, good_idx, side, maker)`, council elections, and standings ties under `RngDomain::Tiebreak` by changing which orders or seats tie), but cannot change market shocks or season-close rolls.
 3. **Resampling future environment draws across `m` remains a future option only:** Nothing is built for per-`m` environment re-keying; it remains documented below as a possible future extension.
 
 ### Evidence at `885929c4` (`path:line`)

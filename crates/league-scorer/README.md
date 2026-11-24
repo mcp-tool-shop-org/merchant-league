@@ -25,8 +25,9 @@ Arm-blind, deterministic CPU decision-scoring kernel for Merchant League v2 eval
   `composite_drops`, and `scaled`, each verified via `preview_seat_bundle`, bounded by `k_synth_max`
   + `synth_slot_fill_order` with `candidate_id` tie-breaking, and exposed via `league-scorer
   candidates --checkpoints <dir> --save-sha256 <hex> --seal-sha256 <hex> --focal-seat <n>
-  --state-id <id> --config <file> --scorer-seed <u64> --out <dir>` writing sorted
-  `<out>/<state_id>.json` with empty `talk_commitments`.
+  --state-id <id> --config <file> --scorer-seed <u64> --out <dir> [--verified-checkpoints <file>]`
+  writing sorted `<out>/<state_id>.json` with empty `talk_commitments` (and running
+  `build_arm_independent_request_verified` when `--verified-checkpoints <file>` is passed).
 - **Undealt mandate scenarios (`scenarios.rs`):** reads `spec.mandate_deck` from the checkpoint
   observation, removes one instance of the focal seat's dealt mandate, and draws `(seat_count - 1)`
   distinct peer mandates without replacement via domain-separated SHA-256 reverse Fisher-Yates
@@ -36,30 +37,40 @@ Arm-blind, deterministic CPU decision-scoring kernel for Merchant League v2 eval
   `day` and `(day + 1)..close`, plus canonicalized Turn-`day` talk commitments whose integer
   threshold `threshold_ppm` is derived once via `p_honour_to_ppm` before pure-integer SHA-256 draws
   and fail-closed `preview_seat_bundle` legality pruning.
-- **Sequential season-close rollouts (`rollout.rs`):** re-verifies `.save.json`, `.seal`, and
-  domain-separated pair SHA-256 hashes before every `EvalHost::fork_from_checkpoint`, strips
-  directory components from error output (`sanitize_error_text`), advances to natural close using
-  counterfactual peer postures and unmodified focal `ClubBot`, calls `finalize_eval_season`, and
-  records exact integer `(total_equity, project_equity, net_asset_equity, mandate_bonus)` (also
-  returning the `SeasonReplayLog` via `run_single_rollout_with_replay_log`).
+- **Sequential season-close rollouts (`rollout.rs`):** `execute_blind_request` and
+  `execute_blind_request_verified` read each `.save.json` and `.seal` pair once into memory,
+  verify outer save/seal/pair SHA-256 digests (and, when `--verified-checkpoints <file>` is
+  supplied, validate `VerifiedCheckpointsManifest` build-ID parity with `LEAGUE_SCORER_GIT_SHA`,
+  format `v2` versions, `engine_commit` syntax, and tip `expected_state_digest`), construct
+  `base_host` via `EvalHost::fork_from_verified_checkpoint_bytes` (refusing `v1` checkpoints and
+  closing the double-read TOCTOU window), clone `base_host` in memory per `(c, m)` rollout
+  (`run_single_rollout_from_host`), and re-verify `base_host`'s canonical state digest and public
+  snapshot after the `K * M` batch (`InMemoryBaseStateCorrupted`). Standalone
+  `run_single_rollout` / `run_single_rollout_with_replay_log` likewise uses single-read
+  `EvalHost::fork_from_verified_checkpoint_bytes`. Both paths strip directory components from
+  error output (`sanitize_error_text`), advance to natural close using counterfactual peer
+  postures and unmodified focal `ClubBot`, call `finalize_eval_season`, and record exact integer
+  `(total_equity, project_equity, net_asset_equity, mandate_bonus)` (also returning the
+  `SeasonReplayLog` via `run_single_rollout_with_replay_log`).
 - **Deterministic scoring math & CLI (`scoring.rs`, `cli.rs`):** requires even `scenarios_m >= 2`
   for disjoint `M/2` split-half Winner's curse disclosure, integer `i128` scenario sums in `0..M`
   order before one final division, `[v_min, v_max]` span over `in_span == true` candidates only,
   `null` `score_norm` with `degenerate_flat_set: true` on flat spans, paired SE against `c_best`,
   arm-independent rank and mid-rank percentile sensitivity score, `§3.2` arm-blind pre-screen
   flags, and `league-scorer score --blind-inputs <dir> --checkpoints <dir> --config <file> --out
-  <dir> [--freeze <file>] [--scorer-crate-dir <dir>]` enforcing filename stem `== req.state_id`,
-  rejecting case-insensitive `state_id` collisions, resolving strictly `<sha256>.save.json` /
-  `<sha256>.seal` blobs, echoing `blind_request_sha256` from the exact request file bytes read
-  by `league-scorer score` (or from `to_sorted_pretty_json` on direct library calls to
-  `execute_blind_request`), and writing sorted-key `<out>/scores/<state_id>.json` with zero
-  timestamps, durations, hostnames,
-  paths, or arm labels. When `--freeze` is supplied, `--scorer-crate-dir` hashes the given crate
-  source tree on disk, not the running binary.
+  <dir> [--freeze <file> --verified-checkpoints <file>] [--scorer-crate-dir <dir>]` enforcing
+  filename stem `== req.state_id`, rejecting case-insensitive `state_id` collisions, resolving
+  strictly `<sha256>.save.json` / `<sha256>.seal` blobs, echoing `blind_request_sha256` from the
+  exact request file bytes read by `league-scorer score` (or from `to_sorted_pretty_json` on
+  direct library calls to `execute_blind_request`), and writing sorted-key
+  `<out>/scores/<state_id>.json` with zero timestamps, durations, hostnames, paths, or arm
+  labels. Passing `--freeze <file>` requires `--verified-checkpoints <file>` (`MISSING_VERIFIED_CHECKPOINTS`
+  if omitted, `FREEZE_VERIFIED_CHECKPOINTS_MISMATCH` if its SHA-256 differs from
+  `scorer_freeze.json::verified_checkpoints_sha256`), and `--verified-checkpoints <file>` may
+  also be passed on unfrozen `score` and `candidates` runs. When `--freeze` is supplied,
+  `--scorer-crate-dir` hashes the given crate source tree on disk, not the running binary.
 
-## Remaining stages (S3–S4)
+## Remaining work
 
-- **S3:** unblinded `BlindScoringRequest` / `arm_map/` builder in `league-eval`, `scorer_freeze.json`
-  pre-registration join gate, and post-unblinding mechanism measures.
-- **S4:** optional deterministic parallelism across rollouts (`S1`–`S2` execute sequentially without
-  `rayon`).
+- **Evaluation orchestrator (`league-eval`):** `build-blind-inputs`, `verify-checkpoints`, `freeze`, and `join` are implemented in [`crates/league-eval`](../league-eval/README.md).
+- **Optional deterministic parallelism (`S4`):** parallel execution across rollouts remains future work (scoring currently executes sequentially without `rayon`).

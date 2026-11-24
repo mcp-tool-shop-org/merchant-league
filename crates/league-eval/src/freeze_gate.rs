@@ -36,7 +36,7 @@ use crate::talk_extract::talk_rules_v2_digest;
 pub const DESCRIPTIVE_ONLY_INFERENTIAL_STATUS: &str = "descriptive_only";
 
 /// Plain readout statement documenting shared counterfactual environment randomness across `M` scenarios.
-pub const SCENARIO_RANDOMNESS_SCOPE_STATEMENT: &str = "Counterfactual scenarios m in 0..M share the base game's future environment RNG stream (market shocks and season-close rolls) and vary only sampled peer hidden mandates and talk-commitment honour draws; within a fixed scenario m, distinct focal actions that alter sweep state transitions can shift downstream environment draws.";
+pub const SCENARIO_RANDOMNESS_SCOPE_STATEMENT: &str = "Counterfactual scenarios m in 0..M share the base game's future environment RNG stream (market shocks and season-close rolls) and vary only sampled peer hidden mandates and talk-commitment honour draws; within a fixed scenario m, distinct focal actions can change tie-break outcomes (batch matching, council elections, and standings ties) but cannot change market shocks or season-close rolls.";
 
 /// Options for [`run_freeze`].
 #[derive(Debug, Clone)]
