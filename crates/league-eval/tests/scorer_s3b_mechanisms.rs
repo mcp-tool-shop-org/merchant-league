@@ -18,9 +18,9 @@ use league_eval::{
     MECHANISM_DATA_LIMITS, PASS_B_LIMIT_STATEMENT, PerArmSummaryFile,
     REFUSED_BUNDLE_LEGS_MIN_COUNT, RefusalCodeCounts, RefusedBundleRecord,
     TALK_COMMITMENT_HONOUR_WINDOW_DAYS, TALK_COMMITMENT_MIN_FILL_BPS,
-    TALK_COMMITMENT_PRICE_TOLERANCE_MILLI_CRED, TOOL_CALL_USED_MIN_COUNT, WrongPartCounter,
-    execute_cli_with_git_sha, measure_reasoning_length_in_memory, run_freeze, run_join,
-    summarize_arm_mechanisms,
+    TALK_COMMITMENT_PRICE_TOLERANCE_MILLI_CRED, TOOL_CALL_USED_MIN_COUNT, VerifyCheckpointsOptions,
+    WrongPartCounter, execute_cli_with_git_sha, measure_reasoning_length_in_memory, run_freeze,
+    run_join, run_verify_checkpoints, summarize_arm_mechanisms,
 };
 use league_relay::{
     CONTROL_WORDING_ARM, CallLogEntry, NegotiationInputs, Round, SavedHttpReplyRecord,
@@ -60,10 +60,69 @@ impl TmpDir {
     }
 }
 
+#[cfg(unix)]
+fn clear_readonly_recursive(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        let mode = if meta.is_dir() { 0o755 } else { 0o644 };
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+        if meta.is_dir()
+            && let Ok(entries) = fs::read_dir(path)
+        {
+            for entry in entries.flatten() {
+                clear_readonly_recursive(&entry.path());
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn clear_readonly_recursive(path: &Path) {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        let mut perms = meta.permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
+        }
+        if meta.is_dir()
+            && let Ok(entries) = fs::read_dir(path)
+        {
+            for entry in entries.flatten() {
+                clear_readonly_recursive(&entry.path());
+            }
+        }
+    }
+}
+
 impl Drop for TmpDir {
     fn drop(&mut self) {
+        clear_readonly_recursive(&self.0);
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+fn clean_build_sha() -> &'static str {
+    if CRATE_GIT_SHA.len() == 40 && CRATE_GIT_SHA.bytes().all(|b| b.is_ascii_hexdigit()) {
+        CRATE_GIT_SHA
+    } else {
+        FALLBACK_GIT_SHA
+    }
+}
+
+fn verify_source_ckpts(
+    src_dir: &Path,
+    out_path: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let _ = run_verify_checkpoints(
+        &VerifyCheckpointsOptions {
+            checkpoints_dir: src_dir.join("checkpoints"),
+            out_path: out_path.to_path_buf(),
+            blind_dir: None,
+        },
+        &clean_git_sha_source(),
+    )?;
+    Ok(out_path.to_path_buf())
 }
 
 fn clean_git_sha_source() -> CrateGitShaSource<'static> {
@@ -334,6 +393,7 @@ fn write_minimal_source_game(
     fs::create_dir_all(dir.join("decisions"))?;
     fs::create_dir_all(dir.join("to-seat"))?;
 
+    host.set_engine_commit(clean_build_sha())?;
     let (save_path, seal_path) = host.write_pre_act_checkpoint(&dir.join("checkpoints"))?;
     let save_bytes = fs::read(&save_path)?;
     let seal_bytes = fs::read(&seal_path)?;
@@ -892,6 +952,7 @@ fn measures_1_to_4_and_missing_data_in_join_report() -> TestResult {
 
     let cfg_path = tmp.path().join("cfg.json");
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let vc_path = verify_source_ckpts(&src_dir, &tmp.path().join("vc.json"))?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -899,6 +960,7 @@ fn measures_1_to_4_and_missing_data_in_join_report() -> TestResult {
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &clean_git_sha_source(),
@@ -910,6 +972,7 @@ fn measures_1_to_4_and_missing_data_in_join_report() -> TestResult {
         arm_map_dir,
         scores_dir,
         out_dir: out_dir.clone(),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: Some(blind_dir),
         source_game_dirs: Vec::new(),
     })?;
@@ -1335,6 +1398,7 @@ fn measure_5a_pledges_and_5b_deal_keeping_cover_all_buckets() -> TestResult {
 
     let cfg_path = tmp.path().join("cfg.json");
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let vc_path = verify_source_ckpts(&src_dir, &tmp.path().join("vc_m5a.json"))?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -1342,6 +1406,7 @@ fn measure_5a_pledges_and_5b_deal_keeping_cover_all_buckets() -> TestResult {
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &clean_git_sha_source(),
@@ -1353,6 +1418,7 @@ fn measure_5a_pledges_and_5b_deal_keeping_cover_all_buckets() -> TestResult {
         arm_map_dir,
         scores_dir,
         out_dir: out_dir.clone(),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: Some(blind_dir),
         source_game_dirs: vec![src_dir],
     })?;
@@ -1680,6 +1746,7 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
 
     let cfg_path = tmp.path().join("cfg.json");
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let vc_path = verify_source_ckpts(&src_dir, &tmp.path().join("vc_sent.json"))?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -1687,6 +1754,7 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &clean_git_sha_source(),
@@ -1695,6 +1763,7 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
     let outputs_root = tmp.path().join("all_outputs");
     fs::create_dir_all(&outputs_root)?;
     let git_sha = clean_git_sha_source();
+    let vc_str = vc_path.to_str().unwrap_or_default().to_owned();
     let run_cli_join = |out_name: &str, with_src: bool| -> (PathBuf, i32, String, String) {
         let out_dir = outputs_root.join(out_name);
         let mut args = vec![
@@ -1707,6 +1776,8 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
             arm_map_dir.to_str().unwrap_or_default(),
             "--scores",
             scores_dir.to_str().unwrap_or_default(),
+            "--verified-checkpoints",
+            vc_str.as_str(),
             "--out",
             out_dir.to_str().unwrap_or_default(),
         ];
@@ -1806,6 +1877,7 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
         arm_map_dir,
         scores_dir,
         out_dir: outputs_root.join("err_missing_src"),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: None,
         source_game_dirs: vec![tmp.path().join("missing_source_game_dir")],
     })
@@ -1915,6 +1987,7 @@ fn measure_5b_cross_source_retraction_zero_applicable_and_duplicate_source_error
 
     let cfg_path = tmp.path().join("cfg.json");
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let vc_path = verify_source_ckpts(&src_dir, &tmp.path().join("vc_ret.json"))?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -1922,6 +1995,7 @@ fn measure_5b_cross_source_retraction_zero_applicable_and_duplicate_source_error
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &clean_git_sha_source(),
@@ -1933,6 +2007,7 @@ fn measure_5b_cross_source_retraction_zero_applicable_and_duplicate_source_error
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: out_dir.clone(),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: None,
         source_game_dirs: vec![src_dir.clone()],
     })?;
@@ -1957,6 +2032,7 @@ fn measure_5b_cross_source_retraction_zero_applicable_and_duplicate_source_error
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: tmp.path().join("joined_dup"),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: None,
         source_game_dirs: vec![src_dir.clone(), dup_dir],
     })
@@ -1977,6 +2053,7 @@ fn measure_5b_cross_source_retraction_zero_applicable_and_duplicate_source_error
         arm_map_dir,
         scores_dir,
         out_dir: tmp.path().join("joined_tamper"),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: None,
         source_game_dirs: vec![tamper_src],
     })
@@ -2244,6 +2321,7 @@ fn measure_5b_neg_merge_recursive_source_scan_and_sidecar_filters() -> TestResul
 
     let cfg_path = tmp.path().join("cfg.json");
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let vc_path = verify_source_ckpts(&src_dir, &tmp.path().join("vc_merge.json"))?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -2251,6 +2329,7 @@ fn measure_5b_neg_merge_recursive_source_scan_and_sidecar_filters() -> TestResul
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &clean_git_sha_source(),
@@ -2262,6 +2341,7 @@ fn measure_5b_neg_merge_recursive_source_scan_and_sidecar_filters() -> TestResul
         arm_map_dir,
         scores_dir,
         out_dir: out_dir.clone(),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: None,
         source_game_dirs: vec![parent_src],
     })?;
@@ -2283,6 +2363,7 @@ struct SingleJoinHarness {
     dec_path: PathBuf,
     out_path: PathBuf,
     freeze_path: PathBuf,
+    vc_path: PathBuf,
     arm_map_dir: PathBuf,
     scores_dir: PathBuf,
 }
@@ -2347,6 +2428,7 @@ fn prepare_single_decision_join(
 
     let cfg_path = base.join("cfg.json");
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let vc_path = verify_source_ckpts(&src_dir, &base.join("vc.json"))?;
     let freeze_path = base.join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -2354,6 +2436,7 @@ fn prepare_single_decision_join(
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &clean_git_sha_source(),
@@ -2365,6 +2448,7 @@ fn prepare_single_decision_join(
         dec_path,
         out_path,
         freeze_path,
+        vc_path,
         arm_map_dir,
         scores_dir,
     })
@@ -2379,6 +2463,7 @@ fn run_single_join(
         arm_map_dir: harness.arm_map_dir.clone(),
         scores_dir: harness.scores_dir.clone(),
         out_dir: out_dir.to_path_buf(),
+        verified_checkpoints_path: Some(harness.vc_path.clone()),
         blind_dir: None,
         source_game_dirs: vec![harness.src_dir.clone()],
     })?;
@@ -2785,6 +2870,7 @@ fn sec72_measure5_methods_align_with_doc_and_preview_equivalence() -> TestResult
     );
     let _ = host.apply_act_submissions(&t1_subs)?;
     let _ = host.sweep_turn()?;
+    host.set_engine_commit(clean_build_sha())?;
     let (save_path, seal_path) = host.write_pre_act_checkpoint(tmp.path())?;
     let snap_val: serde_json::Value = serde_json::from_slice(&fs::read(&save_path)?)?;
     let obs = host.observe_seat(Seat(0))?;

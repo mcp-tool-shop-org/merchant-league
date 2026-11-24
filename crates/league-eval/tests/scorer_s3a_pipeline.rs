@@ -19,13 +19,15 @@ use league_eval::{
     ArmMapStateFile, BranchManifest, BranchOptions, BuildBlindInputsOptions, CRATE_GIT_SHA,
     CrateGitShaSource, DESCRIPTIVE_ONLY_INFERENTIAL_STATUS, EVAL_REPLY_WORDING_ARM, EvalArm,
     EvalDecisionRecord, EvalError, EvalManifest, EvalSetupFile, FreezeOptions, JoinOptions,
-    JoinedDecisionsFile, PerArmSummaryFile, PlayOptions, ScorerFreezeFile, TalkRulesV2Table,
-    eval_wording_slot, execute_cli_with_git_sha, extract_talk_commitments_for_state,
+    JoinedDecisionsFile, PerArmSummaryFile, PlayOptions, SCENARIO_RANDOMNESS_SCOPE_STATEMENT,
+    ScorerFreezeFile, TalkRulesV2Table, VerifyCheckpointsOptions, eval_wording_slot,
+    execute_cli_with_git_sha, extract_talk_commitments_for_state,
     extract_talk_commitments_from_messages, extract_talk_commitments_from_messages_with_rules,
     extract_talk_commitments_with_counts_for_state, resolve_eval_seat_guilds,
     run_branch_with_transport_and_git_sha, run_build_blind_inputs, run_freeze, run_join,
-    run_play_with_transport_and_git_sha, talk_rules_v2_digest, talk_rules_v2_digest_for,
-    write_freeze_file_with_writer, write_freeze_file_with_writer_and_remover,
+    run_play_with_transport_and_git_sha, run_verify_checkpoints, talk_rules_v2_digest,
+    talk_rules_v2_digest_for, write_freeze_file_with_writer,
+    write_freeze_file_with_writer_and_remover,
 };
 use league_relay::{
     CONTROL_WORDING_ARM, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round,
@@ -63,10 +65,63 @@ impl TmpDir {
     }
 }
 
+#[cfg(unix)]
+fn clear_readonly_recursive(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        let mode = if meta.is_dir() { 0o755 } else { 0o644 };
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+        if meta.is_dir()
+            && let Ok(entries) = fs::read_dir(path)
+        {
+            for entry in entries.flatten() {
+                clear_readonly_recursive(&entry.path());
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn clear_readonly_recursive(path: &Path) {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        let mut perms = meta.permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
+        }
+        if meta.is_dir()
+            && let Ok(entries) = fs::read_dir(path)
+        {
+            for entry in entries.flatten() {
+                clear_readonly_recursive(&entry.path());
+            }
+        }
+    }
+}
+
 impl Drop for TmpDir {
     fn drop(&mut self) {
+        clear_readonly_recursive(&self.0);
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+fn verify_ckpts_for_test(
+    ckpts_dir: &Path,
+    out_path: &Path,
+    blind_dir: Option<&Path>,
+    git_sha: &CrateGitShaSource<'_>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let _ = run_verify_checkpoints(
+        &VerifyCheckpointsOptions {
+            checkpoints_dir: ckpts_dir.to_path_buf(),
+            out_path: out_path.to_path_buf(),
+            blind_dir: blind_dir.map(Path::to_path_buf),
+        },
+        git_sha,
+    )?;
+    Ok(out_path.to_path_buf())
 }
 
 fn clean_git_sha_source() -> CrateGitShaSource<'static> {
@@ -686,7 +741,23 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
     let bytes_b = fs::read(scores_dir_b.join(format!("scores/{expected_state_id}.json")))?;
     assert_eq!(bytes_a, bytes_b, "two scorer passes must be byte-identical");
 
-    // 5. Write freeze file and run scorer WITH `--freeze`.
+    // 5. Verify checkpoints (Gate 2), write freeze file, and run scorer WITH `--freeze`.
+    let vc_path = tmp.path().join("verified_checkpoints.json");
+    let (vc_code, vc_out, vc_err) = run_eval_cli(
+        &[
+            "verify-checkpoints",
+            "--checkpoints",
+            ckpts_cas_dir.to_str().ok_or("utf8")?,
+            "--blind",
+            blind_dir.to_str().ok_or("utf8")?,
+            "--out",
+            vc_path.to_str().ok_or("utf8")?,
+        ],
+        &git_sha,
+    );
+    assert_eq!(vc_code, 0, "verify-checkpoints stderr: {vc_err}");
+    assert!(vc_out.contains("verified_count=1"));
+
     let freeze_path = tmp.path().join("scorer_freeze.json");
     let (freeze_code, freeze_out, freeze_err) = run_eval_cli(
         &[
@@ -697,6 +768,8 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
             cfg_path.to_str().ok_or("utf8")?,
             "--control-wording-arm",
             CONTROL_WORDING_ARM,
+            "--verified-checkpoints",
+            vc_path.to_str().ok_or("utf8")?,
             "--out",
             freeze_path.to_str().ok_or("utf8")?,
         ],
@@ -709,6 +782,7 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
     let freeze: ScorerFreezeFile = serde_json::from_slice(&fs::read(&freeze_path)?)?;
     assert_eq!(freeze.control_wording_arm, CONTROL_WORDING_ARM);
     assert_eq!(freeze.talk_extractor_version, "talk_rules_v2");
+    assert_eq!(freeze.verified_checkpoints_sha256.len(), 64);
 
     let scores_frozen = tmp.path().join("scores_frozen");
     let mut sf_out = Vec::new();
@@ -724,6 +798,8 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
             cfg_path.to_str().ok_or("utf8")?,
             "--freeze",
             freeze_path.to_str().ok_or("utf8")?,
+            "--verified-checkpoints",
+            vc_path.to_str().ok_or("utf8")?,
             "--out",
             scores_frozen.to_str().ok_or("utf8")?,
         ],
@@ -759,6 +835,8 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
             scores_frozen.to_str().ok_or("utf8")?,
             "--blind",
             blind_dir.to_str().ok_or("utf8")?,
+            "--verified-checkpoints",
+            vc_path.to_str().ok_or("utf8")?,
             "--out",
             joined_dir.to_str().ok_or("utf8")?,
         ],
@@ -774,6 +852,18 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
         joined_decisions.inferential_status,
         DESCRIPTIVE_ONLY_INFERENTIAL_STATUS
     );
+    assert_eq!(
+        joined_decisions.verified_checkpoints_sha256,
+        freeze.verified_checkpoints_sha256
+    );
+    assert_eq!(
+        joined_decisions.scorer_engine_build_id,
+        freeze.scorer_git_sha
+    );
+    assert_eq!(
+        joined_decisions.scenario_randomness_scope,
+        SCENARIO_RANDOMNESS_SCOPE_STATEMENT
+    );
     assert_eq!(joined_decisions.rows.len(), 3);
     for arm_entry in &arm_map.entries {
         let row = joined_decisions
@@ -786,6 +876,7 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
             row.first_draft_candidate_id,
             arm_entry.first_draft_candidate_id
         );
+        assert_eq!(row.checkpoint_engine_commit.len(), 40);
     }
 
     let summary_file: PerArmSummaryFile =
@@ -793,6 +884,15 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
     assert_eq!(
         summary_file.inferential_status,
         DESCRIPTIVE_ONLY_INFERENTIAL_STATUS
+    );
+    assert_eq!(
+        summary_file.verified_checkpoints_sha256,
+        freeze.verified_checkpoints_sha256
+    );
+    assert_eq!(summary_file.scorer_engine_build_id, freeze.scorer_git_sha);
+    assert_eq!(
+        summary_file.scenario_randomness_scope,
+        SCENARIO_RANDOMNESS_SCOPE_STATEMENT
     );
     assert_eq!(summary_file.arms.len(), 3);
     Ok(())
@@ -804,7 +904,8 @@ fn first_draft_call_index_ordering_no_reply_refusals_and_or_merge() -> TestResul
     let ckpt_dir = tmp.path().join("src_game");
     let ckpts = ckpt_dir.join("checkpoints");
     fs::create_dir_all(&ckpts)?;
-    let mut host = EvalHost::from_standard_setup(TableId(9102), 4, 1, 21)?;
+    let mut host = EvalHost::from_standard_setup(TableId(9102), 4, 1, 21)?
+        .with_engine_commit(TEST_FALLBACK_GIT_SHA)?;
     let obs = host.observe_seat(Seat(0))?;
     let (save_path, seal_path) = host.write_pre_act_checkpoint(&ckpts)?;
     assert!(save_path.is_file() && seal_path.is_file());
@@ -1422,6 +1523,12 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
 
     let joined_out = tmp.path().join("joined_fail");
     let missing_freeze_path = tmp.path().join("missing_freeze.json");
+    let vc_path = verify_ckpts_for_test(
+        &ckpts_dir,
+        &tmp.path().join("verified_checkpoints.json"),
+        Some(&blind_dir),
+        &git_sha,
+    )?;
 
     // 1. Join without a freeze file MUST be refused (`MISSING_FREEZE_FILE`, §8.2 step 2).
     let no_freeze_err = run_join(&league_eval::JoinOptions {
@@ -1429,6 +1536,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: None,
         source_game_dirs: Vec::new(),
     })
@@ -1449,6 +1557,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
             config_path: cfg_path.clone(),
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &dirty_sha,
@@ -1464,6 +1573,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
             config_path: cfg_path.clone(),
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -1476,6 +1586,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
             config_path: cfg_path.clone(),
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -1497,6 +1608,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: None,
         source_game_dirs: Vec::new(),
     })
@@ -1517,6 +1629,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: None,
         source_game_dirs: Vec::new(),
     })
@@ -1536,6 +1649,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: Some(blind_dir.clone()),
         source_game_dirs: Vec::new(),
     })
@@ -1562,6 +1676,8 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
             cfg_path.to_str().ok_or("utf8")?,
             "--freeze",
             freeze_path.to_str().ok_or("utf8")?,
+            "--verified-checkpoints",
+            vc_path.to_str().ok_or("utf8")?,
             "--scorer-crate-dir",
             fake_crate_dir.to_str().ok_or("utf8")?,
             "--out",
@@ -1584,6 +1700,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         arm_map_dir,
         scores_dir,
         out_dir: joined_out,
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: Some(blind_dir),
         source_game_dirs: Vec::new(),
     })?;
@@ -2029,6 +2146,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
         "MISSING_SOURCE_SETUP"
     );
 
+    let unused_vc = tmp.path().join("unused_vc.json");
     assert_eq!(
         run_freeze(
             &FreezeOptions {
@@ -2036,6 +2154,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
                 config_path: valid_cfg_path.clone(),
                 control_wording_arm: "   ".to_owned(),
                 out_path: tmp.path().join("f0.json"),
+                verified_checkpoints_path: unused_vc.clone(),
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2052,6 +2171,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
                 config_path: bad_ver_cfg_path,
                 control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
                 out_path: tmp.path().join("f1.json"),
+                verified_checkpoints_path: unused_vc.clone(),
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2068,6 +2188,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
                 config_path: bad_dig_cfg_path,
                 control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
                 out_path: tmp.path().join("f2.json"),
+                verified_checkpoints_path: unused_vc,
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2188,6 +2309,12 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
         0
     );
 
+    let vc_path = verify_ckpts_for_test(
+        &ckpts_dir,
+        &tmp.path().join("verified_checkpoints.json"),
+        Some(&blind_dir),
+        &git_sha,
+    )?;
     let freeze_path = tmp.path().join("freeze.json");
     let freeze = run_freeze(
         &FreezeOptions {
@@ -2195,6 +2322,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             config_path: valid_cfg_path.clone(),
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -2218,6 +2346,26 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             .validate()
             .err()
             .ok_or("expected bad tree hex")?
+            .code(),
+        "SCHEMA_VALIDATION_FAILED"
+    );
+    let mut missing_vc_freeze = freeze.clone();
+    missing_vc_freeze.verified_checkpoints_sha256 = "".to_owned();
+    assert_eq!(
+        missing_vc_freeze
+            .validate()
+            .err()
+            .ok_or("expected missing verified_checkpoints_sha256")?
+            .code(),
+        "MISSING_VERIFIED_CHECKPOINTS"
+    );
+    let mut bad_vc_freeze = freeze.clone();
+    bad_vc_freeze.verified_checkpoints_sha256 = "short".to_owned();
+    assert_eq!(
+        bad_vc_freeze
+            .validate()
+            .err()
+            .ok_or("expected bad verified_checkpoints_sha256 hex")?
             .code(),
         "SCHEMA_VALIDATION_FAILED"
     );
@@ -2253,6 +2401,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: empty_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2270,6 +2419,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
                 config_path: valid_cfg_path.clone(),
                 control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
                 out_path: tmp.path().join("freeze_empty_blind.json"),
+                verified_checkpoints_path: vc_path.clone(),
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2285,6 +2435,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: Some(empty_dir.clone()),
             source_game_dirs: Vec::new(),
         })
@@ -2309,6 +2460,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
                 config_path: valid_cfg_path.clone(),
                 control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
                 out_path: tmp.path().join("freeze_wrong_stem.json"),
+                verified_checkpoints_path: vc_path.clone(),
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2324,6 +2476,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: Some(bad_blind_dir.clone()),
             source_game_dirs: Vec::new(),
         })
@@ -2350,6 +2503,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: Some(bad_blind_dir),
             source_game_dirs: Vec::new(),
         })
@@ -2366,6 +2520,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: empty_dir,
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2393,6 +2548,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2415,6 +2571,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2441,6 +2598,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2468,6 +2626,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: diff_cfg_scores,
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2489,6 +2648,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2514,6 +2674,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2539,6 +2700,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2576,6 +2738,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             arm_map_dir: no_proof_arm_map_dir,
             scores_dir: direct_scores_dir,
             out_dir: joined_fail,
+            verified_checkpoints_path: Some(vc_path),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -2922,6 +3085,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
     fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
 
     // `run_freeze` error paths: missing config, malformed config, nonexistent --blind dir.
+    let unused_vc = tmp.path().join("unused_vc.json");
     assert_eq!(
         run_freeze(
             &FreezeOptions {
@@ -2929,6 +3093,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
                 config_path: tmp.path().join("no_cfg.json"),
                 control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
                 out_path: tmp.path().join("nf.json"),
+                verified_checkpoints_path: unused_vc.clone(),
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2947,6 +3112,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
                 config_path: bad_cfg,
                 control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
                 out_path: tmp.path().join("nf2.json"),
+                verified_checkpoints_path: unused_vc.clone(),
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2963,6 +3129,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
                 config_path: cfg_path.clone(),
                 control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
                 out_path: tmp.path().join("nf3.json"),
+                verified_checkpoints_path: unused_vc,
                 scorer_crate_dir: None,
             },
             &git_sha,
@@ -2974,7 +3141,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
     );
 
     // Invalid `--error-format` on each CLI subcommand.
-    for cmd in ["build-blind-inputs", "freeze", "join"] {
+    for cmd in ["build-blind-inputs", "verify-checkpoints", "freeze", "join"] {
         let (code, _, err) = run_eval_cli(&[cmd, "--error-format", "xml"], &git_sha);
         assert_eq!(code, 1, "expected invalid error-format for {cmd}: {err}");
         assert!(err.contains("INVALID_USAGE"));
@@ -3064,6 +3231,12 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
     );
 
     // Freeze written into a newly created nested subdirectory.
+    let vc_path = verify_ckpts_for_test(
+        &ckpts_dir,
+        &tmp.path().join("verified_checkpoints.json"),
+        Some(&blind_dir),
+        &git_sha,
+    )?;
     let nested_freeze_path = tmp.path().join("nested/dir/scorer_freeze.json");
     let _freeze = run_freeze(
         &FreezeOptions {
@@ -3071,6 +3244,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: nested_freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -3088,6 +3262,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3102,6 +3277,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: tmp.path().join("missing_arm_map"),
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3120,6 +3296,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: bad_am_dir,
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3138,6 +3315,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: bad_scores_dir,
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3157,6 +3335,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3172,6 +3351,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3191,6 +3371,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3206,6 +3387,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3225,6 +3407,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: arm_map_dir.clone(),
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3253,6 +3436,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: am_mc_dir,
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
+            verified_checkpoints_path: Some(vc_path.clone()),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3276,6 +3460,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             arm_map_dir: am_md_dir,
             scores_dir,
             out_dir: out_fail,
+            verified_checkpoints_path: Some(vc_path),
             blind_dir: None,
             source_game_dirs: Vec::new(),
         })
@@ -3845,6 +4030,12 @@ fn join_refuses_scores_from_rebuilt_blind_inputs_with_different_talk_commitments
         scorer_seed: 42,
     })?;
 
+    let vc_a = verify_ckpts_for_test(
+        &ckpts_a,
+        &tmp.path().join("vc_a.json"),
+        Some(&blind_a),
+        &git_sha,
+    )?;
     let freeze_a = tmp.path().join("freeze_a.json");
     run_freeze(
         &FreezeOptions {
@@ -3852,6 +4043,7 @@ fn join_refuses_scores_from_rebuilt_blind_inputs_with_different_talk_commitments
             config_path: cfg_path.clone(),
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_a.clone(),
+            verified_checkpoints_path: vc_a.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -3953,6 +4145,8 @@ fn join_refuses_scores_from_rebuilt_blind_inputs_with_different_talk_commitments
             arm_map_a.to_str().ok_or("utf8")?,
             "--scores",
             scores_b.to_str().ok_or("utf8")?,
+            "--verified-checkpoints",
+            vc_a.to_str().ok_or("utf8")?,
             "--out",
             joined_tampered.to_str().ok_or("utf8")?,
         ],
@@ -4056,6 +4250,12 @@ fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch
         ),
         0
     );
+    let vc_path = verify_ckpts_for_test(
+        &ckpts_dir,
+        &tmp.path().join("vc_r.json"),
+        Some(&blind_dir),
+        &git_sha,
+    )?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -4063,6 +4263,7 @@ fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -4077,6 +4278,7 @@ fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: tmp.path().join("joined_fail"),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: None,
         source_game_dirs: Vec::new(),
     })
@@ -4091,6 +4293,7 @@ fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch
         arm_map_dir,
         scores_dir,
         out_dir: tmp.path().join("joined_fail2"),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: None,
         source_game_dirs: Vec::new(),
     })
@@ -4523,6 +4726,12 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         ),
         0
     );
+    let vc_path = verify_ckpts_for_test(
+        &ckpts_dir,
+        &tmp.path().join("vc_dup.json"),
+        Some(&blind_dir),
+        &git_sha,
+    )?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -4530,6 +4739,7 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -4548,6 +4758,7 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         arm_map_dir: arm_map_dir.clone(),
         scores_dir: scores_dir.clone(),
         out_dir: tmp.path().join("out_dup_score"),
+        verified_checkpoints_path: Some(vc_path.clone()),
         blind_dir: None,
         source_game_dirs: Vec::new(),
     })
@@ -4568,6 +4779,7 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         arm_map_dir,
         scores_dir,
         out_dir: tmp.path().join("out_dup_am"),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: None,
         source_game_dirs: Vec::new(),
     })
@@ -5367,6 +5579,12 @@ fn talk_extraction_counts_blind_sha_and_join_arm_summary() -> TestResult {
     let score2: StateScoreOutput = serde_json::from_slice(&fs::read(
         scores_dir.join("scores").join(format!("{sid2}.json")),
     )?)?;
+    let vc_path = verify_ckpts_for_test(
+        &ckpts_a,
+        &tmp.path().join("vc_counts.json"),
+        Some(&blind_a),
+        &git_sha,
+    )?;
     let freeze_path = tmp.path().join("freeze.json");
     run_freeze(
         &FreezeOptions {
@@ -5374,6 +5592,7 @@ fn talk_extraction_counts_blind_sha_and_join_arm_summary() -> TestResult {
             config_path: cfg_path,
             control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
             out_path: freeze_path.clone(),
+            verified_checkpoints_path: vc_path.clone(),
             scorer_crate_dir: None,
         },
         &git_sha,
@@ -5384,6 +5603,7 @@ fn talk_extraction_counts_blind_sha_and_join_arm_summary() -> TestResult {
         arm_map_dir: arm_map_a,
         scores_dir,
         out_dir: joined_dir.clone(),
+        verified_checkpoints_path: Some(vc_path),
         blind_dir: Some(blind_a),
         source_game_dirs: Vec::new(),
     })?;

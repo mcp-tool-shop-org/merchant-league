@@ -18,6 +18,7 @@ pub mod schema;
 pub mod select;
 pub mod serving;
 pub mod talk_extract;
+pub mod verify_checkpoints;
 pub mod view;
 pub mod wording;
 
@@ -35,7 +36,8 @@ pub use error::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERR
 pub use freeze_gate::{
     CountDistribution, DESCRIPTIVE_ONLY_INFERENTIAL_STATUS, FreezeOptions, JoinOptions, JoinReport,
     JoinedDecisionRow, JoinedDecisionsFile, PerArmSummaryFile, PerArmSummaryRow,
-    PerArmTalkCountsSummary, ScorerFreezeFile, run_freeze, run_join,
+    PerArmTalkCountsSummary, SCENARIO_RANDOMNESS_SCOPE_STATEMENT, ScorerFreezeFile, run_freeze,
+    run_join,
 };
 #[doc(hidden)]
 pub use freeze_gate::{write_freeze_file_with_writer, write_freeze_file_with_writer_and_remover};
@@ -77,6 +79,9 @@ pub use talk_extract::{
     TalkExtractionResult, TalkRulesV2Table, extract_talk_commitments_for_state,
     extract_talk_commitments_from_messages, extract_talk_commitments_with_counts_for_state,
     resolve_eval_seat_guilds, talk_rules_v2_digest, talk_rules_v2_digest_for,
+};
+pub use verify_checkpoints::{
+    VerifyCheckpointsOptions, VerifyCheckpointsReport, run_verify_checkpoints,
 };
 pub use view::{
     EVAL_SEAT_VIEW_JSON_INDENT_SPACES, EVAL_SEAT_VIEW_SERIALIZER_NAME,

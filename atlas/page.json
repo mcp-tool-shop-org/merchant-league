@@ -102,8 +102,8 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 2,
-      "changed": 18,
+      "added": 0,
+      "changed": 11,
       "moved": 0,
       "parts": 5,
       "removed": 0
@@ -111,13 +111,13 @@
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-23; 2 files added and 18 changed content.",
+        "sentence": "Nothing structural changed since 2026-11-24; 11 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "6bb8fc70544d39ec39dc61de5cd60308aa616476",
-      "generatedAt": "2026-11-23T11:29:51.971Z"
+      "commit": "cf4068dd3ebc9ca8445cf7d1727d39cb845f14e1",
+      "generatedAt": "2026-11-24T06:18:41.348Z"
     },
     "unchanged": true
   },
@@ -125,6 +125,21 @@
     {
       "a": "crates/league-eval/src/driver.rs",
       "b": "crates/league-eval/tests/play_and_branch.rs",
+      "either": 7,
+      "partLabels": [
+        "league-eval",
+        "league-eval"
+      ],
+      "parts": [
+        "league-eval",
+        "league-eval"
+      ],
+      "relation": "inside",
+      "shared": 7
+    },
+    {
+      "a": "crates/league-eval/src/cli.rs",
+      "b": "crates/league-eval/src/lib.rs",
       "either": 6,
       "partLabels": [
         "league-eval",
@@ -139,23 +154,8 @@
     },
     {
       "a": "crates/league-eval/src/driver.rs",
-      "b": "crates/league-eval/src/records.rs",
-      "either": 6,
-      "partLabels": [
-        "league-eval",
-        "league-eval"
-      ],
-      "parts": [
-        "league-eval",
-        "league-eval"
-      ],
-      "relation": "inside",
-      "shared": 5
-    },
-    {
-      "a": "crates/league-eval/src/driver.rs",
       "b": "crates/league-eval/tests/addendum_item9.rs",
-      "either": 6,
+      "either": 7,
       "partLabels": [
         "league-eval",
         "league-eval"
@@ -165,27 +165,12 @@
         "league-eval"
       ],
       "relation": "inside",
-      "shared": 5
-    },
-    {
-      "a": "crates/league-eval/src/records.rs",
-      "b": "crates/league-eval/tests/play_and_branch.rs",
-      "either": 6,
-      "partLabels": [
-        "league-eval",
-        "league-eval"
-      ],
-      "parts": [
-        "league-eval",
-        "league-eval"
-      ],
-      "relation": "inside",
-      "shared": 5
+      "shared": 6
     },
     {
       "a": "crates/league-eval/tests/addendum_item9.rs",
       "b": "crates/league-eval/tests/play_and_branch.rs",
-      "either": 6,
+      "either": 7,
       "partLabels": [
         "league-eval",
         "league-eval"
@@ -193,6 +178,21 @@
       "parts": [
         "league-eval",
         "league-eval"
+      ],
+      "relation": "inside",
+      "shared": 6
+    },
+    {
+      "a": "crates/league-gen/src/empirical.rs",
+      "b": "crates/league-gen/tests/properties.rs",
+      "either": 6,
+      "partLabels": [
+        "league-gen",
+        "league-gen"
+      ],
+      "parts": [
+        "league-gen",
+        "league-gen"
       ],
       "relation": "inside",
       "shared": 5
@@ -203,9 +203,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "3cd4f615e768b2e7d7b48f3086365e948b992c89",
+  "commit": "c11a2263c0e09112ba8c233ef687f9c14bbfcf75",
   "defaultBranch": "main",
-  "derived": "16 parts, mostly Rust (410 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (416 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -228,7 +228,7 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 25
+          "files": 27
         },
         {
           "boundary": "league-error",
@@ -238,7 +238,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 22
+          "files": 24
         },
         {
           "boundary": "league-gen",
@@ -258,7 +258,7 @@
         {
           "boundary": "league-scorer",
           "depth": 0,
-          "files": 12
+          "files": 14
         },
         {
           "boundary": "league-season",
@@ -332,6 +332,7 @@
         "crates/league-relay/src/secret.rs",
         "crates/league-relay/src/transport.rs",
         "crates/league-relay/tests/",
+        "crates/league-scorer/build.rs",
         "crates/league-scorer/tests/",
         "crates/league-season/",
         "crates/league-seat-types/src/lib.rs",
@@ -342,8 +343,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 49,
-      "runsMore": 73,
+      "runsCount": 50,
+      "runsMore": 77,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -392,7 +393,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 16
+          "files": 17
         },
         {
           "boundary": "league-relay",
@@ -402,7 +403,7 @@
         {
           "boundary": "league-core",
           "depth": 2,
-          "files": 15
+          "files": 16
         },
         {
           "boundary": "league-error",
@@ -448,7 +449,7 @@
         {
           "boundary": "league-core",
           "depth": 1,
-          "files": 15
+          "files": 16
         },
         {
           "boundary": "league-gen",
@@ -499,7 +500,7 @@
         {
           "boundary": "league-core",
           "depth": 3,
-          "files": 15
+          "files": 16
         },
         {
           "boundary": "league-error",
@@ -540,7 +541,7 @@
         {
           "boundary": "league-core",
           "depth": 2,
-          "files": 15
+          "files": 16
         },
         {
           "boundary": "league-seat-types",
@@ -746,12 +747,12 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-23T19:53:24.446Z",
+  "generatedAt": "2026-11-24T09:53:20.292Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "52 writes and 49 reads use paths built at run time and are not named here.",
+    "53 writes and 55 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "19 writes and 77 reads go to a path their caller passes, not to this repository.",
+    "20 writes and 83 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
@@ -794,15 +795,15 @@
   "startReason": "This path follows league-eval (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 106,
+  "testFiles": 109,
   "testedBy": {
-    "league-core": 28,
+    "league-core": 31,
     "league-error": 10,
-    "league-eval": 12,
+    "league-eval": 13,
     "league-gen": 10,
     "league-ledger": 8,
-    "league-relay": 10,
-    "league-scorer": 4,
+    "league-relay": 11,
+    "league-scorer": 6,
     "league-season": 1,
     "league-seat-types": 8,
     "league-seat-ui": 1,
@@ -816,7 +817,7 @@
     "league-seat-ui",
     "league-tui"
   ],
-  "unnamedWrites": 52,
+  "unnamedWrites": 53,
   "unread": [],
   "unreadFiles": 1,
   "unreadNote": [],

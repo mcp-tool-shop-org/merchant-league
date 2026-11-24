@@ -53,7 +53,8 @@ fn timing_benchmark_early_mid_late_rollouts() -> Result<(), Box<dyn Error>> {
     let ckpt_dir = tmp.path().join("ckpts");
     fs::create_dir_all(&ckpt_dir)?;
 
-    let mut host = EvalHost::from_standard_setup(TableId(9001), 4, 1, 42)?;
+    let mut host = EvalHost::from_standard_setup(TableId(9001), 4, 1, 42)?
+        .with_engine_commit("0123456789abcdef0123456789abcdef01234567")?;
     let mut saved_by_day: BTreeMap<u8, (PathBuf, PathBuf)> = BTreeMap::new();
 
     while host.phase() == TurnPhase::TalkAndMarket {

@@ -8,21 +8,22 @@ use std::path::{Path, PathBuf};
 
 use league_core::{StructuredError, ToStructuredError as _};
 
-use crate::candidates::build_arm_independent_request;
+use crate::candidates::{build_arm_independent_request, build_arm_independent_request_verified};
 use crate::error::{EXIT_OK, ScorerError, sanitize_error_text};
-use crate::rollout::execute_blind_request;
+use crate::rollout::{execute_blind_request, execute_blind_request_verified};
 use crate::types::{
-    ScorerConfig, ScorerFreezeBlindView, compute_blind_inputs_manifest_sha256,
-    compute_scorer_tree_sha256, is_valid_sha256_hex, parse_blind_scoring_request_strict,
-    sha256_hex, to_sorted_pretty_json,
+    ScorerConfig, ScorerFreezeBlindView, VerifiedCheckpointsManifest,
+    compute_blind_inputs_manifest_sha256, compute_scorer_tree_sha256, is_valid_sha256_hex,
+    parse_blind_scoring_request_strict, parse_verified_checkpoints_manifest_strict, sha256_hex,
+    to_sorted_pretty_json,
 };
 
 const HELP_TEXT: &str = "\
 Merchant League blind decision scorer
 
 USAGE:
-  league-scorer [--error-format text|json] score --blind-inputs <dir> --checkpoints <dir> --config <file> --out <dir> [--freeze <file>] [--scorer-crate-dir <dir>]
-  league-scorer [--error-format text|json] candidates --checkpoints <dir> --save-sha256 <hex> --seal-sha256 <hex> --focal-seat <n> --state-id <id> --config <file> --scorer-seed <u64> --out <dir>
+  league-scorer [--error-format text|json] score --blind-inputs <dir> --checkpoints <dir> --config <file> --out <dir> [--freeze <file>] [--verified-checkpoints <file>] [--scorer-crate-dir <dir>]
+  league-scorer [--error-format text|json] candidates --checkpoints <dir> --save-sha256 <hex> --seal-sha256 <hex> --focal-seat <n> --state-id <id> --config <file> --scorer-seed <u64> --out <dir> [--verified-checkpoints <file>]
   league-scorer --help | -h
   league-scorer --version | -V
 
@@ -61,15 +62,29 @@ pub fn main_entry() -> i32 {
     run_cli(raw_args, &mut stdout, &mut stderr)
 }
 
-/// Runs the `league-scorer` CLI against explicit arguments and output streams.
+/// Runs the `league-scorer` CLI against explicit arguments and output streams using `CRATE_GIT_SHA`.
 pub fn run_cli<I, S>(args: I, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    run_cli_with_build_id(args, crate::CRATE_GIT_SHA, stdout, stderr)
+}
+
+/// Testable entrypoint for [`run_cli`] accepting an explicit `scorer_build_id` seam.
+pub fn run_cli_with_build_id<I, S>(
+    args: I,
+    scorer_build_id: &str,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
     let args_vec: Vec<OsString> = args.into_iter().map(Into::into).collect();
     let err_fmt = peek_error_format(&args_vec);
-    match run_cli_args(&args_vec, stdout) {
+    match run_cli_args(&args_vec, scorer_build_id, stdout) {
         Ok(()) => EXIT_OK,
         Err(err) => {
             write_cli_error(&err, err_fmt, stderr);
@@ -137,6 +152,7 @@ struct ScoreCliArgs {
     checkpoints_dir: PathBuf,
     config_path: PathBuf,
     freeze_path: Option<PathBuf>,
+    verified_checkpoints_path: Option<PathBuf>,
     scorer_crate_dir: Option<PathBuf>,
     out_dir: PathBuf,
 }
@@ -149,10 +165,15 @@ struct CandidatesCliArgs {
     state_id: String,
     config_path: PathBuf,
     scorer_seed: u64,
+    verified_checkpoints_path: Option<PathBuf>,
     out_dir: PathBuf,
 }
 
-fn run_cli_args(args: &[OsString], stdout: &mut dyn Write) -> Result<(), ScorerError> {
+fn run_cli_args(
+    args: &[OsString],
+    scorer_build_id: &str,
+    stdout: &mut dyn Write,
+) -> Result<(), ScorerError> {
     let mut iter = args.iter().cloned().peekable();
     let mut _error_format = ErrorFormat::Text;
     let mut command: Option<String> = None;
@@ -185,11 +206,11 @@ fn run_cli_args(args: &[OsString], stdout: &mut dyn Write) -> Result<(), ScorerE
     match command.as_deref() {
         Some("score") => {
             let parsed = parse_score_flags(iter)?;
-            execute_score_command(&parsed, stdout)
+            execute_score_command(&parsed, scorer_build_id, stdout)
         }
         Some("candidates") => {
             let parsed = parse_candidates_flags(iter)?;
-            execute_candidates_command(&parsed, stdout)
+            execute_candidates_command(&parsed, scorer_build_id, stdout)
         }
         Some(other) => Err(ScorerError::Usage(format!(
             "unknown subcommand `{other}`; expected `score` or `candidates`"
@@ -217,6 +238,7 @@ where
     let mut checkpoints_dir: Option<PathBuf> = None;
     let mut config_path: Option<PathBuf> = None;
     let mut freeze_path: Option<PathBuf> = None;
+    let mut verified_checkpoints_path: Option<PathBuf> = None;
     let mut scorer_crate_dir: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
 
@@ -242,6 +264,11 @@ where
                 &mut freeze_path,
                 take_path(&mut iter, "--freeze")?,
                 "--freeze",
+            )?,
+            "--verified-checkpoints" => set_unique(
+                &mut verified_checkpoints_path,
+                take_path(&mut iter, "--verified-checkpoints")?,
+                "--verified-checkpoints",
             )?,
             "--scorer-crate-dir" => set_unique(
                 &mut scorer_crate_dir,
@@ -270,6 +297,7 @@ where
         config_path: config_path
             .ok_or_else(|| ScorerError::Usage("missing required --config <file>".to_owned()))?,
         freeze_path,
+        verified_checkpoints_path,
         scorer_crate_dir,
         out_dir: out_dir
             .ok_or_else(|| ScorerError::Usage("missing required --out <dir>".to_owned()))?,
@@ -287,6 +315,7 @@ where
     let mut state_id: Option<String> = None;
     let mut config_path: Option<PathBuf> = None;
     let mut scorer_seed: Option<u64> = None;
+    let mut verified_checkpoints_path: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
 
     while let Some(arg) = iter.next() {
@@ -333,6 +362,11 @@ where
                 })?;
                 set_unique(&mut scorer_seed, parsed, "--scorer-seed")?;
             }
+            "--verified-checkpoints" => set_unique(
+                &mut verified_checkpoints_path,
+                take_path(&mut iter, "--verified-checkpoints")?,
+                "--verified-checkpoints",
+            )?,
             "--out" => set_unique(&mut out_dir, take_path(&mut iter, "--out")?, "--out")?,
             "--error-format" => {
                 let val = take_string(&mut iter, "--error-format")?;
@@ -361,6 +395,7 @@ where
             .ok_or_else(|| ScorerError::Usage("missing required --config <file>".to_owned()))?,
         scorer_seed: scorer_seed
             .ok_or_else(|| ScorerError::Usage("missing required --scorer-seed <u64>".to_owned()))?,
+        verified_checkpoints_path,
         out_dir: out_dir
             .ok_or_else(|| ScorerError::Usage("missing required --out <dir>".to_owned()))?,
     })
@@ -445,8 +480,34 @@ fn collect_blind_request_files(blind_inputs_dir: &Path) -> Result<Vec<PathBuf>, 
     Ok(paths)
 }
 
+fn load_verified_checkpoints(
+    path: &Path,
+    scorer_build_id: &str,
+) -> Result<(VerifiedCheckpointsManifest, String), ScorerError> {
+    let vc_bytes = fs::read(path).map_err(|e| {
+        if e.kind() == io::ErrorKind::NotFound {
+            ScorerError::MissingVerifiedCheckpoints(format!(
+                "missing --verified-checkpoints file {}",
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("<file>")
+            ))
+        } else {
+            ScorerError::Io(sanitize_error_text(
+                &format!("read --verified-checkpoints file: {e}"),
+                &[path],
+            ))
+        }
+    })?;
+    let vc_sha256 = sha256_hex(&vc_bytes);
+    let manifest = parse_verified_checkpoints_manifest_strict(&vc_bytes)?;
+    manifest.validate_for_scorer(scorer_build_id)?;
+    Ok((manifest, vc_sha256))
+}
+
 fn execute_candidates_command(
     args: &CandidatesCliArgs,
+    scorer_build_id: &str,
     stdout: &mut dyn Write,
 ) -> Result<(), ScorerError> {
     let config = load_and_validate_config(&args.config_path)?;
@@ -470,16 +531,32 @@ fn execute_candidates_command(
     let seal_path = args
         .checkpoints_dir
         .join(format!("{}.seal", args.seal_sha256));
-    let req = build_arm_independent_request(
-        &save_path,
-        &seal_path,
-        &args.save_sha256,
-        &args.seal_sha256,
-        args.focal_seat,
-        &args.state_id,
-        &config,
-        args.scorer_seed,
-    )?;
+    let req = if let Some(ref vc_path) = args.verified_checkpoints_path {
+        let (manifest, _) = load_verified_checkpoints(vc_path, scorer_build_id)?;
+        build_arm_independent_request_verified(
+            &save_path,
+            &seal_path,
+            &args.save_sha256,
+            &args.seal_sha256,
+            args.focal_seat,
+            &args.state_id,
+            &config,
+            args.scorer_seed,
+            &manifest,
+            scorer_build_id,
+        )?
+    } else {
+        build_arm_independent_request(
+            &save_path,
+            &seal_path,
+            &args.save_sha256,
+            &args.seal_sha256,
+            args.focal_seat,
+            &args.state_id,
+            &config,
+            args.scorer_seed,
+        )?
+    };
 
     fs::create_dir_all(&args.out_dir).map_err(|e| {
         ScorerError::Io(sanitize_error_text(
@@ -506,11 +583,16 @@ fn execute_candidates_command(
     Ok(())
 }
 
-fn execute_score_command(args: &ScoreCliArgs, stdout: &mut dyn Write) -> Result<(), ScorerError> {
+fn execute_score_command(
+    args: &ScoreCliArgs,
+    scorer_build_id: &str,
+    stdout: &mut dyn Write,
+) -> Result<(), ScorerError> {
     let config = load_and_validate_config(&args.config_path)?;
     validate_checkpoints_layout(&args.checkpoints_dir)?;
     let request_paths = collect_blind_request_files(&args.blind_inputs_dir)?;
 
+    let mut verified_manifest: Option<VerifiedCheckpointsManifest> = None;
     if let Some(freeze_path) = &args.freeze_path {
         let freeze_bytes = fs::read(freeze_path).map_err(|e| {
             ScorerError::Io(sanitize_error_text(
@@ -550,6 +632,23 @@ fn execute_score_command(args: &ScoreCliArgs, stdout: &mut dyn Write) -> Result<
                 freeze.blind_inputs_manifest_sha256
             )));
         }
+
+        let vc_path = args.verified_checkpoints_path.as_deref().ok_or_else(|| {
+            ScorerError::MissingVerifiedCheckpoints(
+                "--freeze requires --verified-checkpoints <file>".to_owned(),
+            )
+        })?;
+        let (manifest, vc_sha256) = load_verified_checkpoints(vc_path, scorer_build_id)?;
+        if vc_sha256 != freeze.verified_checkpoints_sha256 {
+            return Err(ScorerError::FreezeVerifiedCheckpointsMismatch(format!(
+                "verified_checkpoints_sha256 `{vc_sha256}` != freeze `{}`",
+                freeze.verified_checkpoints_sha256
+            )));
+        }
+        verified_manifest = Some(manifest);
+    } else if let Some(ref vc_path) = args.verified_checkpoints_path {
+        let (manifest, _) = load_verified_checkpoints(vc_path, scorer_build_id)?;
+        verified_manifest = Some(manifest);
     }
 
     let mut requests = Vec::with_capacity(request_paths.len());
@@ -599,7 +698,17 @@ fn execute_score_command(args: &ScoreCliArgs, stdout: &mut dyn Write) -> Result<
         let seal_path = args
             .checkpoints_dir
             .join(format!("{}.seal", req.pre_act_seal_sha256));
-        let mut output = execute_blind_request(req, &config, &save_path, &seal_path)?;
+        let mut output = match verified_manifest.as_ref() {
+            Some(manifest) => execute_blind_request_verified(
+                req,
+                &config,
+                &save_path,
+                &seal_path,
+                manifest,
+                scorer_build_id,
+            )?,
+            None => execute_blind_request(req, &config, &save_path, &seal_path)?,
+        };
         output.blind_request_sha256 = req_sha256.clone();
         let json_text = to_sorted_pretty_json(&output)?;
         let out_path = scores_dir.join(format!("{}.json", req.state_id));

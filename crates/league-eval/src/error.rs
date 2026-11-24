@@ -113,6 +113,21 @@ pub enum EvalError {
     FreezeConfigMismatch(String),
     /// `join` or input builder refused because `control` wording arm disagrees with `scorer_freeze.json` (`exit 1`).
     ControlWordingArmMismatch(String),
+    /// Pre-act checkpoint verification refused an artifact (`exit 1`).
+    CheckpointVerify {
+        /// Stable uppercase error code from Gate 1 / Gate 2 verification.
+        code: &'static str,
+        /// Sanitized diagnostic message.
+        message: String,
+        /// Actionable operator hint.
+        hint: &'static str,
+    },
+    /// `verify-checkpoints` refused to overwrite an existing `verified_checkpoints.json` (`exit 1`).
+    VerifiedCheckpointsExists(String),
+    /// `freeze` or `join` refused because `--verified-checkpoints` was missing or empty (`exit 1`).
+    MissingVerifiedCheckpoints(String),
+    /// `freeze` or `join` refused because `verified_checkpoints.json` disagrees with `scorer_freeze.json`, blind inputs, or build ID (`exit 1`).
+    VerifiedCheckpointsMismatch(String),
     /// Underlying `league-scorer` error.
     Scorer(ScorerError),
     /// Underlying `EvalHost` / `league-core` error.
@@ -175,6 +190,10 @@ impl EvalError {
             Self::DuplicateStateId(_) => "DUPLICATE_STATE_ID",
             Self::FreezeConfigMismatch(_) => "FREEZE_CONFIG_MISMATCH",
             Self::ControlWordingArmMismatch(_) => "CONTROL_WORDING_ARM_MISMATCH",
+            Self::CheckpointVerify { code, .. } => code,
+            Self::VerifiedCheckpointsExists(_) => "VERIFIED_CHECKPOINTS_EXISTS",
+            Self::MissingVerifiedCheckpoints(_) => "MISSING_VERIFIED_CHECKPOINTS",
+            Self::VerifiedCheckpointsMismatch(_) => "VERIFIED_CHECKPOINTS_MISMATCH",
             Self::Scorer(err) => err.code(),
             Self::Engine(err) => err.code(),
             Self::Relay(err) => err.code(),
@@ -220,7 +239,11 @@ impl EvalError {
             | Self::FreezeManifestMismatch(_)
             | Self::DuplicateStateId(_)
             | Self::FreezeConfigMismatch(_)
-            | Self::ControlWordingArmMismatch(_) => EXIT_USER_ERROR,
+            | Self::ControlWordingArmMismatch(_)
+            | Self::CheckpointVerify { .. }
+            | Self::VerifiedCheckpointsExists(_)
+            | Self::MissingVerifiedCheckpoints(_)
+            | Self::VerifiedCheckpointsMismatch(_) => EXIT_USER_ERROR,
             Self::Scorer(err) => err.exit_code(),
             Self::Relay(err) => err.exit_code(),
             Self::InvalidWrongPartRate(_)
@@ -407,6 +430,26 @@ impl fmt::Display for EvalError {
                 write!(
                     f,
                     "CONTROL_WORDING_ARM_MISMATCH: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::CheckpointVerify { code, message, .. } => {
+                write!(f, "{code}: {}", scrub_secret_text(message))
+            }
+            Self::VerifiedCheckpointsExists(msg) => {
+                write!(f, "VERIFIED_CHECKPOINTS_EXISTS: {}", scrub_secret_text(msg))
+            }
+            Self::MissingVerifiedCheckpoints(msg) => {
+                write!(
+                    f,
+                    "MISSING_VERIFIED_CHECKPOINTS: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::VerifiedCheckpointsMismatch(msg) => {
+                write!(
+                    f,
+                    "VERIFIED_CHECKPOINTS_MISMATCH: {}",
                     scrub_secret_text(msg)
                 )
             }
@@ -715,6 +758,27 @@ impl ToStructuredError for EvalError {
                 self.code(),
                 self.to_string(),
                 "ensure every control run's relay_wording_arm matches scorer_freeze.json::control_wording_arm",
+                false,
+            ),
+            Self::CheckpointVerify { code, hint, .. } => {
+                StructuredError::new(code, self.to_string(), hint, false)
+            }
+            Self::VerifiedCheckpointsExists(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "verified_checkpoints.json is write-once; pass a fresh --out path rather than overwriting",
+                false,
+            ),
+            Self::MissingVerifiedCheckpoints(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "run `league-eval verify-checkpoints` and pass `--verified-checkpoints <file>` to `freeze` and `join`",
+                false,
+            ),
+            Self::VerifiedCheckpointsMismatch(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure `--verified-checkpoints` matches the frozen verified_checkpoints_sha256, build ID, and blind inputs",
                 false,
             ),
             Self::Scorer(err) => err.to_structured_error(),

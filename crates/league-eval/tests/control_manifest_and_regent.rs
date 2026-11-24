@@ -1571,8 +1571,12 @@ fn regent_andon_voids_game_and_branch_and_counts_by_arm() {
     let seeded_dir = tmp.join("regent_c_andon_play");
     must_ok(fs::create_dir_all(&seeded_dir), "mkdir seeded_dir");
     let seeded_host = must_ok(
-        EvalHost::from_standard_setup_with_model_seats(TableId(62), 4, 7, 12345, &[false; 4]),
-        "create table with Regent on seat 0",
+        must_ok(
+            EvalHost::from_standard_setup_with_model_seats(TableId(62), 4, 7, 12345, &[false; 4]),
+            "create table with Regent on seat 0",
+        )
+        .with_engine_commit(TEST_FALLBACK_GIT_SHA),
+        "attach engine_commit",
     );
     let _ = must_ok(
         league_eval::persist_eval_game_state(&seeded_host, &seeded_dir),
@@ -2432,8 +2436,12 @@ fn regent_on_model_seat_or_prior_receipt_refuses_at_startup_zero_calls() {
         "mkdir s8_configured_regent",
     );
     let seeded_host = must_ok(
-        EvalHost::from_standard_setup_with_model_seats(TableId(230), 4, 7, 111, &[false; 4]),
-        "seed host with Seat 0 Regent",
+        must_ok(
+            EvalHost::from_standard_setup_with_model_seats(TableId(230), 4, 7, 111, &[false; 4]),
+            "seed host with Seat 0 Regent",
+        )
+        .with_engine_commit(TEST_FALLBACK_GIT_SHA),
+        "attach engine_commit",
     );
     let _ = must_ok(
         league_eval::persist_eval_game_state(&seeded_host, &seeded_dir),
@@ -2476,8 +2484,12 @@ fn regent_on_model_seat_or_prior_receipt_refuses_at_startup_zero_calls() {
     let prior_dir = tmp.join("s8_prior_receipt");
     must_ok(fs::create_dir_all(&prior_dir), "mkdir s8_prior_receipt");
     let mut prior_host = must_ok(
-        EvalHost::from_standard_setup_with_model_seats(TableId(231), 4, 7, 222, &[false; 4]),
-        "seed host for prior Regent receipt",
+        must_ok(
+            EvalHost::from_standard_setup_with_model_seats(TableId(231), 4, 7, 222, &[false; 4]),
+            "seed host for prior Regent receipt",
+        )
+        .with_engine_commit(TEST_FALLBACK_GIT_SHA),
+        "attach engine_commit",
     );
     for _ in 0..4 {
         let _ = must_ok(

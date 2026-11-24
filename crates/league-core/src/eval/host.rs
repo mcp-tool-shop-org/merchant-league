@@ -5,6 +5,9 @@
 //! and [`TableMode::Game`] are refused). Pre-derives all `32` `EvalVrf` proofs on initialization
 //! and drops the `SealedEvalSeed` in memory; neither `.save.json` nor `.seal` stores a raw seed.
 
+#[path = "checkpoint_verify.rs"]
+pub mod checkpoint_verify;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -42,10 +45,10 @@ use crate::types::{
 };
 
 /// Current schema version for public `.save.json` snapshots written by [`EvalHost`].
-pub const EVAL_SAVE_FORMAT_VERSION: u32 = 1;
+pub const EVAL_SAVE_FORMAT_VERSION: u32 = 2;
 
 /// Current schema version for private `.seal` sidecar payloads written by [`EvalHost`].
-pub const EVAL_SEAL_FORMAT_VERSION: u32 = 1;
+pub const EVAL_SEAL_FORMAT_VERSION: u32 = 2;
 
 /// Public, spectator-safe Evaluation Mode save projection matching [`SeatObservation`] without any
 /// hidden secrets, `TurnEngine`, `EngineState`, unannounced `drawn_shocks`, VRF proofs, or
@@ -54,6 +57,8 @@ pub const EVAL_SEAL_FORMAT_VERSION: u32 = 1;
 pub struct EvalSaveSnapshot {
     /// Save projection format version (`EVAL_SAVE_FORMAT_VERSION`).
     pub format_version: u32,
+    /// Per-game 32-hex identifier matching the paired `.seal` sidecar.
+    pub game_id: String,
     /// Public clear layout seed (`< 2^63`) or redacted `sealed`-pool digest (`>= 2^63`).
     pub layout_seed: ReplayLayoutSeed,
     /// Table identifier.
@@ -166,9 +171,15 @@ pub struct EvalActApplyOutcome {
 #[derive(Serialize, Deserialize)]
 struct EvalSealPayload {
     format_version: u32,
+    save_format_version: u32,
+    turn: u8,
     game_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pre_act_checkpoint_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    save_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engine_commit: Option<String>,
     layout_seed: u64,
     vrf_proofs: Vec<Vec<u8>>,
     engine: TurnEngine,
@@ -194,6 +205,7 @@ struct EvalSealPayload {
 /// No Evaluation Mode seat module touches `TurnEngine`, `EngineState`, `SweepReceipt`, or
 /// `SealedEvalSeed` directly: every seat reads only [`SeatObservation`] via [`Self::observe_seat`]
 /// and [`PublicSweepReceipt`] via [`Self::sweep_turn`] / [`Self::public_receipts`].
+#[derive(Clone)]
 pub struct EvalHost {
     game_id: String,
     layout_seed: u64,
@@ -212,6 +224,7 @@ pub struct EvalHost {
     turn_salts: Vec<Vec<RevealSalt>>,
     recorded_act_submissions: BTreeMap<u8, EvalActSubmission>,
     active_pre_act_checkpoint_sha256: Option<String>,
+    engine_commit: Option<String>,
 }
 
 impl fmt::Debug for EvalHost {
@@ -323,6 +336,7 @@ impl EvalHost {
             turn_salts,
             recorded_act_submissions: BTreeMap::new(),
             active_pre_act_checkpoint_sha256: None,
+            engine_commit: None,
         })
     }
 
@@ -436,6 +450,54 @@ impl EvalHost {
     #[must_use]
     pub fn game_id(&self) -> &str {
         &self.game_id
+    }
+
+    /// Attaches a validated 40 lowercase hex engine commit SHA provenance stamp before persistence.
+    pub fn set_engine_commit(&mut self, engine_commit: &str) -> Result<(), EngineError> {
+        if !checkpoint_verify::is_valid_git_commit_sha40(engine_commit) {
+            return Err(EngineError::InvalidConfig(format!(
+                "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: engine_commit must be 40 lowercase hex characters, got '{engine_commit}'"
+            )));
+        }
+        self.engine_commit = Some(engine_commit.to_owned());
+        Ok(())
+    }
+
+    /// Builder variant of [`Self::set_engine_commit`].
+    pub fn with_engine_commit(mut self, engine_commit: &str) -> Result<Self, EngineError> {
+        self.set_engine_commit(engine_commit)?;
+        Ok(self)
+    }
+
+    /// Returns the recorded 40-hex commit SHA provenance stamped on this host, if present.
+    #[must_use]
+    pub fn engine_commit(&self) -> Option<&str> {
+        self.engine_commit.as_deref()
+    }
+
+    /// Computes the canonical lowercase 64-hex `TurnEngine::state_digest()` of this host.
+    pub fn canonical_state_digest_hex(&self) -> Result<String, EngineError> {
+        Ok(hex::encode(self.engine.state_digest()?))
+    }
+
+    /// Returns the lowercase 64-hex digest recorded in the last element of `live_state_digests`.
+    #[must_use]
+    pub fn last_live_state_digest_hex(&self) -> Option<String> {
+        self.live_state_digests.last().map(hex::encode)
+    }
+
+    /// Validates a 40-hex commit stamp for persistence; fails closed if missing or malformed.
+    fn validated_engine_commit(&self) -> Result<&str, EngineError> {
+        match self.engine_commit.as_deref() {
+            Some(sha) if checkpoint_verify::is_valid_git_commit_sha40(sha) => Ok(sha),
+            Some(other) => Err(EngineError::InvalidConfig(format!(
+                "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: invalid engine_commit `{other}` (expected 40 lowercase hex characters)"
+            ))),
+            None => Err(EngineError::InvalidConfig(
+                "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: EvalHost missing required 40-hex engine_commit before checkpoint write"
+                    .to_owned(),
+            )),
+        }
     }
 
     /// Returns the clear layout seed for this table (`ReplayLayoutSeed` handles redaction when
@@ -872,6 +934,7 @@ impl EvalHost {
             .collect();
         Ok(EvalSaveSnapshot {
             format_version: EVAL_SAVE_FORMAT_VERSION,
+            game_id: self.game_id.clone(),
             layout_seed: replay_layout_seed_for_raw(self.layout_seed)?,
             table_id: state.table_id,
             turn: state.turn,
@@ -909,26 +972,50 @@ impl EvalHost {
     /// Serializes the public `.save.json` projection and private `.seal` sidecar bytes
     /// (host-only `pub(crate)` helper behind [`Self::write_save_and_seal`]).
     pub(crate) fn to_save_and_seal_bytes(&self) -> Result<(Vec<u8>, Vec<u8>), EngineError> {
+        let _ = self.validated_engine_commit()?;
+        let pre_act = self.ensure_pre_act_state("to_save_and_seal_bytes").is_ok();
+        if pre_act && self.turn() > 1 {
+            let expected_idx = usize::from(self.turn() - 2);
+            let actual = self.engine.state_digest()?;
+            let recorded = self.live_state_digests.get(expected_idx).copied().ok_or_else(|| {
+                EngineError::InvalidConfig(
+                    "TIP_STATE_DIGEST_MISMATCH: live_state_digests length disagrees with current turn"
+                        .to_owned(),
+                )
+            })?;
+            if actual != recorded {
+                return Err(EngineError::InvalidConfig(format!(
+                    "TIP_STATE_DIGEST_MISMATCH: pre-act tip digest {} != live_state_digests[{expected_idx}] {}",
+                    hex::encode(actual),
+                    hex::encode(recorded),
+                )));
+            }
+        }
         let save = self.public_save_snapshot()?;
         let save_bytes = serde_json::to_vec_pretty(&save).map_err(|err| {
             EngineError::InvalidConfig(format!("failed to serialize EvalSaveSnapshot: {err}"))
         })?;
-        let seal_bytes = self.to_seal_bytes()?;
+        let save_sha256 = checkpoint_verify::compute_eval_save_v2_sha256_hex(&save_bytes);
+        let seal_bytes = self.to_seal_bytes_with_checkpoint_sha(None, Some(save_sha256))?;
+        checkpoint_verify::verify_written_pair_round_trip(&save_bytes, &seal_bytes)
+            .map_err(checkpoint_verify::CheckpointVerifyError::into_engine_error)?;
         Ok((save_bytes, seal_bytes))
-    }
-
-    pub(crate) fn to_seal_bytes(&self) -> Result<Vec<u8>, EngineError> {
-        self.to_seal_bytes_with_checkpoint_sha(None)
     }
 
     fn to_seal_bytes_with_checkpoint_sha(
         &self,
         pre_act_checkpoint_sha256: Option<String>,
+        save_sha256: Option<String>,
     ) -> Result<Vec<u8>, EngineError> {
+        let engine_commit = self.validated_engine_commit()?.to_owned();
         let seal = EvalSealPayload {
             format_version: EVAL_SEAL_FORMAT_VERSION,
+            save_format_version: EVAL_SAVE_FORMAT_VERSION,
+            turn: self.engine.state().turn,
             game_id: self.game_id.clone(),
             pre_act_checkpoint_sha256,
+            save_sha256,
+            engine_commit: Some(engine_commit),
             layout_seed: self.layout_seed,
             vrf_proofs: self.vrf_proofs.clone(),
             engine: self.engine.clone(),
@@ -956,19 +1043,18 @@ impl EvalHost {
         save_bytes: &[u8],
         seal_bytes: &[u8],
     ) -> Result<Self, EngineError> {
-        #[derive(serde::Deserialize)]
-        struct FormatVersionHeader {
-            format_version: u32,
-        }
-        if let Ok(hdr) = serde_json::from_slice::<FormatVersionHeader>(save_bytes)
-            && hdr.format_version != EVAL_SAVE_FORMAT_VERSION
+        let raw_save = checkpoint_verify::parse_strict_json_value("save", save_bytes)
+            .map_err(checkpoint_verify::CheckpointVerifyError::into_engine_error)?;
+        if let Some(found) = raw_save.get("format_version").and_then(|v| v.as_u64())
+            && let Ok(found_u32) = u32::try_from(found)
+            && found_u32 != EVAL_SAVE_FORMAT_VERSION
         {
             return Err(EngineError::UnsupportedReplayVersion {
-                found: hdr.format_version,
+                found: found_u32,
                 newest_known: EVAL_SAVE_FORMAT_VERSION,
             });
         }
-        let save: EvalSaveSnapshot = serde_json::from_slice(save_bytes).map_err(|err| {
+        let save: EvalSaveSnapshot = serde_json::from_value(raw_save.clone()).map_err(|err| {
             EngineError::InvalidConfig(format!(
                 "MALFORMED_SAVE_JSON: Eval save JSON does not parse: {err}"
             ))
@@ -979,6 +1065,16 @@ impl EvalHost {
                 newest_known: EVAL_SAVE_FORMAT_VERSION,
             });
         }
+        let canonical_save_val = serde_json::to_value(&save).map_err(|err| {
+            EngineError::InvalidConfig(format!("failed to re-serialize Eval save: {err}"))
+        })?;
+        checkpoint_verify::check_unknown_and_skipped_fields(
+            "save",
+            "",
+            &raw_save,
+            &canonical_save_val,
+        )
+        .map_err(checkpoint_verify::CheckpointVerifyError::into_engine_error)?;
 
         let seal = validate_eval_seal_bytes(seal_bytes)?;
         let expected_save_seed = replay_layout_seed_for_raw(seal.layout_seed)?;
@@ -987,6 +1083,12 @@ impl EvalHost {
                 "SEAL_LAYOUT_SEED_MISMATCH: Eval save layout_seed does not match seal layout_seed"
                     .to_owned(),
             ));
+        }
+        if !is_lower_ascii_hex_len(&save.game_id, 32) || save.game_id != seal.game_id {
+            return Err(EngineError::InvalidConfig(format!(
+                "PAIR_BINDING_MISMATCH: Eval save game_id `{}` != seal game_id `{}`",
+                save.game_id, seal.game_id
+            )));
         }
 
         let host = Self {
@@ -1007,11 +1109,32 @@ impl EvalHost {
             turn_salts: seal.turn_salts,
             recorded_act_submissions: seal.recorded_act_submissions,
             active_pre_act_checkpoint_sha256: None,
+            engine_commit: seal.engine_commit,
         };
         if host.public_save_snapshot()? != save {
             return Err(EngineError::InvalidConfig(
                 "SAVE_SEAL_SNAPSHOT_MISMATCH: Eval save snapshot does not match verified seal state"
                     .to_owned(),
+            ));
+        }
+        let expected_save_sha = checkpoint_verify::compute_eval_save_v2_sha256_hex(save_bytes);
+        if seal.save_sha256.as_deref() != Some(expected_save_sha.as_str()) {
+            return Err(EngineError::InvalidConfig(format!(
+                "PAIR_BINDING_MISMATCH: seal.save_sha256 {:?} != expected domain SHA-256 `{expected_save_sha}`",
+                seal.save_sha256
+            )));
+        }
+        let expected_canonical_save = serde_json::to_vec_pretty(&save).map_err(|err| {
+            EngineError::InvalidConfig(format!("failed to serialize canonical save: {err}"))
+        })?;
+        if expected_canonical_save != save_bytes {
+            return Err(EngineError::InvalidConfig(
+                "NON_CANONICAL_ENCODING: Eval save bytes are not canonically formatted".to_owned(),
+            ));
+        }
+        if !is_canonical_seal_bytes(seal_bytes)? {
+            return Err(EngineError::InvalidConfig(
+                "NON_CANONICAL_ENCODING: Eval seal bytes are not canonically formatted".to_owned(),
             ));
         }
         Ok(host)
@@ -1157,7 +1280,7 @@ impl EvalHost {
         }
         let seal_path = checkpoints_dir.join(format!("day-{day:02}-act-recorded.seal"));
         let seal_bytes =
-            self.to_seal_bytes_with_checkpoint_sha(Some(expected_ckpt_sha.to_owned()))?;
+            self.to_seal_bytes_with_checkpoint_sha(Some(expected_ckpt_sha.to_owned()), None)?;
         write_atomic_bytes(&seal_path, &seal_bytes)?;
         Ok(seal_path)
     }
@@ -1188,6 +1311,56 @@ impl EvalHost {
             recorded_seal_path,
         )?;
         self.apply_act_submissions(&seal.recorded_act_submissions)
+    }
+
+    /// Forks an independent [`EvalHost`] from in-memory pre-act `.save.json` and `.seal` bytes,
+    /// enforcing strict v2 decoding, duplicate/unknown JSON field rejection, canonical bytes, pair
+    /// binding, and tip state digest parity before returning.
+    pub fn fork_from_verified_checkpoint_bytes(
+        save_bytes: &[u8],
+        seal_bytes: &[u8],
+    ) -> Result<Self, EngineError> {
+        let host = checkpoint_verify::decode_strict_checkpoint_pair(save_bytes, seal_bytes)
+            .map_err(checkpoint_verify::CheckpointVerifyError::into_engine_error)?;
+        Ok(host)
+    }
+
+    /// Runs Gate 2 causal replay, cumulative chain hashing, tip equivalence, and 1-turn `ClubBot`
+    /// probe verification on `(save_bytes, seal_bytes)` returning a primitive summary tuple or
+    /// `(error_code, message, hint)`.
+    #[allow(clippy::type_complexity)]
+    pub fn verify_checkpoint_causal_raw(
+        save_bytes: &[u8],
+        seal_bytes: &[u8],
+    ) -> Result<
+        (
+            String,
+            String,
+            String,
+            String,
+            u8,
+            u8,
+            String,
+            String,
+            String,
+        ),
+        (&'static str, String, &'static str),
+    > {
+        checkpoint_verify::verify_checkpoint_causal(save_bytes, seal_bytes)
+            .map(|(_, s)| {
+                (
+                    s.pre_act_pair_sha256,
+                    s.pre_act_save_sha256,
+                    s.pre_act_seal_sha256,
+                    s.engine_commit,
+                    s.turn,
+                    s.seat_count,
+                    s.expected_state_digest,
+                    s.turn_chain_digest,
+                    s.post_probe_state_digest,
+                )
+            })
+            .map_err(|err| (err.code(), err.to_string(), err.hint()))
     }
 
     /// Forks an independent [`EvalHost`] from a verified turn-0 or pre-act checkpoint pair,
@@ -1390,20 +1563,58 @@ fn compute_pre_act_pair_sha256_hex(save_bytes: &[u8], seal_bytes: &[u8]) -> Stri
     hex::encode(digest)
 }
 
+fn is_canonical_seal_bytes(seal_bytes: &[u8]) -> Result<bool, EngineError> {
+    let seal: EvalSealPayload = serde_json::from_slice(seal_bytes).map_err(|err| {
+        EngineError::InvalidConfig(format!("failed to parse seal for canonical check: {err}"))
+    })?;
+    let expected = serde_json::to_vec(&seal).map_err(|err| {
+        EngineError::InvalidConfig(format!("failed to re-serialize seal canonically: {err}"))
+    })?;
+    Ok(expected == seal_bytes)
+}
+
 fn validate_eval_seal_bytes(seal_bytes: &[u8]) -> Result<EvalSealPayload, EngineError> {
-    #[derive(serde::Deserialize)]
-    struct FormatVersionHeader {
-        format_version: u32,
-    }
-    if let Ok(hdr) = serde_json::from_slice::<FormatVersionHeader>(seal_bytes)
-        && hdr.format_version != EVAL_SEAL_FORMAT_VERSION
+    let raw_seal = checkpoint_verify::parse_strict_json_value("seal", seal_bytes)
+        .map_err(checkpoint_verify::CheckpointVerifyError::into_engine_error)?;
+    if let Some(found) = raw_seal.get("format_version").and_then(|v| v.as_u64())
+        && let Ok(found_u32) = u32::try_from(found)
+        && found_u32 != EVAL_SEAL_FORMAT_VERSION
     {
         return Err(EngineError::UnsupportedReplayVersion {
-            found: hdr.format_version,
+            found: found_u32,
             newest_known: EVAL_SEAL_FORMAT_VERSION,
         });
     }
-    let seal: EvalSealPayload = serde_json::from_slice(seal_bytes).map_err(|err| {
+    match raw_seal.get("save_format_version") {
+        Some(v) if v.as_u64() == Some(u64::from(EVAL_SAVE_FORMAT_VERSION)) => {}
+        Some(v) => {
+            return Err(EngineError::InvalidConfig(format!(
+                "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: seal.save_format_version found {v}, expected {EVAL_SAVE_FORMAT_VERSION}"
+            )));
+        }
+        None => {
+            return Err(EngineError::InvalidConfig(format!(
+                "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: seal missing required save_format_version {EVAL_SAVE_FORMAT_VERSION}"
+            )));
+        }
+    }
+    match raw_seal.get("engine_commit") {
+        Some(serde_json::Value::String(sha))
+            if checkpoint_verify::is_valid_git_commit_sha40(sha) => {}
+        Some(other) => {
+            return Err(EngineError::InvalidConfig(format!(
+                "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: seal.engine_commit `{other}` must be 40 lowercase hex characters"
+            )));
+        }
+        None => {
+            return Err(EngineError::InvalidConfig(
+                "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: seal missing required 40-hex engine_commit"
+                    .to_owned(),
+            ));
+        }
+    }
+
+    let seal: EvalSealPayload = serde_json::from_value(raw_seal.clone()).map_err(|err| {
         EngineError::InvalidConfig(format!(
             "MALFORMED_SEAL_JSON: Eval seal JSON does not parse at line {}, column {} ({:?})",
             err.line(),
@@ -1417,16 +1628,49 @@ fn validate_eval_seal_bytes(seal_bytes: &[u8]) -> Result<EvalSealPayload, Engine
             newest_known: EVAL_SEAL_FORMAT_VERSION,
         });
     }
+    if seal.save_format_version != EVAL_SAVE_FORMAT_VERSION {
+        return Err(EngineError::InvalidConfig(format!(
+            "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION: seal.save_format_version {} != {EVAL_SAVE_FORMAT_VERSION}",
+            seal.save_format_version
+        )));
+    }
+    let canonical_seal_val = serde_json::to_value(&seal).map_err(|err| {
+        EngineError::InvalidConfig(format!("failed to re-serialize Eval seal: {err}"))
+    })?;
+    checkpoint_verify::check_unknown_and_skipped_fields("seal", "", &raw_seal, &canonical_seal_val)
+        .map_err(checkpoint_verify::CheckpointVerifyError::into_engine_error)?;
+
     if !is_lower_ascii_hex_len(&seal.game_id, 32) {
         return Err(EngineError::InvalidConfig(
             "INVALID_SEAL_GAME_ID: EvalHost seal requires a 32-hex game_id".to_owned(),
         ));
     }
-    if let Some(ref ckpt_sha) = seal.pre_act_checkpoint_sha256
-        && !is_lower_ascii_hex_len(ckpt_sha, 64)
+    if seal.turn != seal.engine.state().turn {
+        return Err(EngineError::InvalidConfig(format!(
+            "PAIR_BINDING_MISMATCH: seal.turn {} != seal.engine.state().turn {}",
+            seal.turn,
+            seal.engine.state().turn
+        )));
+    }
+    if let Some(ref ckpt_sha) = seal.pre_act_checkpoint_sha256 {
+        if !is_lower_ascii_hex_len(ckpt_sha, 64) {
+            return Err(EngineError::InvalidConfig(
+                "INVALID_ACT_RECORDED_CHECKPOINT_SHA256: pre_act_checkpoint_sha256 must be 64 lowercase hex characters"
+                    .to_owned(),
+            ));
+        }
+        if seal.save_sha256.is_some() {
+            return Err(EngineError::InvalidConfig(
+                "PAIR_BINDING_MISMATCH: act-recorded seal must omit save_sha256".to_owned(),
+            ));
+        }
+    } else if !seal
+        .save_sha256
+        .as_deref()
+        .is_some_and(|sha| is_lower_ascii_hex_len(sha, 64))
     {
         return Err(EngineError::InvalidConfig(
-            "INVALID_ACT_RECORDED_CHECKPOINT_SHA256: pre_act_checkpoint_sha256 must be 64 lowercase hex characters"
+            "PAIR_BINDING_MISMATCH: EvalHost save/seal pair requires 64-hex seal.save_sha256"
                 .to_owned(),
         ));
     }
@@ -1618,6 +1862,8 @@ mod tests {
     use crate::commit::DrandSchedule;
     use crate::contracts::{OfferProposal, OfferSide};
 
+    const TEST_ENGINE_COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
     fn must_ok<T, E: fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
         match res {
             Ok(v) => v,
@@ -1632,16 +1878,20 @@ mod tests {
         );
         let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([byte_tag + 1 + i; 32])).collect();
         must_ok(
-            EvalHost::from_explicit_setup(
-                tid,
-                4,
-                layout_seed,
-                [byte_tag + 9; 32],
-                &salts,
-                eval_seed,
-                77,
-            ),
-            "EvalHost::from_explicit_setup",
+            must_ok(
+                EvalHost::from_explicit_setup(
+                    tid,
+                    4,
+                    layout_seed,
+                    [byte_tag + 9; 32],
+                    &salts,
+                    eval_seed,
+                    77,
+                ),
+                "EvalHost::from_explicit_setup",
+            )
+            .with_engine_commit(TEST_ENGINE_COMMIT),
+            "with_engine_commit",
         )
     }
 
@@ -1760,31 +2010,35 @@ mod tests {
         let (save_bytes, seal_bytes) =
             must_ok(host.to_save_and_seal_bytes(), "to_save_and_seal_bytes");
 
-        // Save version mismatch
-        let mut bad_ver_save: serde_json::Value =
-            must_ok(serde_json::from_slice(&save_bytes), "parse save");
-        bad_ver_save["format_version"] = serde_json::json!(99);
-        let bad_ver_bytes = must_ok(serde_json::to_vec(&bad_ver_save), "ser bad save");
-        assert!(matches!(
-            EvalHost::from_save_and_seal_bytes(&bad_ver_bytes, &seal_bytes),
-            Err(EngineError::UnsupportedReplayVersion {
-                found: 99,
-                newest_known: 1
-            })
-        ));
+        // Save version mismatch (v1 and future v99)
+        for bad_ver in [1_u32, 99] {
+            let mut bad_ver_save: serde_json::Value =
+                must_ok(serde_json::from_slice(&save_bytes), "parse save");
+            bad_ver_save["format_version"] = serde_json::json!(bad_ver);
+            let bad_ver_bytes = must_ok(serde_json::to_vec(&bad_ver_save), "ser bad save");
+            assert_eq!(
+                EvalHost::from_save_and_seal_bytes(&bad_ver_bytes, &seal_bytes).err(),
+                Some(EngineError::UnsupportedReplayVersion {
+                    found: bad_ver,
+                    newest_known: 2
+                })
+            );
+        }
 
-        // Seal version mismatch
-        let mut bad_ver_seal: serde_json::Value =
-            must_ok(serde_json::from_slice(&seal_bytes), "parse seal");
-        bad_ver_seal["format_version"] = serde_json::json!(99);
-        let bad_seal_bytes = must_ok(serde_json::to_vec(&bad_ver_seal), "ser bad seal");
-        assert!(matches!(
-            EvalHost::from_save_and_seal_bytes(&save_bytes, &bad_seal_bytes),
-            Err(EngineError::UnsupportedReplayVersion {
-                found: 99,
-                newest_known: 1
-            })
-        ));
+        // Seal version mismatch (v1 and future v99)
+        for bad_ver in [1_u32, 99] {
+            let mut bad_ver_seal: serde_json::Value =
+                must_ok(serde_json::from_slice(&seal_bytes), "parse seal");
+            bad_ver_seal["format_version"] = serde_json::json!(bad_ver);
+            let bad_seal_bytes = must_ok(serde_json::to_vec(&bad_ver_seal), "ser bad seal");
+            assert_eq!(
+                EvalHost::from_save_and_seal_bytes(&save_bytes, &bad_seal_bytes).err(),
+                Some(EngineError::UnsupportedReplayVersion {
+                    found: bad_ver,
+                    newest_known: 2
+                })
+            );
+        }
 
         // Tampered seal VRF proof count
         let mut bad_vrf_seal: serde_json::Value =
@@ -2052,6 +2306,75 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&tmp);
+        Ok(())
+    }
+
+    #[test]
+    fn eval_host_internal_verify_round_trip_and_seal_guards()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut host = explicit_host(TableId(910_048), 4, 0x22);
+        let (save_bytes, seal_bytes) = host.to_save_and_seal_bytes()?;
+        checkpoint_verify::verify_written_pair_round_trip(&save_bytes, &seal_bytes)?;
+
+        let save_str = String::from_utf8(save_bytes.clone())?;
+        let seal_str = String::from_utf8(seal_bytes.clone())?;
+
+        let diff_game_save = save_str
+            .replacen(&host.game_id, &"f".repeat(32), 1)
+            .into_bytes();
+        assert!(matches!(
+            checkpoint_verify::verify_written_pair_round_trip(&diff_game_save, &seal_bytes),
+            Err(checkpoint_verify::CheckpointVerifyError::PairBindingMismatch { .. })
+        ));
+        assert!(matches!(
+            EvalHost::from_save_and_seal_bytes(&diff_game_save, &seal_bytes),
+            Err(EngineError::InvalidConfig(_))
+        ));
+
+        let wrong_sha_seal = {
+            let mut s = seal_str.clone();
+            if let Some(pos) = s.find("\"save_sha256\":\"") {
+                let start = pos + "\"save_sha256\":\"".len();
+                s.replace_range(start..start + 64, &"0".repeat(64));
+            }
+            s.into_bytes()
+        };
+        assert!(matches!(
+            checkpoint_verify::verify_written_pair_round_trip(&save_bytes, &wrong_sha_seal),
+            Err(checkpoint_verify::CheckpointVerifyError::PairBindingMismatch { .. })
+        ));
+
+        let ws_save = format!("{save_str} ").into_bytes();
+        let ws_sha = checkpoint_verify::compute_eval_save_v2_sha256_hex(&ws_save);
+        let ws_seal = {
+            let mut s = seal_str.clone();
+            if let Some(pos) = s.find("\"save_sha256\":\"") {
+                let start = pos + "\"save_sha256\":\"".len();
+                s.replace_range(start..start + 64, &ws_sha);
+            }
+            s.into_bytes()
+        };
+        assert!(matches!(
+            checkpoint_verify::verify_written_pair_round_trip(&ws_save, &ws_seal),
+            Err(checkpoint_verify::CheckpointVerifyError::NonCanonicalEncoding { .. })
+        ));
+        let ws_only_seal = format!("{seal_str} ").into_bytes();
+        assert!(matches!(
+            checkpoint_verify::verify_written_pair_round_trip(&save_bytes, &ws_only_seal),
+            Err(checkpoint_verify::CheckpointVerifyError::NonCanonicalEncoding { .. })
+        ));
+
+        // Non-numeric save.format_version in IncompatibleEngineOrSchemaVersion maps to InvalidConfig.
+        let non_num_err =
+            checkpoint_verify::CheckpointVerifyError::IncompatibleEngineOrSchemaVersion {
+                field: "save.format_version".to_owned(),
+                found: "\"bad\"".to_owned(),
+                expected: "2".to_owned(),
+            }
+            .into_engine_error();
+        assert!(matches!(non_num_err, EngineError::InvalidConfig(_)));
+
+        let _ = &mut host;
         Ok(())
     }
 }

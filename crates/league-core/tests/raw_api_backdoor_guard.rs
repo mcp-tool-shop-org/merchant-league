@@ -1383,12 +1383,17 @@ const ALLOWED_CLUB_HOST_PUB_FNS: [&str; 29] = [
     "wipe_seal_file",
 ];
 
-const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 43] = [
+const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 50] = [
     "new",
     "from_standard_setup",
     "from_standard_setup_with_model_seats",
     "from_explicit_setup",
     "game_id",
+    "set_engine_commit",
+    "with_engine_commit",
+    "engine_commit",
+    "canonical_state_digest_hex",
+    "last_live_state_digest_hex",
     "layout_seed",
     "bot_tie_seed",
     "table_id",
@@ -1423,6 +1428,8 @@ const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 43] = [
     "write_act_recorded_seal",
     "read_recorded_act_submissions",
     "apply_recorded_act_submissions_from_seal",
+    "fork_from_verified_checkpoint_bytes",
+    "verify_checkpoint_causal_raw",
     "fork_from_checkpoint",
     "fork_duplicate_from_turn_0",
     "from_explicit_entropy",
@@ -7676,7 +7683,10 @@ fn scan_league_core_src_tree_with_surface(
         if rel == "bot.rs" || rel.starts_with("bot/") {
             bot_seat_files.push((rel.clone(), source.clone()));
         } else if (rel.starts_with("club/") && rel != "club/host.rs" && rel != "club/mod.rs")
-            || (rel.starts_with("eval/") && rel != "eval/host.rs" && rel != "eval/mod.rs")
+            || (rel.starts_with("eval/")
+                && rel != "eval/host.rs"
+                && rel != "eval/mod.rs"
+                && rel != "eval/checkpoint_verify.rs")
         {
             club_seat_files.push((rel.clone(), source));
         }
@@ -9494,6 +9504,7 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
         "contracts.rs",
         "engine.rs",
         "error.rs",
+        "eval/checkpoint_verify.rs",
         "eval/host.rs",
         "eval/mod.rs",
         "lib.rs",

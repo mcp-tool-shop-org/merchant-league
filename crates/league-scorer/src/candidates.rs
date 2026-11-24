@@ -1,13 +1,17 @@
 //! Arm-independent candidate generators and blind request builder (`§3.1` sources 1 & 4, `§5.2`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
 
+use league_core::eval::host::checkpoint_verify::{
+    CheckpointVerifyError, verify_and_construct_pre_act_bytes,
+};
 use league_core::{
     AssetId, BPS_SCALE, CharterBidOrder, CharterRole, CheckStatus, ClubBot, ConverterRunOrder,
-    CouncilVoteBallot, EscrowStatus, EvalActSubmission, MarketAction, OfferProposal, OfferSide,
-    PrivateMandate, ProjectDeliveryOrder, SealedOrderBundle, Seat, SeatObservation, TurnPhase,
-    Units, checked_ceil_units_parity, mul_units_parity, town_import_cost_cred,
+    CouncilVoteBallot, EscrowStatus, EvalActSubmission, EvalHost, MarketAction, OfferProposal,
+    OfferSide, PrivateMandate, ProjectDeliveryOrder, SealedOrderBundle, Seat, SeatObservation,
+    TurnPhase, Units, checked_ceil_units_parity, mul_units_parity, town_import_cost_cred,
 };
 use league_seat_types::UNIT_SCALE;
 
@@ -22,7 +26,8 @@ use crate::types::{
     SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER, SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES,
     SYNTH_PROJECT_RANK_BY_EQUITY, SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS,
     SYNTH_QUOTE_MIN_UNITS, SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScorerConfig,
-    TalkExtractionCounts, candidate_id_for_submission, is_valid_sha256_hex, validate_state_id,
+    TalkExtractionCounts, VerifiedCheckpointsManifest, candidate_id_for_submission,
+    compute_pre_act_pair_sha256_hex, is_valid_sha256_hex, validate_state_id,
 };
 
 /// Deduplicates `candidates` by canonical `candidate_id` (`sha256_hex` of compact submission JSON),
@@ -970,6 +975,131 @@ pub fn build_arm_independent_request(
         expected_seal_sha256,
         None,
     )?;
+    build_arm_independent_request_from_host(
+        &host,
+        &pair_sha,
+        expected_save_sha256,
+        expected_seal_sha256,
+        focal_seat,
+        state_id,
+        config,
+        scorer_seed,
+    )
+}
+
+/// Gate 3 verified counterpart to [`build_arm_independent_request`] enforcing
+/// `VerifiedCheckpointsManifest` build-ID, outer file SHA-256, and tip canonical state digest.
+#[allow(clippy::too_many_arguments)]
+pub fn build_arm_independent_request_verified(
+    save_path: &Path,
+    seal_path: &Path,
+    expected_save_sha256: &str,
+    expected_seal_sha256: &str,
+    focal_seat: u8,
+    state_id: &str,
+    config: &ScorerConfig,
+    scorer_seed: u64,
+    verified_manifest: &VerifiedCheckpointsManifest,
+    scorer_build_id: &str,
+) -> Result<BlindScoringRequest, ScorerError> {
+    config.validate()?;
+    validate_state_id(state_id)?;
+    if !is_valid_sha256_hex(expected_save_sha256) {
+        return Err(ScorerError::InvalidHexDigest {
+            field: "save_sha256",
+            value: expected_save_sha256.to_owned(),
+        });
+    }
+    if !is_valid_sha256_hex(expected_seal_sha256) {
+        return Err(ScorerError::InvalidHexDigest {
+            field: "seal_sha256",
+            value: expected_seal_sha256.to_owned(),
+        });
+    }
+    if focal_seat >= EVAL_TABLE_SEAT_COUNT {
+        return Err(ScorerError::InvalidFocalSeat {
+            focal_seat,
+            seat_count: EVAL_TABLE_SEAT_COUNT,
+        });
+    }
+    verified_manifest.validate_for_scorer(scorer_build_id)?;
+
+    let save_bytes = fs::read(save_path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            ScorerError::CheckpointNotFound(format!(
+                "missing checkpoint save for `{expected_save_sha256}`"
+            ))
+        } else {
+            ScorerError::Io(format!("read checkpoint save: {err}"))
+        }
+    })?;
+    let seal_bytes = fs::read(seal_path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            ScorerError::CheckpointNotFound(format!(
+                "missing checkpoint seal for `{expected_seal_sha256}`"
+            ))
+        } else {
+            ScorerError::Io(format!("read checkpoint seal: {err}"))
+        }
+    })?;
+    let pair_sha = compute_pre_act_pair_sha256_hex(&save_bytes, &seal_bytes);
+    let entry = verified_manifest.find_entry(&pair_sha).ok_or_else(|| {
+        ScorerError::CheckpointVerify(CheckpointVerifyError::OuterFileHashMismatch {
+            file: "pair".to_owned(),
+            expected: "verified_checkpoints entry".to_owned(),
+            actual: pair_sha.clone(),
+        })
+    })?;
+    if entry.pre_act_save_sha256 != expected_save_sha256 {
+        return Err(ScorerError::CheckpointVerify(
+            CheckpointVerifyError::OuterFileHashMismatch {
+                file: "save".to_owned(),
+                expected: entry.pre_act_save_sha256.clone(),
+                actual: expected_save_sha256.to_owned(),
+            },
+        ));
+    }
+    if entry.pre_act_seal_sha256 != expected_seal_sha256 {
+        return Err(ScorerError::CheckpointVerify(
+            CheckpointVerifyError::OuterFileHashMismatch {
+                file: "seal".to_owned(),
+                expected: entry.pre_act_seal_sha256.clone(),
+                actual: expected_seal_sha256.to_owned(),
+            },
+        ));
+    }
+
+    let host = verify_and_construct_pre_act_bytes(
+        &save_bytes,
+        &seal_bytes,
+        Some(&entry.pre_act_save_sha256),
+        Some(&entry.pre_act_seal_sha256),
+        Some(&entry.pre_act_pair_sha256),
+        Some((entry.turn, entry.seat_count, &entry.expected_state_digest)),
+    )?;
+    build_arm_independent_request_from_host(
+        &host,
+        &pair_sha,
+        expected_save_sha256,
+        expected_seal_sha256,
+        focal_seat,
+        state_id,
+        config,
+        scorer_seed,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_arm_independent_request_from_host(
+    host: &EvalHost,
+    pair_sha: &str,
+    expected_save_sha256: &str,
+    expected_seal_sha256: &str,
+    focal_seat: u8,
+    state_id: &str,
+    config: &ScorerConfig,
+    scorer_seed: u64,
+) -> Result<BlindScoringRequest, ScorerError> {
     let seat_count = host.seat_count();
     if seat_count != EVAL_TABLE_SEAT_COUNT {
         return Err(ScorerError::InvalidCheckpointState(format!(
@@ -988,7 +1118,7 @@ pub fn build_arm_independent_request(
     let req = BlindScoringRequest {
         candidates,
         focal_seat,
-        pre_act_pair_sha256: pair_sha,
+        pre_act_pair_sha256: pair_sha.to_owned(),
         pre_act_save_sha256: expected_save_sha256.to_owned(),
         pre_act_seal_sha256: expected_seal_sha256.to_owned(),
         schema_version: BLIND_SCORING_SCHEMA_VERSION,

@@ -1868,7 +1868,7 @@ pub fn run_play_with_transport_and_git_sha(
             .map_err(|e| EvalError::Io(format!("read {}: {e}", setup_path.display())))?;
         let existing_setup: EvalSetupFile = serde_json::from_str(&raw_setup)
             .map_err(|e| EvalError::Io(format!("parse {}: {e}", setup_path.display())))?;
-        let host = EvalHost::read_game_save_and_seal(&opts.game_dir, TableId(opts.table_id))?;
+        let mut host = EvalHost::read_game_save_and_seal(&opts.game_dir, TableId(opts.table_id))?;
         if existing_setup.game_id != host.game_id() {
             return Err(EvalError::IncompatibleEvalSetup(format!(
                 "setup.json game_id '{}' does not match seal game_id '{}'",
@@ -1889,20 +1889,24 @@ pub fn run_play_with_transport_and_git_sha(
                     .to_owned(),
             ));
         }
+        host.set_engine_commit(&crate_git_sha)?;
         host
     } else if dir_has_eval_save_or_seal(&opts.game_dir)? {
-        let host = EvalHost::fork_duplicate_from_game_dir(&opts.game_dir, TableId(opts.table_id))?;
+        let mut host =
+            EvalHost::fork_duplicate_from_game_dir(&opts.game_dir, TableId(opts.table_id))?;
+        host.set_engine_commit(&crate_git_sha)?;
         persist_eval_game_state(&host, &opts.game_dir)?;
         host
     } else {
         let bot_tie_seed = draw_os_bot_tie_seed()?;
-        let host = EvalHost::from_standard_setup_with_model_seats(
+        let mut host = EvalHost::from_standard_setup_with_model_seats(
             TableId(opts.table_id),
             4,
             opts.seed,
             bot_tie_seed,
             &model_seats,
         )?;
+        host.set_engine_commit(&crate_git_sha)?;
         persist_eval_game_state(&host, &opts.game_dir)?;
         host
     };
