@@ -166,7 +166,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-scorer",
-      "qualifyingSourceCommits": 6,
+      "qualifyingSourceCommits": 7,
       "rebaseline": null
     },
     {
@@ -330,13 +330,13 @@
         "path": ".polyglot-pins.json"
       },
       {
-        "commits": 92,
-        "lines": 636,
+        "commits": 93,
+        "lines": 644,
         "path": "CHANGELOG.md"
       },
       {
-        "commits": 15,
-        "lines": 169,
+        "commits": 16,
+        "lines": 171,
         "path": "CLAUDE.md"
       },
       {
@@ -410,8 +410,8 @@
         "path": "SHIP_GATE.md"
       },
       {
-        "commits": 84,
-        "lines": 1829,
+        "commits": 85,
+        "lines": 1848,
         "path": "atlas/README.md"
       },
       {
@@ -420,18 +420,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 84,
-        "lines": 6832,
+        "commits": 85,
+        "lines": 6901,
         "path": "atlas/page.json"
       },
       {
-        "commits": 84,
-        "lines": 23530,
+        "commits": 85,
+        "lines": 23808,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 84,
-        "lines": 93311,
+        "commits": 85,
+        "lines": 93862,
         "path": "atlas/structure.json"
       },
       {
@@ -1090,8 +1090,8 @@
         "path": "crates/league-scorer/Cargo.toml"
       },
       {
-        "commits": 5,
-        "lines": 160,
+        "commits": 6,
+        "lines": 165,
         "path": "crates/league-scorer/README.md"
       },
       {
@@ -1105,13 +1105,13 @@
         "path": "crates/league-scorer/src/candidates.rs"
       },
       {
-        "commits": 5,
-        "lines": 941,
+        "commits": 6,
+        "lines": 974,
         "path": "crates/league-scorer/src/cli.rs"
       },
       {
-        "commits": 5,
-        "lines": 471,
+        "commits": 6,
+        "lines": 473,
         "path": "crates/league-scorer/src/error.rs"
       },
       {
@@ -1130,8 +1130,8 @@
         "path": "crates/league-scorer/src/postures.rs"
       },
       {
-        "commits": 5,
-        "lines": 954,
+        "commits": 6,
+        "lines": 956,
         "path": "crates/league-scorer/src/rollout.rs"
       },
       {
@@ -1150,8 +1150,8 @@
         "path": "crates/league-scorer/src/types.rs"
       },
       {
-        "commits": 2,
-        "lines": 1187,
+        "commits": 3,
+        "lines": 1391,
         "path": "crates/league-scorer/tests/checkpoint_gate3.rs"
       },
       {
@@ -1160,8 +1160,8 @@
         "path": "crates/league-scorer/tests/scorer_tests.rs"
       },
       {
-        "commits": 4,
-        "lines": 1959,
+        "commits": 5,
+        "lines": 2307,
         "path": "crates/league-scorer/tests/timing_bench.rs"
       },
       {
@@ -1325,23 +1325,23 @@
         "path": "crates/league-tui/src/main.rs"
       },
       {
-        "commits": 2,
-        "lines": 294,
+        "commits": 3,
+        "lines": 296,
         "path": "docs/checkpoint-trust.md"
       },
       {
-        "commits": 19,
-        "lines": 595,
+        "commits": 20,
+        "lines": 607,
         "path": "docs/club-mode-design.md"
       },
       {
-        "commits": 7,
-        "lines": 1340,
+        "commits": 8,
+        "lines": 1352,
         "path": "docs/decision-scorer.md"
       },
       {
-        "commits": 15,
-        "lines": 616,
+        "commits": 16,
+        "lines": 618,
         "path": "docs/design-v2.md"
       },
       {
@@ -1370,8 +1370,8 @@
         "path": "docs/paper-test/brief.md"
       },
       {
-        "commits": 2,
-        "lines": 480,
+        "commits": 3,
+        "lines": 482,
         "path": "docs/paper-test/design-ruling-1.md"
       },
       {
@@ -3650,38 +3650,38 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-24T11:47:23.573Z",
+  "generatedAt": "2026-11-24T13:11:57.491Z",
   "generatedFrom": {
-    "commit": "9ca990b83e51651df8b4a628b93b4b0a89b5f509"
+    "commit": "70422d047d71d656fceb1a5407c22a549ff83bc3"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
       "b": "atlas/README.md",
-      "either": 88,
+      "either": 90,
       "shared": 54,
-      "strength": 0.613636
+      "strength": 0.6
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/page.json",
-      "either": 88,
+      "either": 90,
       "shared": 54,
-      "strength": 0.613636
+      "strength": 0.6
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/statistics.json",
-      "either": 88,
+      "either": 90,
       "shared": 54,
-      "strength": 0.613636
+      "strength": 0.6
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/structure.json",
-      "either": 88,
+      "either": 90,
       "shared": 54,
-      "strength": 0.613636
+      "strength": 0.6
     },
     {
       "a": "README.es.md",
@@ -3833,43 +3833,43 @@
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 66,
-      "shared": 66,
+      "either": 67,
+      "shared": 67,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 66,
-      "shared": 66,
+      "either": 67,
+      "shared": 67,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 66,
-      "shared": 66,
+      "either": 67,
+      "shared": 67,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 66,
-      "shared": 66,
+      "either": 67,
+      "shared": 67,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 66,
-      "shared": 66,
+      "either": 67,
+      "shared": 67,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 66,
-      "shared": 66,
+      "either": 67,
+      "shared": 67,
       "strength": 1
     },
     {
@@ -4225,114 +4225,135 @@
     {
       "a": "crates/league-scorer/README.md",
       "b": "crates/league-scorer/src/cli.rs",
-      "either": 5,
-      "shared": 5,
+      "either": 6,
+      "shared": 6,
       "strength": 1
     },
     {
       "a": "crates/league-scorer/README.md",
       "b": "crates/league-scorer/src/error.rs",
-      "either": 5,
-      "shared": 5,
+      "either": 6,
+      "shared": 6,
       "strength": 1
     },
     {
       "a": "crates/league-scorer/README.md",
       "b": "crates/league-scorer/src/lib.rs",
-      "either": 5,
+      "either": 6,
       "shared": 5,
-      "strength": 1
+      "strength": 0.833333
     },
     {
       "a": "crates/league-scorer/README.md",
       "b": "crates/league-scorer/src/rollout.rs",
-      "either": 5,
-      "shared": 5,
+      "either": 6,
+      "shared": 6,
       "strength": 1
     },
     {
       "a": "crates/league-scorer/README.md",
       "b": "crates/league-scorer/tests/scorer_tests.rs",
-      "either": 6,
+      "either": 7,
       "shared": 4,
-      "strength": 0.666667
+      "strength": 0.571429
+    },
+    {
+      "a": "crates/league-scorer/README.md",
+      "b": "crates/league-scorer/tests/timing_bench.rs",
+      "either": 6,
+      "shared": 5,
+      "strength": 0.833333
     },
     {
       "a": "crates/league-scorer/README.md",
       "b": "docs/decision-scorer.md",
-      "either": 7,
-      "shared": 5,
-      "strength": 0.714286
+      "either": 8,
+      "shared": 6,
+      "strength": 0.75
     },
     {
       "a": "crates/league-scorer/src/cli.rs",
       "b": "crates/league-scorer/src/error.rs",
-      "either": 5,
-      "shared": 5,
+      "either": 6,
+      "shared": 6,
       "strength": 1
     },
     {
       "a": "crates/league-scorer/src/cli.rs",
       "b": "crates/league-scorer/src/lib.rs",
-      "either": 5,
+      "either": 6,
       "shared": 5,
-      "strength": 1
+      "strength": 0.833333
     },
     {
       "a": "crates/league-scorer/src/cli.rs",
       "b": "crates/league-scorer/src/rollout.rs",
-      "either": 5,
-      "shared": 5,
+      "either": 6,
+      "shared": 6,
       "strength": 1
     },
     {
       "a": "crates/league-scorer/src/cli.rs",
       "b": "crates/league-scorer/tests/scorer_tests.rs",
-      "either": 6,
+      "either": 7,
       "shared": 4,
-      "strength": 0.666667
+      "strength": 0.571429
+    },
+    {
+      "a": "crates/league-scorer/src/cli.rs",
+      "b": "crates/league-scorer/tests/timing_bench.rs",
+      "either": 6,
+      "shared": 5,
+      "strength": 0.833333
     },
     {
       "a": "crates/league-scorer/src/cli.rs",
       "b": "docs/decision-scorer.md",
-      "either": 7,
-      "shared": 5,
-      "strength": 0.714286
+      "either": 8,
+      "shared": 6,
+      "strength": 0.75
     },
     {
       "a": "crates/league-scorer/src/error.rs",
       "b": "crates/league-scorer/src/lib.rs",
-      "either": 5,
+      "either": 6,
       "shared": 5,
-      "strength": 1
+      "strength": 0.833333
     },
     {
       "a": "crates/league-scorer/src/error.rs",
       "b": "crates/league-scorer/src/rollout.rs",
-      "either": 5,
-      "shared": 5,
+      "either": 6,
+      "shared": 6,
       "strength": 1
     },
     {
       "a": "crates/league-scorer/src/error.rs",
       "b": "crates/league-scorer/tests/scorer_tests.rs",
-      "either": 6,
+      "either": 7,
       "shared": 4,
-      "strength": 0.666667
+      "strength": 0.571429
+    },
+    {
+      "a": "crates/league-scorer/src/error.rs",
+      "b": "crates/league-scorer/tests/timing_bench.rs",
+      "either": 6,
+      "shared": 5,
+      "strength": 0.833333
     },
     {
       "a": "crates/league-scorer/src/error.rs",
       "b": "docs/decision-scorer.md",
-      "either": 7,
-      "shared": 5,
-      "strength": 0.714286
+      "either": 8,
+      "shared": 6,
+      "strength": 0.75
     },
     {
       "a": "crates/league-scorer/src/lib.rs",
       "b": "crates/league-scorer/src/rollout.rs",
-      "either": 5,
+      "either": 6,
       "shared": 5,
-      "strength": 1
+      "strength": 0.833333
     },
     {
       "a": "crates/league-scorer/src/lib.rs",
@@ -4343,31 +4364,52 @@
     },
     {
       "a": "crates/league-scorer/src/lib.rs",
-      "b": "docs/decision-scorer.md",
-      "either": 7,
-      "shared": 5,
-      "strength": 0.714286
-    },
-    {
-      "a": "crates/league-scorer/src/rollout.rs",
-      "b": "crates/league-scorer/tests/scorer_tests.rs",
+      "b": "crates/league-scorer/tests/timing_bench.rs",
       "either": 6,
       "shared": 4,
       "strength": 0.666667
     },
     {
+      "a": "crates/league-scorer/src/lib.rs",
+      "b": "docs/decision-scorer.md",
+      "either": 8,
+      "shared": 5,
+      "strength": 0.625
+    },
+    {
+      "a": "crates/league-scorer/src/rollout.rs",
+      "b": "crates/league-scorer/tests/scorer_tests.rs",
+      "either": 7,
+      "shared": 4,
+      "strength": 0.571429
+    },
+    {
+      "a": "crates/league-scorer/src/rollout.rs",
+      "b": "crates/league-scorer/tests/timing_bench.rs",
+      "either": 6,
+      "shared": 5,
+      "strength": 0.833333
+    },
+    {
       "a": "crates/league-scorer/src/rollout.rs",
       "b": "docs/decision-scorer.md",
-      "either": 7,
-      "shared": 5,
-      "strength": 0.714286
+      "either": 8,
+      "shared": 6,
+      "strength": 0.75
     },
     {
       "a": "crates/league-scorer/tests/scorer_tests.rs",
       "b": "docs/decision-scorer.md",
-      "either": 7,
+      "either": 8,
       "shared": 5,
-      "strength": 0.714286
+      "strength": 0.625
+    },
+    {
+      "a": "crates/league-scorer/tests/timing_bench.rs",
+      "b": "docs/decision-scorer.md",
+      "either": 8,
+      "shared": 5,
+      "strength": 0.625
     },
     {
       "a": "crates/league-tui/src/host.rs",
@@ -4401,16 +4443,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-24T06:47:16-05:00",
+    "headDate": "2026-11-24T08:11:37-05:00",
     "inScopeFiles": 663,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 105,
+    "qualifyingCommits": 107,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-28T11:47:16.000Z",
+    "since": "2026-05-28T13:11:37.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

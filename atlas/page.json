@@ -102,22 +102,22 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 10,
+      "added": 0,
+      "changed": 13,
       "moved": 0,
-      "parts": 4,
+      "parts": 3,
       "removed": 0
     },
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-24; 1 file added and 10 changed content.",
+        "sentence": "Nothing structural changed since 2026-11-24; 13 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "c11a2263c0e09112ba8c233ef687f9c14bbfcf75",
-      "generatedAt": "2026-11-24T09:53:20.292Z"
+      "commit": "9ca990b83e51651df8b4a628b93b4b0a89b5f509",
+      "generatedAt": "2026-11-24T11:47:23.573Z"
     },
     "unchanged": true
   },
@@ -155,7 +155,7 @@
     {
       "a": "crates/league-scorer/src/cli.rs",
       "b": "crates/league-scorer/src/error.rs",
-      "either": 5,
+      "either": 6,
       "partLabels": [
         "league-scorer",
         "league-scorer"
@@ -165,27 +165,12 @@
         "league-scorer"
       ],
       "relation": "inside",
-      "shared": 5
-    },
-    {
-      "a": "crates/league-scorer/src/cli.rs",
-      "b": "crates/league-scorer/src/lib.rs",
-      "either": 5,
-      "partLabels": [
-        "league-scorer",
-        "league-scorer"
-      ],
-      "parts": [
-        "league-scorer",
-        "league-scorer"
-      ],
-      "relation": "inside",
-      "shared": 5
+      "shared": 6
     },
     {
       "a": "crates/league-scorer/src/cli.rs",
       "b": "crates/league-scorer/src/rollout.rs",
-      "either": 5,
+      "either": 6,
       "partLabels": [
         "league-scorer",
         "league-scorer"
@@ -195,7 +180,22 @@
         "league-scorer"
       ],
       "relation": "inside",
-      "shared": 5
+      "shared": 6
+    },
+    {
+      "a": "crates/league-scorer/src/error.rs",
+      "b": "crates/league-scorer/src/rollout.rs",
+      "either": 6,
+      "partLabels": [
+        "league-scorer",
+        "league-scorer"
+      ],
+      "parts": [
+        "league-scorer",
+        "league-scorer"
+      ],
+      "relation": "inside",
+      "shared": 6
     }
   ],
   "changesTogetherNote": [
@@ -203,7 +203,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "9ca990b83e51651df8b4a628b93b4b0a89b5f509",
+  "commit": "70422d047d71d656fceb1a5407c22a549ff83bc3",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (416 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -747,7 +747,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-24T11:47:23.573Z",
+  "generatedAt": "2026-11-24T13:11:57.491Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "53 writes and 55 reads use paths built at run time and are not named here.",
