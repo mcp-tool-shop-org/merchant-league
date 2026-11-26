@@ -150,6 +150,8 @@ const ALLOWED_LEAGUE_EVAL_CORE_ITEMS: &[&str] = &[
     "EvalActSubmission",
     "EvalSeatApplyReport",
     "ClubBot",
+    "PolicyChaChaRng",
+    "preview_seat_bundle",
     "PublicSweepReceipt",
     "SeatObservation",
     "PublicPreviewState",
@@ -169,7 +171,7 @@ const ALLOWED_LEAGUE_EVAL_CORE_ITEMS: &[&str] = &[
     "ToStructuredError",
     "scrub_secret_text",
 ];
-const _: () = assert!(ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() == 22);
+const _: () = assert!(ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() == 24);
 
 const FORBIDDEN_EVAL_CORE_SYMBOLS: [&str; 21] = [
     "TurnEngine",
@@ -396,9 +398,9 @@ fn check_league_eval_core_isolation(files: &[(String, String)]) -> Result<(), St
             i += 1;
         }
     }
-    if ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() != 22 {
+    if ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() != 24 {
         return Err(format!(
-            "ALLOWED_LEAGUE_EVAL_CORE_ITEMS must contain exactly the 22 used core items, found {}",
+            "ALLOWED_LEAGUE_EVAL_CORE_ITEMS must contain exactly the 24 used core items, found {}",
             ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len()
         ));
     }
@@ -605,6 +607,7 @@ const ALLOWED_SEAT_TYPES: &[&str] = &[
     "Bps",
     "ClubBot",
     "ClubBotDecision",
+    "PolicyChaChaRng",
     "EngineError",
     // `league-error` & `league-gen` display-safe types
     "StructuredError",
@@ -1443,7 +1446,7 @@ const ALLOWED_OBSERVATION_PUB_FNS: [&str; 4] = [
     "preview_seat_bundle",
 ];
 
-const PRODUCTION_ALLOWED_REEXPORTS: [&str; 264] = [
+const PRODUCTION_ALLOWED_REEXPORTS: [&str; 265] = [
     // bot (landed in Part B)
     "bot::ClubBot",
     "bot::ClubBotDecision",
@@ -1485,6 +1488,7 @@ const PRODUCTION_ALLOWED_REEXPORTS: [&str; 264] = [
     "commit::MandateKind",
     "commit::MandateReveal",
     "commit::OrderReveal",
+    "commit::PolicyChaChaRng",
     "commit::PreimageSecret",
     "commit::PrivateMandate",
     "commit::ProjectDeliveryOrder",

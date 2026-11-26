@@ -7,7 +7,8 @@ use league_core::SeatObservation;
 use league_relay::{NegotiationInputs, Round, UntrustedWhisper};
 
 use crate::error::EvalError;
-use crate::wording::eval_wording_slot;
+use crate::records::CommunicationMode;
+use crate::wording::{eval_silent_wording_slot, eval_wording_slot};
 
 /// Deterministic pretty JSON serializer label recorded in tests and docs (`1.6`).
 pub const EVAL_SEAT_VIEW_SERIALIZER_NAME: &str = "serde_json::to_string_pretty";
@@ -30,6 +31,29 @@ pub fn render_seat_view_markdown(round: Round, obs: &SeatObservation) -> Result<
     let state_json = serde_json::to_string_pretty(obs)
         .map_err(|e| EvalError::Io(format!("failed to serialize SeatObservation: {e}")))?;
     Ok(format!("{instruction}\n\n{intro}\n\n{state_json}\n"))
+}
+
+/// Render `<game-dir>/to-seat/day-DD-<round>-<Guild>.md` according to [`CommunicationMode`].
+pub fn render_seat_view_markdown_for_communication(
+    round: Round,
+    communication: CommunicationMode,
+    obs: &SeatObservation,
+) -> Result<String, EvalError> {
+    match communication {
+        CommunicationMode::Talk => render_seat_view_markdown(round, obs),
+        CommunicationMode::Silent => {
+            if round != Round::Act {
+                return Err(EvalError::SchemaValidation(
+                    "Round::Talk seat view is forbidden in the silent-market condition".to_owned(),
+                ));
+            }
+            let instruction = eval_silent_wording_slot("eval_silent_act_instruction");
+            let intro = eval_silent_wording_slot("eval_state_intro");
+            let state_json = serde_json::to_string_pretty(obs)
+                .map_err(|e| EvalError::Io(format!("failed to serialize SeatObservation: {e}")))?;
+            Ok(format!("{instruction}\n\n{intro}\n\n{state_json}\n"))
+        }
+    }
 }
 
 /// Render `<game-dir>/to-seat/day-DD-act-<Guild>.preview-state.json` using the exact canonical

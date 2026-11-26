@@ -4,3 +4,6 @@
 crates/league-relay/tests/fixtures/play_mode_golden/** -text
 crates/league-relay/tests/fixtures/play_mode_on_golden/** -text
 crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md -text
+crates/league-eval/wrappers/v2_seat_brief_silent_2026_11_26_r1.md -text
+crates/league-eval/tests/fixtures/d902d04_talk_turn0/** -text
+crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/** -text

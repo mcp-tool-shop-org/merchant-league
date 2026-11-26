@@ -17,32 +17,40 @@ use league_relay::{
     ApiKey, CallLogEntry, LocalReasoningBudgetKey, MemoryMode, PreviewToolMode, RawHttpResponse,
     ReasoningEffort, Round, SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord,
     SeatBackend, SeatFile, SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError,
-    TurnConfig, TurnSummary, UntrustedWhisper, parse_preview_tool_arguments, run_turn, sha256_hex,
+    TurnConfig, TurnSummary, UntrustedWhisper, build_silent_control_turn_orders_tool_definition,
+    build_silent_preview_turn_orders_tool_definition, canonical_tool_definition_sha256,
+    parse_preview_tool_arguments, parse_silent_preview_tool_arguments, run_turn, sha256_hex,
 };
 use serde::Serialize;
 
 use crate::EvalError;
+use crate::baselines::{
+    EvalFileSeatModel, decide_scripted_baseline_act, decide_scripted_baseline_talk,
+};
 use crate::records::{
-    BranchArmOutcome, BranchManifest, BranchSummary, DecisionTokenTopLogprobs,
+    BranchArmOutcome, BranchManifest, BranchSummary, CommunicationMode, DecisionTokenTopLogprobs,
     DecisionTopLogprobEntry, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
     EvalSetupFile, FailedRelayAttempt, PASS_B_LIMIT_STATEMENT, RefusalCodeCounts,
     RefusedBundleRecord, TurnRegentAuditRecord, WrongPartCounter, count_bundle_legs,
     summarize_branch_outcomes,
 };
 use crate::reply::{
-    ReplyRefusalCode, classify_wrong_round_from_raw_text, parse_eval_act_reply,
+    ReplyRefusalCode, classify_wrong_round_from_raw_text, parse_eval_act_reply_for_communication,
     parse_eval_talk_reply,
 };
-use crate::schema::build_eval_response_format_config;
+use crate::schema::{build_eval_response_format_config, build_eval_silent_response_format_config};
 use crate::select::{SelectionList, expand_home_path};
 use crate::serving::{
     CrateGitShaSource, EngineKind, ServingManifestRecord, WordingArmDigests,
     capture_serving_env_snapshot, load_and_validate_serving_manifest, resolve_crate_git_sha_from,
 };
 use crate::view::{
-    build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,
+    build_act_negotiation_inputs, render_preview_state_json,
+    render_seat_view_markdown_for_communication,
 };
-use crate::wording::{EVAL_REPLY_WORDING_ARM, resolve_pinned_wrapper};
+use crate::wording::{
+    EVAL_REPLY_WORDING_ARM, EVAL_SILENT_REPLY_WORDING_ARM, resolve_pinned_wrapper_for_communication,
+};
 
 /// Inert mock transport for all-`ClubBot` offline runs with zero HTTP calls.
 #[derive(Debug, Default, Clone, Copy)]
@@ -196,9 +204,17 @@ pub(crate) fn write_text_atomic(path: &Path, text: &str) -> Result<(), EvalError
     Ok(())
 }
 
-/// Validate Evaluation Mode seat count (`D6` = 4 seats), `"file"` backend policy (`1.7`, Test 6),
+/// Validate Evaluation Mode seat count (`D6` = 4 seats), `"file"` backend policy (`1.7`, `D8`),
 /// and ban `reasoning.exclude_from_transcript: true` (`A1.3`).
 pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> {
+    validate_eval_seats_for_communication(seats_file, CommunicationMode::Talk)
+}
+
+/// Validate that `seats.json` has 4 seats and that every `"file"` policy supports `communication`.
+pub fn validate_eval_seats_for_communication(
+    seats_file: &SeatFile,
+    communication: CommunicationMode,
+) -> Result<(), EvalError> {
     if seats_file.seats.len() != 4 {
         return Err(EvalError::InvalidSeatCount {
             actual: seats_file.seats.len(),
@@ -207,10 +223,13 @@ pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> 
     for seat in &seats_file.seats {
         let (exclude_from_transcript, unsupported_backend) = match &seat.backend {
             SeatBackend::File { model } => {
-                if model.as_deref() != Some("ClubBot") {
-                    return Err(EvalError::UnsupportedFileSeatModel {
+                let policy = EvalFileSeatModel::parse_for_seat(&seat.guild, model.as_deref())?;
+                if policy == EvalFileSeatModel::TitForTat
+                    && communication == CommunicationMode::Silent
+                {
+                    return Err(EvalError::BaselineRequiresTalk {
                         guild: seat.guild.clone(),
-                        model: model.clone(),
+                        model: policy.as_str().to_owned(),
                     });
                 }
                 (false, None)
@@ -619,6 +638,7 @@ fn collect_http_reply_telemetry(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_round_attempt_diagnostics(
     run_root: &Path,
     calls_path: &Path,
@@ -627,6 +647,7 @@ fn read_round_attempt_diagnostics(
     round: Round,
     seat_index: u8,
     guild: &str,
+    communication: CommunicationMode,
 ) -> Result<RoundAttemptDiagnostics, EvalError> {
     if !calls_path.exists() {
         return Ok(RoundAttemptDiagnostics::default());
@@ -758,7 +779,15 @@ fn read_round_attempt_diagnostics(
                 if is_wire_error_code(wire, "MALFORMED_TOOL_CALL") {
                     continue;
                 }
-                if let Some(parsed_req) = parse_preview_tool_arguments(&call.arguments, seat_index)
+                let parsed_req = match communication {
+                    CommunicationMode::Talk => {
+                        parse_preview_tool_arguments(&call.arguments, seat_index)
+                    }
+                    CommunicationMode::Silent => {
+                        parse_silent_preview_tool_arguments(&call.arguments, seat_index)
+                    }
+                };
+                if let Some(parsed_req) = parsed_req
                     && let Ok(bundle_bytes) = serde_json::to_vec(&parsed_req.bundle)
                 {
                     out.intermediate_bundle_sha256s
@@ -792,6 +821,7 @@ fn read_round_attempt_diagnostics(
 
 #[allow(clippy::too_many_arguments)]
 fn build_no_reply_record(
+    communication: CommunicationMode,
     game_id: &str,
     table_id: u64,
     day: u8,
@@ -862,6 +892,7 @@ fn build_no_reply_record(
         round,
         seat,
         guild: guild.to_owned(),
+        communication,
         arm,
         seat_kind: "Model".to_owned(),
         keeps_notes,
@@ -947,6 +978,7 @@ fn resolve_talk_model_round(
     }
     if diag.first_failure.is_some() {
         return Ok(build_no_reply_record(
+            CommunicationMode::Talk,
             game_id,
             table_id,
             day,
@@ -1000,6 +1032,7 @@ fn resolve_talk_model_round(
                 round: Round::Talk,
                 seat,
                 guild: guild.to_owned(),
+                communication: CommunicationMode::Talk,
                 arm,
                 seat_kind: "Model".to_owned(),
                 keeps_notes,
@@ -1046,6 +1079,7 @@ fn resolve_talk_model_round(
             })
         }
         _ => Ok(build_no_reply_record(
+            CommunicationMode::Talk,
             game_id,
             table_id,
             day,
@@ -1066,6 +1100,7 @@ fn resolve_talk_model_round(
 
 #[allow(clippy::too_many_arguments)]
 fn resolve_act_model_round(
+    communication: CommunicationMode,
     game_id: &str,
     table_id: u64,
     day: u8,
@@ -1090,6 +1125,7 @@ fn resolve_act_model_round(
         return Ok((
             EvalActSubmission::default(),
             build_no_reply_record(
+                communication,
                 game_id,
                 table_id,
                 day,
@@ -1112,7 +1148,12 @@ fn resolve_act_model_round(
             let raw_reply = fs::read_to_string(from_seat_path).map_err(|e| {
                 EvalError::Io(format!("read reply {}: {e}", from_seat_path.display()))
             })?;
-            let parsed = parse_eval_act_reply(&raw_reply, seat, keeps_notes);
+            let parsed = parse_eval_act_reply_for_communication(
+                communication,
+                &raw_reply,
+                seat,
+                keeps_notes,
+            );
             if let Some(wp) = wrong_part_refusals {
                 let wrong_part = parsed
                     .refusal_code
@@ -1141,6 +1182,7 @@ fn resolve_act_model_round(
                 round: Round::Act,
                 seat,
                 guild: guild.to_owned(),
+                communication,
                 arm,
                 seat_kind: "Model".to_owned(),
                 keeps_notes,
@@ -1178,6 +1220,7 @@ fn resolve_act_model_round(
         _ => Ok((
             EvalActSubmission::default(),
             build_no_reply_record(
+                communication,
                 game_id,
                 table_id,
                 day,
@@ -1517,6 +1560,27 @@ fn find_model_seat_regent_intervention(
     }
 }
 
+fn seat_suppresses_regent_flags(
+    seats_file: &SeatFile,
+) -> Result<(Vec<bool>, Vec<bool>), EvalError> {
+    let mut model_seats = Vec::with_capacity(seats_file.seats.len());
+    let mut suppress_regents = Vec::with_capacity(seats_file.seats.len());
+    for s in &seats_file.seats {
+        match &s.backend {
+            SeatBackend::File { model } => {
+                let policy = EvalFileSeatModel::parse_for_seat(&s.guild, model.as_deref())?;
+                model_seats.push(false);
+                suppress_regents.push(!policy.uses_standing_regent());
+            }
+            SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
+                model_seats.push(true);
+                suppress_regents.push(true);
+            }
+        }
+    }
+    Ok((model_seats, suppress_regents))
+}
+
 fn ensure_no_model_seat_regent_at_startup(
     host: &EvalHost,
     model_seats: &[bool],
@@ -1537,7 +1601,7 @@ fn ensure_no_model_seat_regent_at_startup(
                 .get(idx)
                 .map_or("unknown", |s| s.guild.as_str());
             return Err(EvalError::ModelSeatRegentIntervention(format!(
-                "startup check refused run: automated model seat [seat={idx},guild={guild}] has a Standing Regent configured"
+                "startup check refused run: seat [seat={idx},guild={guild}] requires no Standing Regent configured"
             )));
         }
     }
@@ -1546,6 +1610,7 @@ fn ensure_no_model_seat_regent_at_startup(
 
 #[allow(clippy::too_many_arguments)]
 fn empty_clubbot_decision(
+    communication: CommunicationMode,
     game_id: &str,
     table_id: u64,
     day: u8,
@@ -1563,11 +1628,69 @@ fn empty_clubbot_decision(
         round,
         seat,
         guild: guild.to_owned(),
+        communication,
         arm,
         seat_kind: "ClubBot".to_owned(),
         keeps_notes: false,
         notes_present: false,
         raw_reply: None,
+        discarded_reply_path: None,
+        discarded_reply_sha256: None,
+        attempts: 0,
+        failed_attempts: Vec::new(),
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        wall_secs: None,
+        tool_calls_used: 0,
+        parse_failure: false,
+        refused_market_actions: 0,
+        refused_bundle_legs: 0,
+        cleared_non_empty_actions: false,
+        intermediate_bundle_sha256s: Vec::new(),
+        prompt_token_ids_sha256s: Vec::new(),
+        prompt_token_ids_source: None,
+        prompt_token_ids_template_check: None,
+        reply_token_ids: Vec::new(),
+        reply_top_logprobs: Vec::new(),
+        loaded_history_sha256,
+        refusal_code: None,
+        refusal_reason: None,
+        invalid_recipients: Vec::new(),
+        no_reply: false,
+        apply_report: None,
+        refused_bundle: None,
+        club_bot_baseline,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scripted_baseline_decision(
+    communication: CommunicationMode,
+    game_id: &str,
+    table_id: u64,
+    day: u8,
+    round: Round,
+    seat: u8,
+    guild: &str,
+    arm: EvalArm,
+    policy: EvalFileSeatModel,
+    raw_reply: String,
+    loaded_history_sha256: BTreeMap<String, String>,
+    club_bot_baseline: Option<EvalActSubmission>,
+) -> EvalDecisionRecord {
+    EvalDecisionRecord {
+        game_id: game_id.to_owned(),
+        table_id,
+        day,
+        round,
+        seat,
+        guild: guild.to_owned(),
+        communication,
+        arm,
+        seat_kind: policy.as_str().to_owned(),
+        keeps_notes: false,
+        notes_present: false,
+        raw_reply: Some(raw_reply),
         discarded_reply_path: None,
         discarded_reply_sha256: None,
         attempts: 0,
@@ -1665,10 +1788,12 @@ fn populate_act_apply_telemetry(
 
 #[allow(clippy::too_many_arguments)]
 fn build_eval_manifest(
+    communication: CommunicationMode,
     game_id: &str,
     table_id: u64,
     seed: u64,
     arm: EvalArm,
+    eval_reply_wording_arm: &str,
     relay_wording_arm: &str,
     wrapper_version: &str,
     wrapper_sha256: &str,
@@ -1710,15 +1835,17 @@ fn build_eval_manifest(
         game_id: game_id.to_owned(),
         table_id,
         seed,
+        communication,
         arm,
-        eval_reply_wording_arm: EVAL_REPLY_WORDING_ARM.to_owned(),
+        eval_reply_wording_arm: eval_reply_wording_arm.to_owned(),
         relay_wording_arm: relay_wording_arm.to_owned(),
         wrapper_version: wrapper_version.to_owned(),
         wrapper_sha256: wrapper_sha256.to_owned(),
         pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
         played_turns,
         crate_git_sha: crate_git_sha.to_owned(),
-        wording_digests: Some(WordingArmDigests::compute(
+        wording_digests: Some(WordingArmDigests::compute_for_communication(
+            communication,
             relay_wording_arm,
             wrapper_version,
             wrapper_sha256,
@@ -1759,6 +1886,7 @@ fn dir_has_eval_save_or_seal(dir: &Path) -> Result<bool, EvalError> {
 fn validate_wrapper_and_extract(
     wrapper_path: &Path,
     explicit_version: Option<&str>,
+    communication: CommunicationMode,
 ) -> Result<(String, String), EvalError> {
     if !wrapper_path.exists() {
         return Err(EvalError::MissingWrapper(format!(
@@ -1778,7 +1906,38 @@ fn validate_wrapper_and_extract(
             wrapper_path.display()
         )));
     }
-    resolve_pinned_wrapper(&raw_bytes, explicit_version)
+    resolve_pinned_wrapper_for_communication(&raw_bytes, explicit_version, communication)
+}
+
+fn silent_tool_schema_sha256(communication: CommunicationMode, arm: EvalArm) -> Option<String> {
+    if communication != CommunicationMode::Silent {
+        return None;
+    }
+    match arm {
+        EvalArm::Off => None,
+        EvalArm::Control => Some(canonical_tool_definition_sha256(
+            &build_silent_control_turn_orders_tool_definition(),
+        )),
+        EvalArm::On => Some(canonical_tool_definition_sha256(
+            &build_silent_preview_turn_orders_tool_definition(),
+        )),
+    }
+}
+
+fn eval_reply_wording_arm_for(communication: CommunicationMode) -> &'static str {
+    match communication {
+        CommunicationMode::Talk => EVAL_REPLY_WORDING_ARM,
+        CommunicationMode::Silent => EVAL_SILENT_REPLY_WORDING_ARM,
+    }
+}
+
+fn build_eval_response_format_for(
+    communication: CommunicationMode,
+) -> Result<league_relay::ResponseFormatConfig, EvalError> {
+    match communication {
+        CommunicationMode::Talk => build_eval_response_format_config(),
+        CommunicationMode::Silent => build_eval_silent_response_format_config(),
+    }
 }
 
 fn seat_backend_and_model(seat: &SeatSpec) -> (&'static str, String) {
@@ -1818,6 +1977,24 @@ pub fn run_play_with_transport_and_git_sha(
     redaction_key: Option<&ApiKey>,
     git_sha: &CrateGitShaSource<'_>,
 ) -> Result<EvalManifest, EvalError> {
+    run_play_with_communication_and_git_sha(
+        opts,
+        CommunicationMode::Talk,
+        transport,
+        redaction_key,
+        git_sha,
+    )
+}
+
+/// Run an Evaluation Mode game under `communication` (`talk` or `silent`) using `transport`
+/// and a caller-supplied [`CrateGitShaSource`].
+pub fn run_play_with_communication_and_git_sha(
+    opts: &PlayOptions,
+    communication: CommunicationMode,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+    git_sha: &CrateGitShaSource<'_>,
+) -> Result<EvalManifest, EvalError> {
     if opts.turns == 0 || opts.turns > HARD_TURN_CAP {
         return Err(EvalError::Usage(format!(
             "--turns must be in 1..={HARD_TURN_CAP}, got {}",
@@ -1825,19 +2002,18 @@ pub fn run_play_with_transport_and_git_sha(
         )));
     }
     let preview_mode = arm_to_preview_mode(opts.arm)?;
-    let (wrapper_version, wrapper_sha256) =
-        validate_wrapper_and_extract(&opts.wrapper_path, opts.wrapper_version.as_deref())?;
+    let (wrapper_version, wrapper_sha256) = validate_wrapper_and_extract(
+        &opts.wrapper_path,
+        opts.wrapper_version.as_deref(),
+        communication,
+    )?;
     let seats_sha256 = hash_file_sha256(&opts.seats_path, "seats file")?;
     let mem_mode = memory_mode_str(opts.memory_mode).to_owned();
     let seats_file =
         SeatFile::load_with_allowed_hosts(&opts.seats_path, redaction_key, &opts.allowed_vm_hosts)?;
-    validate_eval_seats_file(&seats_file)?;
+    validate_eval_seats_for_communication(&seats_file, communication)?;
 
-    let model_seats: Vec<bool> = seats_file
-        .seats
-        .iter()
-        .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
-        .collect();
+    let (model_seats, suppress_regent_seats) = seat_suppresses_regent_flags(&seats_file)?;
     let has_model_seat = model_seats.iter().any(|&is_model| is_model);
     let crate_git_sha = resolve_crate_git_sha_from(git_sha)?;
     let serving_record =
@@ -1853,8 +2029,10 @@ pub fn run_play_with_transport_and_git_sha(
         .transpose()?;
     let serving_env_snapshot = capture_serving_env_snapshot()?;
 
-    let response_format = build_eval_response_format_config()?;
+    let response_format = build_eval_response_format_for(communication)?;
     let response_schema_sha256 = response_format.canonical_sha256();
+    let tool_schema_sha256 = silent_tool_schema_sha256(communication, opts.arm);
+    let eval_reply_wording_arm = eval_reply_wording_arm_for(communication);
     let relay_wording_arm = preview_mode.wording_arm().to_owned();
 
     fs::create_dir_all(&opts.game_dir)
@@ -1876,16 +2054,18 @@ pub fn run_play_with_transport_and_git_sha(
                 host.game_id()
             )));
         }
-        if existing_setup.arm != opts.arm
+        if existing_setup.communication != communication
+            || existing_setup.arm != opts.arm
             || existing_setup.table_id != opts.table_id
             || existing_setup.seed != opts.seed
             || existing_setup.wrapper_sha256 != wrapper_sha256
             || existing_setup.memory_mode != mem_mode
             || existing_setup.seats_sha256 != seats_sha256
+            || existing_setup.tool_schema_sha256 != tool_schema_sha256
             || existing_setup.serving_manifest_sha256 != serving_manifest_sha256
         {
             return Err(EvalError::IncompatibleEvalSetup(
-                "cannot resume game_dir with mismatched --arm, --table-id, --seed, --wrapper, --memory-mode, --seats, or --serving-manifest"
+                "cannot resume game_dir with mismatched --communication, --arm, --table-id, --seed, --wrapper, --memory-mode, --seats, or --serving-manifest"
                     .to_owned(),
             ));
         }
@@ -1904,7 +2084,7 @@ pub fn run_play_with_transport_and_git_sha(
             4,
             opts.seed,
             bot_tie_seed,
-            &model_seats,
+            &suppress_regent_seats,
         )?;
         host.set_engine_commit(&crate_git_sha)?;
         persist_eval_game_state(&host, &opts.game_dir)?;
@@ -1912,7 +2092,12 @@ pub fn run_play_with_transport_and_git_sha(
     };
 
     let (has_regents, seat_regents) = seat_regent_flags(&host, &seats_file);
-    ensure_no_model_seat_regent_at_startup(&host, &model_seats, &has_regents, &seats_file)?;
+    ensure_no_model_seat_regent_at_startup(
+        &host,
+        &suppress_regent_seats,
+        &has_regents,
+        &seats_file,
+    )?;
 
     let setup_record = EvalSetupFile {
         game_id: host.game_id().to_owned(),
@@ -1920,14 +2105,16 @@ pub fn run_play_with_transport_and_git_sha(
         seed: opts.seed,
         turns: opts.turns,
         seat_count: 4,
+        communication,
         arm: opts.arm,
-        eval_reply_wording_arm: EVAL_REPLY_WORDING_ARM.to_owned(),
+        eval_reply_wording_arm: eval_reply_wording_arm.to_owned(),
         relay_wording_arm: relay_wording_arm.clone(),
         wrapper_version: wrapper_version.clone(),
         wrapper_sha256: wrapper_sha256.clone(),
         memory_mode: mem_mode,
         seats_sha256,
         response_schema_sha256: Some(response_schema_sha256.clone()),
+        tool_schema_sha256,
         serving_manifest_sha256,
     };
     write_json_pretty_atomic(&setup_path, &setup_record)?;
@@ -1959,100 +2146,142 @@ pub fn run_play_with_transport_and_git_sha(
         let day = host.turn();
         ensure_no_partial_from_seat_for_day(&opts.game_dir, day)?;
         let day_str = format!("{day:02}");
-
-        // --- TALK ROUND ---
-        let mut whispers_by_guild: BTreeMap<String, Vec<UntrustedWhisper>> = BTreeMap::new();
-        for g in &seated_guilds {
-            whispers_by_guild.insert(g.clone(), Vec::new());
-        }
-
-        for (idx, seat) in seats_file.seats.iter().enumerate() {
-            let obs = host.observe_seat(Seat(idx as u8))?;
-            let prompt_md = render_seat_view_markdown(Round::Talk, &obs)?;
-            write_text_atomic(
-                &to_seat_dir.join(format!("day-{day_str}-talk-{}.md", seat.guild)),
-                &prompt_md,
-            )?;
-        }
-
         let eval_budget_key = local_reasoning_budget_key_for_manifest(serving_record.as_ref());
-        let talk_cfg = TurnConfig::new(
-            opts.game_dir.clone(),
-            day_str.clone(),
-            Round::Talk,
-            seats_file.clone(),
-            Some(opts.wrapper_path.clone()),
-            opts.live,
-            opts.cap_credits,
-        )
-        .with_cap_gpu_secs(opts.cap_gpu_secs)
-        .with_memory_mode(opts.memory_mode)
-        .with_response_format(Some(response_format.clone()))
-        .with_preview_tool(preview_mode)
-        .with_eval_mode(true)
-        .with_local_reasoning_budget_key(eval_budget_key)
-        .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
-        let talk_calls_offset = count_calls_lines(&calls_path)?;
-        let talk_summary = run_turn(&talk_cfg, transport, redaction_key)?;
-        check_turn_summary_prompt_telemetry(&talk_summary)?;
-        for (idx, seat) in seats_file.seats.iter().enumerate() {
-            let keeps_notes = seat_keeps_notes(seat, &seats_file, opts.memory_mode);
-            let record = match seat.backend {
-                SeatBackend::File { .. } => empty_clubbot_decision(
-                    host.game_id(),
-                    opts.table_id,
-                    day,
-                    Round::Talk,
-                    idx as u8,
-                    &seat.guild,
-                    opts.arm,
-                    BTreeMap::new(),
-                    None,
-                ),
-                SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
-                    let diag = read_round_attempt_diagnostics(
-                        &opts.game_dir,
-                        &calls_path,
-                        talk_calls_offset,
-                        &day_str,
-                        Round::Talk,
-                        idx as u8,
-                        &seat.guild,
-                    )?;
-                    resolve_talk_model_round(
-                        host.game_id(),
-                        opts.table_id,
-                        day,
-                        idx as u8,
-                        &seat.guild,
-                        opts.arm,
-                        keeps_notes,
-                        &seated_guilds,
-                        find_report(&talk_summary, &seat.guild),
-                        diag,
-                        &mut whispers_by_guild,
-                        &mut refusal_by_seat,
-                        &mut refusal_by_arm,
-                        &mut wrong_part_refusals,
-                    )?
-                }
-            };
-            write_json_pretty_atomic(
-                &decisions_dir.join(format!("day-{day_str}-talk-{}.json", seat.guild)),
-                &record,
-            )?;
-        }
+        // --- TALK ROUND (omitted completely under `silent`) ---
+        let talk_observations = if communication == CommunicationMode::Talk {
+            let mut whispers_by_guild: BTreeMap<String, Vec<UntrustedWhisper>> = BTreeMap::new();
+            for g in &seated_guilds {
+                whispers_by_guild.insert(g.clone(), Vec::new());
+            }
 
-        // Write `negotiation.json` for ALL 4 seats (`1.5`: every seat sees `eval_batna` on `act`).
-        for seat in &seats_file.seats {
-            let whispers = whispers_by_guild.remove(&seat.guild).unwrap_or_default();
-            let neg = build_act_negotiation_inputs(whispers);
-            write_json_pretty_atomic(
-                &to_seat_dir.join(format!("day-{day_str}-act-{}.negotiation.json", seat.guild)),
-                &neg,
-            )?;
-        }
+            let mut talk_obs_vec = Vec::with_capacity(4);
+            for (idx, seat) in seats_file.seats.iter().enumerate() {
+                let obs = host.observe_seat(Seat(idx as u8))?;
+                let prompt_md =
+                    render_seat_view_markdown_for_communication(Round::Talk, communication, &obs)?;
+                write_text_atomic(
+                    &to_seat_dir.join(format!("day-{day_str}-talk-{}.md", seat.guild)),
+                    &prompt_md,
+                )?;
+                talk_obs_vec.push(obs);
+            }
+
+            let talk_cfg = TurnConfig::new(
+                opts.game_dir.clone(),
+                day_str.clone(),
+                Round::Talk,
+                seats_file.clone(),
+                Some(opts.wrapper_path.clone()),
+                opts.live,
+                opts.cap_credits,
+            )
+            .with_cap_gpu_secs(opts.cap_gpu_secs)
+            .with_memory_mode(opts.memory_mode)
+            .with_response_format(Some(response_format.clone()))
+            .with_preview_tool(preview_mode)
+            .with_eval_mode(true)
+            .with_local_reasoning_budget_key(eval_budget_key)
+            .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
+
+            let talk_calls_offset = count_calls_lines(&calls_path)?;
+            let talk_summary = run_turn(&talk_cfg, transport, redaction_key)?;
+            check_turn_summary_prompt_telemetry(&talk_summary)?;
+            for (idx, seat) in seats_file.seats.iter().enumerate() {
+                let keeps_notes = seat_keeps_notes(seat, &seats_file, opts.memory_mode);
+                let record = match &seat.backend {
+                    SeatBackend::File { model } => {
+                        let policy =
+                            EvalFileSeatModel::parse_for_seat(&seat.guild, model.as_deref())?;
+                        if policy == EvalFileSeatModel::ClubBot {
+                            empty_clubbot_decision(
+                                communication,
+                                host.game_id(),
+                                opts.table_id,
+                                day,
+                                Round::Talk,
+                                idx as u8,
+                                &seat.guild,
+                                opts.arm,
+                                BTreeMap::new(),
+                                None,
+                            )
+                        } else {
+                            let (_msgs, accepted_whispers, raw_reply) =
+                                decide_scripted_baseline_talk(
+                                    policy,
+                                    &talk_obs_vec[idx],
+                                    &seated_guilds,
+                                )?;
+                            for (recipient_guild, whisper) in accepted_whispers {
+                                if let Some(bucket) = whispers_by_guild.get_mut(&recipient_guild) {
+                                    bucket.push(whisper);
+                                }
+                            }
+                            scripted_baseline_decision(
+                                communication,
+                                host.game_id(),
+                                opts.table_id,
+                                day,
+                                Round::Talk,
+                                idx as u8,
+                                &seat.guild,
+                                opts.arm,
+                                policy,
+                                raw_reply,
+                                BTreeMap::new(),
+                                None,
+                            )
+                        }
+                    }
+                    SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
+                        let diag = read_round_attempt_diagnostics(
+                            &opts.game_dir,
+                            &calls_path,
+                            talk_calls_offset,
+                            &day_str,
+                            Round::Talk,
+                            idx as u8,
+                            &seat.guild,
+                            communication,
+                        )?;
+                        resolve_talk_model_round(
+                            host.game_id(),
+                            opts.table_id,
+                            day,
+                            idx as u8,
+                            &seat.guild,
+                            opts.arm,
+                            keeps_notes,
+                            &seated_guilds,
+                            find_report(&talk_summary, &seat.guild),
+                            diag,
+                            &mut whispers_by_guild,
+                            &mut refusal_by_seat,
+                            &mut refusal_by_arm,
+                            &mut wrong_part_refusals,
+                        )?
+                    }
+                };
+                write_json_pretty_atomic(
+                    &decisions_dir.join(format!("day-{day_str}-talk-{}.json", seat.guild)),
+                    &record,
+                )?;
+            }
+
+            // Write `negotiation.json` for ALL 4 seats (`1.5`: every seat sees `eval_batna` on `act`).
+            for seat in &seats_file.seats {
+                let whispers = whispers_by_guild.remove(&seat.guild).unwrap_or_default();
+                let neg = build_act_negotiation_inputs(whispers);
+                write_json_pretty_atomic(
+                    &to_seat_dir.join(format!("day-{day_str}-act-{}.negotiation.json", seat.guild)),
+                    &neg,
+                )?;
+            }
+            Some(talk_obs_vec)
+        } else {
+            None
+        };
 
         // --- PRE-ACT CHECKPOINT (`R9`: BEFORE act prompt or reply collection) ---
         host.write_pre_act_checkpoint(&checkpoints_dir)?;
@@ -2068,7 +2297,8 @@ pub fn run_play_with_transport_and_git_sha(
         let mut seat_observations = Vec::with_capacity(4);
         for (idx, seat) in seats_file.seats.iter().enumerate() {
             let obs = host.observe_seat(Seat(idx as u8))?;
-            let act_md = render_seat_view_markdown(Round::Act, &obs)?;
+            let act_md =
+                render_seat_view_markdown_for_communication(Round::Act, communication, &obs)?;
             write_text_atomic(
                 &to_seat_dir.join(format!("day-{day_str}-act-{}.md", seat.guild)),
                 &act_md,
@@ -2102,6 +2332,7 @@ pub fn run_play_with_transport_and_git_sha(
         .with_response_format(Some(response_format.clone()))
         .with_preview_tool(preview_mode)
         .with_eval_mode(true)
+        .with_silent_market(communication == CommunicationMode::Silent)
         .with_local_reasoning_budget_key(eval_budget_key)
         .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
@@ -2124,20 +2355,50 @@ pub fn run_play_with_transport_and_git_sha(
             baselines.push(bot_sub.clone());
 
             let keeps_notes = seat_keeps_notes(seat, &seats_file, opts.memory_mode);
-            let (submission, record) = match seat.backend {
-                SeatBackend::File { .. } => {
-                    let rec = empty_clubbot_decision(
-                        host.game_id(),
-                        opts.table_id,
-                        day,
-                        Round::Act,
-                        idx as u8,
-                        &seat.guild,
-                        opts.arm,
-                        BTreeMap::new(),
-                        Some(bot_sub.clone()),
-                    );
-                    (bot_sub, rec)
+            let (submission, record) = match &seat.backend {
+                SeatBackend::File { model } => {
+                    let policy = EvalFileSeatModel::parse_for_seat(&seat.guild, model.as_deref())?;
+                    if policy == EvalFileSeatModel::ClubBot {
+                        let rec = empty_clubbot_decision(
+                            communication,
+                            host.game_id(),
+                            opts.table_id,
+                            day,
+                            Round::Act,
+                            idx as u8,
+                            &seat.guild,
+                            opts.arm,
+                            BTreeMap::new(),
+                            Some(bot_sub.clone()),
+                        );
+                        (bot_sub, rec)
+                    } else {
+                        let (sub, raw_reply) = decide_scripted_baseline_act(
+                            policy,
+                            communication,
+                            opts.seed,
+                            &seat_observations[idx],
+                            own_mandate,
+                            &seated_guilds,
+                            Some(&to_seat_dir),
+                            talk_observations.as_ref().and_then(|v| v.get(idx)),
+                        )?;
+                        let rec = scripted_baseline_decision(
+                            communication,
+                            host.game_id(),
+                            opts.table_id,
+                            day,
+                            Round::Act,
+                            idx as u8,
+                            &seat.guild,
+                            opts.arm,
+                            policy,
+                            raw_reply,
+                            BTreeMap::new(),
+                            Some(bot_sub),
+                        );
+                        (sub, rec)
+                    }
                 }
                 SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
                     let diag = read_round_attempt_diagnostics(
@@ -2148,8 +2409,10 @@ pub fn run_play_with_transport_and_git_sha(
                         Round::Act,
                         idx as u8,
                         &seat.guild,
+                        communication,
                     )?;
                     resolve_act_model_round(
+                        communication,
                         host.game_id(),
                         opts.table_id,
                         day,
@@ -2212,10 +2475,12 @@ pub fn run_play_with_transport_and_git_sha(
         // Write `manifest.json` after every completed turn so counts and Regent audit stay current on disk.
         wrong_part_refusals.validate_rates()?;
         let turn_manifest = build_eval_manifest(
+            communication,
             host.game_id(),
             opts.table_id,
             opts.seed,
             opts.arm,
+            eval_reply_wording_arm,
             &relay_wording_arm,
             &wrapper_version,
             &wrapper_sha256,
@@ -2274,10 +2539,12 @@ pub fn run_play_with_transport_and_git_sha(
 
     wrong_part_refusals.validate_rates()?;
     let manifest = build_eval_manifest(
+        communication,
         host.game_id(),
         opts.table_id,
         opts.seed,
         opts.arm,
+        eval_reply_wording_arm,
         &relay_wording_arm,
         &wrapper_version,
         &wrapper_sha256,
@@ -2370,6 +2637,23 @@ pub fn run_branch_with_transport_and_git_sha(
     redaction_key: Option<&ApiKey>,
     git_sha: &CrateGitShaSource<'_>,
 ) -> Result<Vec<BranchArmOutcome>, EvalError> {
+    run_branch_with_communication_and_git_sha(
+        opts,
+        CommunicationMode::Talk,
+        transport,
+        redaction_key,
+        git_sha,
+    )
+}
+
+/// Evaluate one or more frozen pre-act checkpoints under `communication` (`talk` or `silent`).
+pub fn run_branch_with_communication_and_git_sha(
+    opts: &BranchOptions,
+    communication: CommunicationMode,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+    git_sha: &CrateGitShaSource<'_>,
+) -> Result<Vec<BranchArmOutcome>, EvalError> {
     if opts.arms.is_empty() {
         return Err(EvalError::Usage(
             "branch requires at least one `--arm` / `--arms` entry".to_owned(),
@@ -2380,15 +2664,6 @@ pub fn run_branch_with_transport_and_git_sha(
         active_arms_joined.push(arm_to_preview_mode(arm)?.wording_arm());
     }
     let active_arms_str = active_arms_joined.join(",");
-
-    let (wrapper_version, wrapper_sha256) = validate_wrapper_and_extract(&opts.wrapper_path, None)?;
-    let seats_sha256 = hash_file_sha256(&opts.seats_path, "seats file")?;
-    let expected_memory_mode = memory_mode_str(opts.memory_mode);
-    let seats_file =
-        SeatFile::load_with_allowed_hosts(&opts.seats_path, redaction_key, &opts.allowed_vm_hosts)?;
-    validate_eval_seats_file(&seats_file)?;
-    let response_format = build_eval_response_format_config()?;
-    let response_schema_sha256 = response_format.canonical_sha256();
 
     let targets: Vec<(PathBuf, String, PathBuf)> = match (&opts.checkpoint_prefix, &opts.list_path)
     {
@@ -2438,6 +2713,40 @@ pub fn run_branch_with_transport_and_git_sha(
         }
     };
 
+    // Enforce source/target communication agreement before wrapper hash checks so mismatches report
+    // `COMMUNICATION_CONDITION_MISMATCH` naming both conditions regardless of which wrapper was passed.
+    for (prefix, _, _) in &targets {
+        if let Some(source_game_dir) = prefix.parent().and_then(|p| p.parent()) {
+            let source_setup_path = source_game_dir.join("setup.json");
+            if source_setup_path.exists() {
+                let raw_setup = fs::read_to_string(&source_setup_path).map_err(|e| {
+                    EvalError::Io(format!(
+                        "read source setup {}: {e}",
+                        source_setup_path.display()
+                    ))
+                })?;
+                if let Ok(source_setup) = serde_json::from_str::<EvalSetupFile>(&raw_setup)
+                    && source_setup.communication != communication
+                {
+                    return Err(EvalError::CommunicationConditionMismatch {
+                        checkpoint_condition: source_setup.communication.as_str().to_owned(),
+                        requested_condition: communication.as_str().to_owned(),
+                    });
+                }
+            }
+        }
+    }
+
+    let (wrapper_version, wrapper_sha256) =
+        validate_wrapper_and_extract(&opts.wrapper_path, None, communication)?;
+    let seats_sha256 = hash_file_sha256(&opts.seats_path, "seats file")?;
+    let expected_memory_mode = memory_mode_str(opts.memory_mode);
+    let seats_file =
+        SeatFile::load_with_allowed_hosts(&opts.seats_path, redaction_key, &opts.allowed_vm_hosts)?;
+    validate_eval_seats_for_communication(&seats_file, communication)?;
+    let response_format = build_eval_response_format_for(communication)?;
+    let response_schema_sha256 = response_format.canonical_sha256();
+
     let has_model_focal = targets.iter().try_fold(false, |acc, (_, focal_spec, _)| {
         let idx = resolve_focal_seat(&seats_file, focal_spec)?;
         Ok::<bool, EvalError>(
@@ -2477,6 +2786,7 @@ pub fn run_branch_with_transport_and_git_sha(
 
     for (prefix, focal_spec, target_out_dir) in targets {
         let target_run = branch_one_target(
+            communication,
             &prefix,
             &focal_spec,
             &target_out_dir,
@@ -2521,11 +2831,13 @@ pub fn run_branch_with_transport_and_git_sha(
         .map(|_| "MODEL_SEAT_REGENT_INTERVENTION".to_owned());
     let branch_manifest = BranchManifest {
         crate_git_sha,
+        communication,
         wrapper_version: wrapper_version.clone(),
         wrapper_sha256: wrapper_sha256.clone(),
         pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
         arms: opts.arms.clone(),
-        wording_digests: Some(WordingArmDigests::compute(
+        wording_digests: Some(WordingArmDigests::compute_for_communication(
+            communication,
             &active_arms_str,
             &wrapper_version,
             &wrapper_sha256,
@@ -2579,12 +2891,13 @@ fn verify_branch_target_no_model_regent(
     }
     let probe_host = EvalHost::fork_from_checkpoint(&save_path, &seal_path)?;
     let (has_regents, seat_regents) = seat_regent_flags(&probe_host, seats_file);
-    let model_seats: Vec<bool> = seats_file
-        .seats
-        .iter()
-        .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
-        .collect();
-    ensure_no_model_seat_regent_at_startup(&probe_host, &model_seats, &has_regents, seats_file)?;
+    let (model_seats, suppress_regent_seats) = seat_suppresses_regent_flags(seats_file)?;
+    ensure_no_model_seat_regent_at_startup(
+        &probe_host,
+        &suppress_regent_seats,
+        &has_regents,
+        seats_file,
+    )?;
     Ok(VerifiedBranchTargetProbe {
         probe_host,
         save_path,
@@ -2597,6 +2910,7 @@ fn verify_branch_target_no_model_regent(
 
 #[allow(clippy::too_many_arguments)]
 fn branch_one_target(
+    communication: CommunicationMode,
     checkpoint_prefix: &Path,
     focal_spec: &str,
     target_out_dir: &Path,
@@ -2666,38 +2980,62 @@ fn branch_one_target(
             source_setup_path.display()
         ))
     })?;
+    if source_setup.communication != communication {
+        return Err(EvalError::CommunicationConditionMismatch {
+            checkpoint_condition: source_setup.communication.as_str().to_owned(),
+            requested_condition: communication.as_str().to_owned(),
+        });
+    }
     if source_setup.game_id != source_game_id
         || source_setup.table_id != table_id
         || source_setup.wrapper_sha256 != wrapper_sha256
         || source_setup.memory_mode != expected_memory_mode
         || source_setup.seats_sha256 != expected_seats_sha256
+        || (communication == CommunicationMode::Silent
+            && source_setup.tool_schema_sha256
+                != silent_tool_schema_sha256(communication, source_setup.arm))
     {
         return Err(EvalError::IncompatibleEvalSetup(format!(
-            "branch options do not match source setup {}: check --wrapper, --memory-mode, and --seats",
+            "branch options do not match source setup {}: check --communication, --wrapper, --memory-mode, and --seats",
             source_setup_path.display()
         )));
     }
 
+    let seated_guilds: Vec<String> = seats_file.seats.iter().map(|s| s.guild.clone()).collect();
+    let mut loaded_history_sha256 = BTreeMap::new();
     let neg_rel_path = format!("to-seat/day-{day_str}-act-{focal_guild}.negotiation.json");
     let neg_src_path = source_game_dir.join(&neg_rel_path);
-    if !neg_src_path.exists() {
-        return Err(EvalError::MissingBranchNegotiation(format!(
-            "missing source negotiation file {}",
-            neg_src_path.display()
-        )));
-    }
-    let source_negotiation_json = fs::read_to_string(&neg_src_path).map_err(|e| {
-        EvalError::Io(format!(
-            "read source negotiation {}: {e}",
-            neg_src_path.display()
-        ))
-    })?;
-    let mut loaded_history_sha256 = BTreeMap::new();
-    loaded_history_sha256.insert(neg_rel_path, sha256_hex(source_negotiation_json.as_bytes()));
+    let source_negotiation_json = match communication {
+        CommunicationMode::Talk => {
+            if !neg_src_path.exists() {
+                return Err(EvalError::MissingBranchNegotiation(format!(
+                    "missing source negotiation file {}",
+                    neg_src_path.display()
+                )));
+            }
+            let text = fs::read_to_string(&neg_src_path).map_err(|e| {
+                EvalError::Io(format!(
+                    "read source negotiation {}: {e}",
+                    neg_src_path.display()
+                ))
+            })?;
+            loaded_history_sha256.insert(neg_rel_path, sha256_hex(text.as_bytes()));
+            Some(text)
+        }
+        CommunicationMode::Silent => {
+            if neg_src_path.exists() {
+                return Err(EvalError::CommunicationConditionMismatch {
+                    checkpoint_condition: "talk (negotiation.json present)".to_owned(),
+                    requested_condition: communication.as_str().to_owned(),
+                });
+            }
+            None
+        }
+    };
 
     let is_model_focal = !matches!(focal_seat_spec.backend, SeatBackend::File { .. });
     let (source_transcript_entries, tx_sha_opt) = if is_model_focal {
-        load_pre_act_transcript_prefix(source_game_dir, &focal_guild, day)?
+        load_pre_act_transcript_prefix(source_game_dir, &focal_guild, day, communication)?
     } else {
         (Vec::new(), None)
     };
@@ -2765,31 +3103,65 @@ fn branch_one_target(
 
         let keeps_notes = seat_keeps_notes(focal_seat_spec, seats_file, opts.memory_mode);
         let to_seat_dir = arm_dir.join("to-seat");
-        let act_md = render_seat_view_markdown(Round::Act, &obs)?;
+        let act_md = render_seat_view_markdown_for_communication(Round::Act, communication, &obs)?;
         write_text_atomic(
             &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.md")),
             &act_md,
         )?;
-        write_text_atomic(
-            &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.negotiation.json")),
-            &source_negotiation_json,
-        )?;
+        if let Some(ref neg_json) = source_negotiation_json {
+            write_text_atomic(
+                &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.negotiation.json")),
+                neg_json,
+            )?;
+        }
 
-        let (focal_sub, mut decision_rec) =
-            if matches!(focal_seat_spec.backend, SeatBackend::File { .. }) {
-                let rec = empty_clubbot_decision(
-                    &source_game_id,
-                    table_id,
-                    day,
-                    Round::Act,
-                    focal_idx as u8,
-                    &focal_guild,
-                    arm,
-                    loaded_history_sha256.clone(),
-                    Some(bot_sub.clone()),
-                );
-                (bot_sub, rec)
-            } else {
+        let (focal_sub, mut decision_rec) = match &focal_seat_spec.backend {
+            SeatBackend::File { model } => {
+                let policy = EvalFileSeatModel::parse_for_seat(&focal_guild, model.as_deref())?;
+                if policy == EvalFileSeatModel::ClubBot {
+                    let rec = empty_clubbot_decision(
+                        communication,
+                        &source_game_id,
+                        table_id,
+                        day,
+                        Round::Act,
+                        focal_idx as u8,
+                        &focal_guild,
+                        arm,
+                        loaded_history_sha256.clone(),
+                        Some(bot_sub.clone()),
+                    );
+                    (bot_sub, rec)
+                } else {
+                    let source_to_seat_dir = source_game_dir.join("to-seat");
+                    let (sub, raw_reply) = decide_scripted_baseline_act(
+                        policy,
+                        communication,
+                        source_setup.seed,
+                        &obs,
+                        &own_mandate,
+                        &seated_guilds,
+                        Some(&source_to_seat_dir),
+                        None,
+                    )?;
+                    let rec = scripted_baseline_decision(
+                        communication,
+                        &source_game_id,
+                        table_id,
+                        day,
+                        Round::Act,
+                        focal_idx as u8,
+                        &focal_guild,
+                        arm,
+                        policy,
+                        raw_reply,
+                        loaded_history_sha256.clone(),
+                        Some(bot_sub),
+                    );
+                    (sub, rec)
+                }
+            }
+            SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
                 if matches!(arm, EvalArm::On | EvalArm::Control) {
                     let preview_json = render_preview_state_json(&obs)?;
                     write_text_atomic(
@@ -2842,6 +3214,7 @@ fn branch_one_target(
                 .with_response_format(Some(response_format.clone()))
                 .with_preview_tool(preview_mode)
                 .with_eval_mode(true)
+                .with_silent_market(communication == CommunicationMode::Silent)
                 .with_local_reasoning_budget_key(local_reasoning_budget_key_for_manifest(
                     serving_record,
                 ))
@@ -2859,8 +3232,10 @@ fn branch_one_target(
                     Round::Act,
                     focal_idx as u8,
                     &focal_guild,
+                    communication,
                 )?;
                 resolve_act_model_round(
+                    communication,
                     &source_game_id,
                     table_id,
                     day,
@@ -2876,7 +3251,8 @@ fn branch_one_target(
                     None,
                     None,
                 )?
-            };
+            }
+        };
 
         let mut spliced = recorded_subs.clone();
         spliced.insert(focal_idx as u8, focal_sub.clone());
@@ -2909,16 +3285,19 @@ fn branch_one_target(
             day,
             focal_seat: focal_idx as u8,
             focal_guild: focal_guild.clone(),
+            communication,
             arm,
             decision: decision_rec.clone(),
             receipt: receipt.clone(),
         };
         let arm_summary = summarize_branch_outcomes(std::slice::from_ref(&arm_outcome));
         let arm_manifest = build_eval_manifest(
+            communication,
             &source_game_id,
             table_id,
             source_setup.seed,
             arm,
+            eval_reply_wording_arm_for(communication),
             &relay_wording_arm,
             wrapper_version,
             wrapper_sha256,
@@ -2987,14 +3366,19 @@ fn all_prior_model_rounds_were_no_reply(
     source_game_dir: &Path,
     focal_guild: &str,
     branch_day: u8,
+    communication: CommunicationMode,
 ) -> bool {
     let decisions_dir = source_game_dir.join("decisions");
     let mut prior_rounds: Vec<(u8, Round)> = Vec::new();
     for d in 1..branch_day {
-        prior_rounds.push((d, Round::Talk));
+        if communication == CommunicationMode::Talk {
+            prior_rounds.push((d, Round::Talk));
+        }
         prior_rounds.push((d, Round::Act));
     }
-    prior_rounds.push((branch_day, Round::Talk));
+    if communication == CommunicationMode::Talk {
+        prior_rounds.push((branch_day, Round::Talk));
+    }
     for (d, r) in prior_rounds {
         let dec_path = decisions_dir.join(format!("day-{d:02}-{r}-{focal_guild}.json"));
         let Ok(raw) = fs::read_to_string(&dec_path) else {
@@ -3014,11 +3398,17 @@ fn load_pre_act_transcript_prefix(
     source_game_dir: &Path,
     focal_guild: &str,
     branch_day: u8,
+    communication: CommunicationMode,
 ) -> Result<TranscriptPrefixWithDigest, EvalError> {
     let rel_path = format!("relay/seats/{focal_guild}.jsonl");
     let path = source_game_dir.join(&rel_path);
     if !path.exists() {
-        if all_prior_model_rounds_were_no_reply(source_game_dir, focal_guild, branch_day) {
+        if all_prior_model_rounds_were_no_reply(
+            source_game_dir,
+            focal_guild,
+            branch_day,
+            communication,
+        ) {
             return Ok((Vec::new(), None));
         }
         return Err(EvalError::MissingBranchTranscript(format!(
@@ -3041,6 +3431,12 @@ fn load_pre_act_transcript_prefix(
                 idx + 1
             ))
         })?;
+        if communication == CommunicationMode::Silent && entry.round == Round::Talk {
+            return Err(EvalError::CommunicationConditionMismatch {
+                checkpoint_condition: "talk (Round::Talk transcript entry)".to_owned(),
+                requested_condition: communication.as_str().to_owned(),
+            });
+        }
         all_entries.push(entry);
     }
     if all_entries.is_empty() {
@@ -3280,6 +3676,7 @@ mod tests {
                 Round::Talk,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag A",
         );
@@ -3372,6 +3769,7 @@ mod tests {
                 Round::Talk,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag B",
         );
@@ -3468,6 +3866,7 @@ mod tests {
                 Round::Act,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag C",
         );
@@ -3481,6 +3880,7 @@ mod tests {
         };
         let (sub_c, rec_c) = must_ok(
             resolve_act_model_round(
+                CommunicationMode::Talk,
                 "g1",
                 1,
                 1,
@@ -3564,6 +3964,7 @@ mod tests {
                 Round::Talk,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag late",
         );
@@ -3635,6 +4036,7 @@ mod tests {
     #[test]
     fn checked_sub_refuses_refused_exceeding_submitted() {
         let mut rec = empty_clubbot_decision(
+            CommunicationMode::Talk,
             "g-count",
             1,
             1,

@@ -60,7 +60,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "8dd66fd5cb82a8fa46540208857594a4b8cf48c8cdbc9a55e0d4e75a35bc8f89",
+          "hash": "ccab318a841f70f092f011ec933af595fa6e393eda122ed066cb7f4a8e7e5524",
           "path": "docs/eval-harness.md"
         },
         {
@@ -774,7 +774,7 @@
               "line": 966
             }
           ],
-          "hash": "a1d6b576d6a81f1a9537fa4eec7245ab8bea54a5db3a424133e18212e0b8e453",
+          "hash": "69bfbd4700ccd36650bfa9964ba8d6d67e7aca681dff02f451b9df4fa19ceffd",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/types.rs"
@@ -783,7 +783,8 @@
             "crates/league-core/src/types.rs",
             "crates/league-seat-types/src/lib.rs"
           ],
-          "path": "crates/league-core/src/commit.rs"
+          "path": "crates/league-core/src/commit.rs",
+          "testsInside": true
         },
         {
           "exports": [
@@ -1898,7 +1899,7 @@
           "path": "crates/league-core/src/eval/mod.rs"
         },
         {
-          "hash": "cfda95481fa014ee61f4c53793c5e221d023f5c29997d18e2ade380e3c370f3f",
+          "hash": "202621a7e9b367be7b10dea16373d2444866953f330dc16e3eed118ce33486bf",
           "importsFiles": [
             "crates/league-core/src/bot.rs",
             "crates/league-core/src/club/mod.rs",
@@ -2683,7 +2684,7 @@
           "testsInside": true
         },
         {
-          "hash": "385917cc7eac696869a5fac36fac99405ba4a3692c0e9a4e3ffaa527511e1469",
+          "hash": "9cfe7937d59a2116ed8995fe2bb8608df5ba556170fe1ca5c79caab7cb7fd131",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2756,7 +2757,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 31,
+      "testedBy": 33,
       "unresolvedSites": 0
     },
     {
@@ -2814,11 +2815,11 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 10,
+      "testedBy": 11,
       "unresolvedSites": 0
     },
     {
-      "dynamicReads": 31,
+      "dynamicReads": 43,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 16,
@@ -2833,7 +2834,7 @@
           "path": "crates/league-eval/Cargo.toml"
         },
         {
-          "hash": "b5413cf0e0d2b700246a91455bb1d45b8ea8843fc90d0bafaa5440753fb1dfd2",
+          "hash": "702b4bfadb24427961f6209add5b123a90c1ad55c39f04006f5af612d56cdb81",
           "path": "crates/league-eval/README.md"
         },
         {
@@ -2843,19 +2844,65 @@
         },
         {
           "exports": [
-            "run_build_blind_inputs"
+            "compute_tit_for_tat_stances",
+            "decide_always_defect_act",
+            "decide_random_legal_act",
+            "decide_scripted_baseline_act",
+            "decide_scripted_baseline_talk",
+            "decide_tit_for_tat_act",
+            "decide_tit_for_tat_talk",
+            "derive_baseline_rng",
+            "encode_canonical_eval_reply",
+            "plan_always_defect_talk"
           ],
           "failurePaths": [
             {
-              "in": "run_build_blind_inputs",
+              "in": "parse_for_seat",
               "kind": "err",
-              "line": 372
+              "line": 114
             },
             {
-              "in": "run_build_blind_inputs",
+              "in": "decide_scripted_baseline_talk",
               "kind": "err",
-              "line": 377
+              "line": 2066
             },
+            {
+              "in": "decide_scripted_baseline_act",
+              "kind": "err",
+              "line": 2112
+            }
+          ],
+          "hash": "30a78d5be4177d11718507ea469c109425481efb1e357be3e14a84c0b4d66ce3",
+          "importOrder": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs",
+            "crates/league-eval/src/reply.rs",
+            "crates/league-eval/src/talk_extract.rs",
+            "crates/league-eval/src/wording.rs"
+          ],
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs",
+            "crates/league-eval/src/reply.rs",
+            "crates/league-eval/src/talk_extract.rs",
+            "crates/league-eval/src/wording.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
+          ],
+          "path": "crates/league-eval/src/baselines.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "run_build_blind_inputs"
+          ],
+          "failurePaths": [
             {
               "in": "run_build_blind_inputs",
               "kind": "err",
@@ -2864,35 +2911,55 @@
             {
               "in": "run_build_blind_inputs",
               "kind": "err",
-              "line": 396
+              "line": 394
             },
             {
               "in": "run_build_blind_inputs",
               "kind": "err",
-              "line": 409
+              "line": 406
             },
             {
               "in": "run_build_blind_inputs",
               "kind": "err",
-              "line": 417
+              "line": 413
             },
             {
               "in": "run_build_blind_inputs",
               "kind": "err",
-              "line": 459
+              "line": 426
             },
             {
               "in": "run_build_blind_inputs",
               "kind": "err",
-              "line": 475
+              "line": 434
             },
             {
               "in": "run_build_blind_inputs",
               "kind": "err",
-              "line": 488
+              "line": 483
+            },
+            {
+              "in": "run_build_blind_inputs",
+              "kind": "err",
+              "line": 528
+            },
+            {
+              "in": "run_build_blind_inputs",
+              "kind": "err",
+              "line": 544
+            },
+            {
+              "in": "run_build_blind_inputs",
+              "kind": "err",
+              "line": 557
+            },
+            {
+              "in": "run_build_blind_inputs",
+              "kind": "err",
+              "line": 607
             }
           ],
-          "hash": "562c65fbc27bd46b2fca6d634b7beb48e96a1090abdb49640b9bd5dea568296d",
+          "hash": "69fec8a52e54e2064ea5d594d52cd0f0394e44247cf3d8cb7d231739a3ab33f9",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -2945,50 +3012,50 @@
             {
               "in": "cmd_play",
               "kind": "err",
-              "line": 316
+              "line": 321
             },
             {
               "in": "cmd_branch",
               "kind": "err",
-              "line": 446
+              "line": 462
             },
             {
               "in": "cmd_select",
               "kind": "err",
-              "line": 536
+              "line": 558
             },
             {
               "in": "cmd_select",
               "kind": "err",
-              "line": 557
+              "line": 579
             },
             {
               "in": "cmd_build_blind_inputs",
               "kind": "err",
-              "line": 633
+              "line": 655
             },
             {
               "in": "cmd_verify_checkpoints",
               "kind": "err",
-              "line": 695
+              "line": 717
             },
             {
               "in": "cmd_freeze",
               "kind": "err",
-              "line": 760
+              "line": 786
             },
             {
               "in": "cmd_join",
               "kind": "err",
-              "line": 829
+              "line": 855
             },
             {
               "in": "parse_memory_mode",
               "kind": "err",
-              "line": 862
+              "line": 888
             }
           ],
-          "hash": "09768ebff66d0f1c5c0f332b0282b2afa8c865917f8733ab20b846b22118d83f",
+          "hash": "4b006be4a31e87709c7fe0e978b236af94ab3f7526541845c18bd763074ab925",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
@@ -3079,7 +3146,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 255,
+                  "line": 256,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3088,7 +3155,16 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 273,
+                  "line": 274,
+                  "name": "parse",
+                  "receiver": "CommunicationMode",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  },
+                  "via": "cmd_play"
+                },
+                {
+                  "line": 278,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3097,7 +3173,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 279,
+                  "line": 284,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3106,7 +3182,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 888,
+                  "line": 914,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3115,7 +3191,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 894,
+                  "line": 920,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3123,7 +3199,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 897,
+                  "line": 923,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3132,7 +3208,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 898,
+                  "line": 924,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3140,7 +3216,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 901,
+                  "line": 927,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3149,7 +3225,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 904,
+                  "line": 930,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3158,7 +3234,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 911,
+                  "line": 937,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3167,7 +3243,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 914,
+                  "line": 940,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3176,7 +3252,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 921,
+                  "line": 947,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3185,7 +3261,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 949,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3194,15 +3270,15 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 356,
-                  "name": "run_play_with_transport_and_git_sha",
+                  "line": 361,
+                  "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   },
                   "via": "cmd_play"
                 },
                 {
-                  "line": 371,
+                  "line": 382,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3211,7 +3287,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 400,
+                  "line": 412,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3220,20 +3296,11 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 420,
+                  "line": 431,
                   "name": "parse",
-                  "receiver": "EvalArm",
+                  "receiver": "CommunicationMode",
                   "target": {
                     "file": "crates/league-eval/src/records.rs"
-                  },
-                  "via": "cmd_branch"
-                },
-                {
-                  "line": 433,
-                  "name": "Usage",
-                  "receiver": "EvalError",
-                  "target": {
-                    "file": "crates/league-eval/src/lib.rs"
                   },
                   "via": "cmd_branch"
                 }
@@ -3304,7 +3371,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 255,
+                  "line": 256,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3313,7 +3380,16 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 273,
+                  "line": 274,
+                  "name": "parse",
+                  "receiver": "CommunicationMode",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  },
+                  "via": "cmd_play"
+                },
+                {
+                  "line": 278,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3322,7 +3398,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 279,
+                  "line": 284,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3331,7 +3407,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 888,
+                  "line": 914,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3340,7 +3416,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 894,
+                  "line": 920,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3348,7 +3424,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 897,
+                  "line": 923,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3357,7 +3433,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 898,
+                  "line": 924,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3365,7 +3441,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 901,
+                  "line": 927,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3374,7 +3450,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 904,
+                  "line": 930,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3383,7 +3459,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 911,
+                  "line": 937,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3392,7 +3468,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 914,
+                  "line": 940,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3401,7 +3477,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 921,
+                  "line": 947,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3410,7 +3486,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 949,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3419,15 +3495,15 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 356,
-                  "name": "run_play_with_transport_and_git_sha",
+                  "line": 361,
+                  "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   },
                   "via": "cmd_play"
                 },
                 {
-                  "line": 371,
+                  "line": 382,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3436,7 +3512,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 400,
+                  "line": 412,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3445,20 +3521,11 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 420,
+                  "line": 431,
                   "name": "parse",
-                  "receiver": "EvalArm",
+                  "receiver": "CommunicationMode",
                   "target": {
                     "file": "crates/league-eval/src/records.rs"
-                  },
-                  "via": "cmd_branch"
-                },
-                {
-                  "line": 433,
-                  "name": "Usage",
-                  "receiver": "EvalError",
-                  "target": {
-                    "file": "crates/league-eval/src/lib.rs"
                   },
                   "via": "cmd_branch"
                 }
@@ -3528,7 +3595,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 255,
+                  "line": 256,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3537,7 +3604,16 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 273,
+                  "line": 274,
+                  "name": "parse",
+                  "receiver": "CommunicationMode",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  },
+                  "via": "cmd_play"
+                },
+                {
+                  "line": 278,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3546,7 +3622,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 279,
+                  "line": 284,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3555,7 +3631,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 888,
+                  "line": 914,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3564,7 +3640,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 894,
+                  "line": 920,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3572,7 +3648,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 897,
+                  "line": 923,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3581,7 +3657,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 898,
+                  "line": 924,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3589,7 +3665,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 901,
+                  "line": 927,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3598,7 +3674,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 904,
+                  "line": 930,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3607,7 +3683,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 911,
+                  "line": 937,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3616,7 +3692,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 914,
+                  "line": 940,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3625,7 +3701,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 921,
+                  "line": 947,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3634,7 +3710,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 949,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3643,15 +3719,15 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 356,
-                  "name": "run_play_with_transport_and_git_sha",
+                  "line": 361,
+                  "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   },
                   "via": "cmd_play"
                 },
                 {
-                  "line": 371,
+                  "line": 382,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3660,7 +3736,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 400,
+                  "line": 412,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3669,20 +3745,11 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 420,
+                  "line": 431,
                   "name": "parse",
-                  "receiver": "EvalArm",
+                  "receiver": "CommunicationMode",
                   "target": {
                     "file": "crates/league-eval/src/records.rs"
-                  },
-                  "via": "cmd_branch"
-                },
-                {
-                  "line": 433,
-                  "name": "Usage",
-                  "receiver": "EvalError",
-                  "target": {
-                    "file": "crates/league-eval/src/lib.rs"
                   },
                   "via": "cmd_branch"
                 }
@@ -3785,7 +3852,7 @@
                   }
                 },
                 {
-                  "line": 255,
+                  "line": 256,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3794,7 +3861,16 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 273,
+                  "line": 274,
+                  "name": "parse",
+                  "receiver": "CommunicationMode",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  },
+                  "via": "cmd_play"
+                },
+                {
+                  "line": 278,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3803,7 +3879,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 279,
+                  "line": 284,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3812,7 +3888,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 888,
+                  "line": 914,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3821,7 +3897,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 894,
+                  "line": 920,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3829,7 +3905,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 897,
+                  "line": 923,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3838,7 +3914,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 898,
+                  "line": 924,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3846,7 +3922,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 901,
+                  "line": 927,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3855,7 +3931,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 904,
+                  "line": 930,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3864,7 +3940,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 911,
+                  "line": 937,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3873,7 +3949,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 914,
+                  "line": 940,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3882,7 +3958,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 921,
+                  "line": 947,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3891,7 +3967,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 949,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3900,15 +3976,15 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 356,
-                  "name": "run_play_with_transport_and_git_sha",
+                  "line": 361,
+                  "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   },
                   "via": "cmd_play"
                 },
                 {
-                  "line": 371,
+                  "line": 382,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3917,7 +3993,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 400,
+                  "line": 412,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3926,28 +4002,20 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 420,
+                  "line": 431,
                   "name": "parse",
-                  "receiver": "EvalArm",
+                  "receiver": "CommunicationMode",
                   "target": {
                     "file": "crates/league-eval/src/records.rs"
                   },
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 433,
-                  "name": "Usage",
-                  "receiver": "EvalError",
+                  "line": 436,
+                  "name": "parse",
+                  "receiver": "EvalArm",
                   "target": {
-                    "file": "crates/league-eval/src/lib.rs"
-                  },
-                  "via": "cmd_branch"
-                },
-                {
-                  "line": 486,
-                  "name": "run_branch_with_transport_and_git_sha",
-                  "target": {
-                    "file": "crates/league-eval/src/driver.rs"
+                    "file": "crates/league-eval/src/records.rs"
                   },
                   "via": "cmd_branch"
                 }
@@ -3961,7 +4029,7 @@
             {
               "calls": [
                 {
-                  "line": 255,
+                  "line": 256,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3969,7 +4037,15 @@
                   }
                 },
                 {
-                  "line": 273,
+                  "line": 274,
+                  "name": "parse",
+                  "receiver": "CommunicationMode",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  }
+                },
+                {
+                  "line": 278,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3977,7 +4053,7 @@
                   }
                 },
                 {
-                  "line": 279,
+                  "line": 284,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3985,7 +4061,7 @@
                   }
                 },
                 {
-                  "line": 888,
+                  "line": 914,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3994,7 +4070,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 894,
+                  "line": 920,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -4002,7 +4078,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 897,
+                  "line": 923,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -4011,7 +4087,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 898,
+                  "line": 924,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -4019,7 +4095,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 901,
+                  "line": 927,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -4028,7 +4104,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 904,
+                  "line": 930,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -4037,7 +4113,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 911,
+                  "line": 937,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -4046,7 +4122,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 914,
+                  "line": 940,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -4055,7 +4131,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 921,
+                  "line": 947,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -4064,7 +4140,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 949,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -4073,14 +4149,14 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 356,
-                  "name": "run_play_with_transport_and_git_sha",
+                  "line": 361,
+                  "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 371,
+                  "line": 382,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4096,7 +4172,7 @@
             {
               "calls": [
                 {
-                  "line": 400,
+                  "line": 412,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4104,7 +4180,15 @@
                   }
                 },
                 {
-                  "line": 420,
+                  "line": 431,
+                  "name": "parse",
+                  "receiver": "CommunicationMode",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  }
+                },
+                {
+                  "line": 436,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -4112,7 +4196,7 @@
                   }
                 },
                 {
-                  "line": 862,
+                  "line": 888,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4121,7 +4205,7 @@
                   "via": "parse_memory_mode"
                 },
                 {
-                  "line": 888,
+                  "line": 914,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -4130,7 +4214,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 894,
+                  "line": 920,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -4138,7 +4222,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 897,
+                  "line": 923,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -4147,7 +4231,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 898,
+                  "line": 924,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -4155,7 +4239,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 901,
+                  "line": 927,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -4164,7 +4248,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 904,
+                  "line": 930,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -4173,7 +4257,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 911,
+                  "line": 937,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -4182,7 +4266,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 914,
+                  "line": 940,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -4191,7 +4275,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 921,
+                  "line": 947,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -4200,7 +4284,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 949,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -4209,21 +4293,21 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 486,
-                  "name": "run_branch_with_transport_and_git_sha",
+                  "line": 502,
+                  "name": "run_branch_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 490,
+                  "line": 512,
                   "name": "summarize_branch_outcomes",
                   "target": {
                     "file": "crates/league-eval/src/records.rs"
                   }
                 },
                 {
-                  "line": 499,
+                  "line": 521,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4239,7 +4323,7 @@
             {
               "calls": [
                 {
-                  "line": 514,
+                  "line": 536,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4248,7 +4332,7 @@
                 },
                 {
                   "branch": "parts.len() != 3",
-                  "line": 536,
+                  "line": 558,
                   "name": "InvalidStrata",
                   "receiver": "EvalError",
                   "target": {
@@ -4256,7 +4340,7 @@
                   }
                 },
                 {
-                  "line": 542,
+                  "line": 564,
                   "name": "InvalidStrata",
                   "receiver": "EvalError",
                   "target": {
@@ -4264,7 +4348,7 @@
                   }
                 },
                 {
-                  "line": 552,
+                  "line": 574,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4272,14 +4356,14 @@
                   }
                 },
                 {
-                  "line": 572,
+                  "line": 594,
                   "name": "run_select",
                   "target": {
                     "file": "crates/league-eval/src/select.rs"
                   }
                 },
                 {
-                  "line": 579,
+                  "line": 601,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4295,7 +4379,7 @@
             {
               "calls": [
                 {
-                  "line": 595,
+                  "line": 617,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4303,14 +4387,14 @@
                   }
                 },
                 {
-                  "line": 656,
+                  "line": 678,
                   "name": "run_build_blind_inputs",
                   "target": {
                     "file": "crates/league-eval/src/blind_builder.rs"
                   }
                 },
                 {
-                  "line": 662,
+                  "line": 684,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4326,7 +4410,7 @@
             {
               "calls": [
                 {
-                  "line": 679,
+                  "line": 701,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4334,14 +4418,14 @@
                   }
                 },
                 {
-                  "line": 711,
+                  "line": 733,
                   "name": "run_verify_checkpoints",
                   "target": {
                     "file": "crates/league-eval/src/verify_checkpoints.rs"
                   }
                 },
                 {
-                  "line": 717,
+                  "line": 739,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4357,7 +4441,7 @@
             {
               "calls": [
                 {
-                  "line": 737,
+                  "line": 761,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4365,7 +4449,7 @@
                   }
                 },
                 {
-                  "line": 776,
+                  "line": 802,
                   "name": "MissingVerifiedCheckpoints",
                   "receiver": "EvalError",
                   "target": {
@@ -4373,14 +4457,14 @@
                   }
                 },
                 {
-                  "line": 782,
-                  "name": "run_freeze",
+                  "line": 808,
+                  "name": "run_freeze_with_provenance",
                   "target": {
                     "file": "crates/league-eval/src/freeze_gate.rs"
                   }
                 },
                 {
-                  "line": 791,
+                  "line": 817,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4396,7 +4480,7 @@
             {
               "calls": [
                 {
-                  "line": 808,
+                  "line": 834,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4404,14 +4488,14 @@
                   }
                 },
                 {
-                  "line": 847,
+                  "line": 873,
                   "name": "run_join",
                   "target": {
                     "file": "crates/league-eval/src/freeze_gate.rs"
                   }
                 },
                 {
-                  "line": 853,
+                  "line": 879,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4427,7 +4511,7 @@
             {
               "calls": [
                 {
-                  "line": 862,
+                  "line": 888,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4443,7 +4527,7 @@
             {
               "calls": [
                 {
-                  "line": 888,
+                  "line": 914,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -4451,14 +4535,14 @@
                   }
                 },
                 {
-                  "line": 894,
+                  "line": 920,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
                   }
                 },
                 {
-                  "line": 897,
+                  "line": 923,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -4466,14 +4550,14 @@
                   }
                 },
                 {
-                  "line": 898,
+                  "line": 924,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 901,
+                  "line": 927,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -4481,7 +4565,7 @@
                   }
                 },
                 {
-                  "line": 904,
+                  "line": 930,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -4489,7 +4573,7 @@
                   }
                 },
                 {
-                  "line": 911,
+                  "line": 937,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -4497,7 +4581,7 @@
                   }
                 },
                 {
-                  "line": 914,
+                  "line": 940,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -4505,7 +4589,7 @@
                   }
                 },
                 {
-                  "line": 921,
+                  "line": 947,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -4513,7 +4597,7 @@
                   }
                 },
                 {
-                  "line": 923,
+                  "line": 949,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -4531,12 +4615,15 @@
         {
           "exports": [
             "persist_eval_game_state",
+            "run_branch_with_communication_and_git_sha",
             "run_branch_with_transport",
             "run_branch_with_transport_and_git_sha",
+            "run_play_with_communication_and_git_sha",
             "run_play_with_transport",
             "run_play_with_transport_and_git_sha",
             "seat_keeps_notes",
             "validate_eval_seats_file",
+            "validate_eval_seats_for_communication",
             "write_json_pretty_atomic",
             "write_text_atomic"
           ],
@@ -4544,152 +4631,122 @@
             {
               "in": "post_chat_completions",
               "kind": "err",
-              "line": 58
+              "line": 66
             },
             {
               "in": "write_text_atomic",
               "kind": "match-err",
-              "line": 175
+              "line": 183
             },
             {
               "in": "write_text_atomic",
               "kind": "err",
-              "line": 178
+              "line": 186
             },
             {
               "in": "write_text_atomic",
               "kind": "match-err",
-              "line": 188
+              "line": 196
             },
             {
               "in": "write_text_atomic",
               "kind": "err",
-              "line": 190
+              "line": 198
             },
             {
-              "in": "validate_eval_seats_file",
+              "in": "validate_eval_seats_for_communication",
               "kind": "err",
-              "line": 203
+              "line": 219
             },
             {
-              "in": "validate_eval_seats_file",
+              "in": "validate_eval_seats_for_communication",
               "kind": "err",
-              "line": 211
+              "line": 230
             },
             {
-              "in": "validate_eval_seats_file",
+              "in": "validate_eval_seats_for_communication",
               "kind": "err",
-              "line": 232
+              "line": 251
             },
             {
-              "in": "validate_eval_seats_file",
+              "in": "validate_eval_seats_for_communication",
               "kind": "err",
-              "line": 238
+              "line": 257
             },
             {
               "in": "draw_os_bot_tie_seed",
               "kind": "err",
-              "line": 285
+              "line": 304
             },
             {
               "in": "parse_top_logprob_entries",
               "kind": "err",
-              "line": 407
+              "line": 426
             },
             {
               "in": "parse_top_logprob_entries",
               "kind": "err",
-              "line": 430
+              "line": 449
             },
             {
               "in": "parse_top_logprob_entries",
               "kind": "err",
-              "line": 438
+              "line": 457
             },
             {
               "in": "parse_top_logprob_entries",
               "kind": "err",
-              "line": 454
+              "line": 473
             },
             {
               "in": "parse_top_logprob_entries",
               "kind": "err",
-              "line": 465
+              "line": 484
             },
             {
               "in": "collect_http_reply_telemetry",
               "kind": "err",
-              "line": 530
+              "line": 549
             },
             {
               "in": "collect_http_reply_telemetry",
               "kind": "err",
-              "line": 537
+              "line": 556
             },
             {
               "in": "collect_http_reply_telemetry",
               "kind": "err",
-              "line": 545
+              "line": 564
             },
             {
               "in": "check_turn_summary_prompt_telemetry",
               "kind": "err",
-              "line": 920
+              "line": 951
             },
             {
               "in": "resolve_talk_model_round",
               "kind": "err",
-              "line": 946
+              "line": 977
             },
             {
               "in": "resolve_act_model_round",
               "kind": "err",
-              "line": 1087
+              "line": 1122
             },
             {
               "in": "ensure_no_partial_from_seat_for_day",
               "kind": "err",
-              "line": 1222
+              "line": 1265
             },
             {
               "in": "resolve_serving_manifest_opt",
               "kind": "err",
-              "line": 1330
+              "line": 1373
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1357
-            },
-            {
-              "in": "validate_eval_reasoning_budgets",
-              "kind": "err",
-              "line": 1370
-            },
-            {
-              "in": "validate_eval_reasoning_budgets",
-              "kind": "err",
-              "line": 1377
-            },
-            {
-              "in": "validate_eval_reasoning_budgets",
-              "kind": "err",
-              "line": 1388
-            },
-            {
-              "in": "validate_eval_reasoning_budgets",
-              "kind": "err",
-              "line": 1395
-            },
-            {
-              "in": "validate_eval_reasoning_budgets",
-              "kind": "err",
-              "line": 1401
-            },
-            {
-              "in": "validate_eval_reasoning_budgets",
-              "kind": "err",
-              "line": 1407
+              "line": 1400
             },
             {
               "in": "validate_eval_reasoning_budgets",
@@ -4699,164 +4756,215 @@
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1425
+              "line": 1420
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1432
+              "line": 1431
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1443
+              "line": 1438
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1454
+              "line": 1444
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1450
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1456
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1468
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1475
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1486
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1497
             },
             {
               "in": "ensure_no_model_seat_regent_at_startup",
               "kind": "err",
-              "line": 1528
+              "line": 1592
             },
             {
               "in": "ensure_no_model_seat_regent_at_startup",
               "kind": "err",
-              "line": 1539
+              "line": 1603
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 1764
+              "line": 1892
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 1776
+              "line": 1904
             },
             {
-              "in": "run_play_with_transport_and_git_sha",
+              "in": "run_play_with_communication_and_git_sha",
               "kind": "err",
-              "line": 1822
+              "line": 1999
             },
             {
-              "in": "run_play_with_transport_and_git_sha",
+              "in": "run_play_with_communication_and_git_sha",
               "kind": "err",
-              "line": 1873
+              "line": 2051
             },
             {
-              "in": "run_play_with_transport_and_git_sha",
+              "in": "run_play_with_communication_and_git_sha",
               "kind": "err",
-              "line": 1887
+              "line": 2067
             },
             {
-              "in": "run_play_with_transport_and_git_sha",
+              "in": "run_play_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2241
+              "line": 2506
             },
             {
-              "in": "run_play_with_transport_and_git_sha",
+              "in": "run_play_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2249
+              "line": 2514
             },
             {
-              "in": "run_play_with_transport_and_git_sha",
+              "in": "run_play_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2303
+              "line": 2570
             },
             {
               "in": "ensure_arm_dir_empty",
               "kind": "err",
-              "line": 2346
+              "line": 2613
             },
             {
-              "in": "run_branch_with_transport_and_git_sha",
+              "in": "run_branch_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2374
+              "line": 2658
             },
             {
-              "in": "run_branch_with_transport_and_git_sha",
+              "in": "run_branch_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2397
+              "line": 2672
             },
             {
-              "in": "run_branch_with_transport_and_git_sha",
+              "in": "run_branch_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2414
+              "line": 2689
             },
             {
-              "in": "run_branch_with_transport_and_git_sha",
+              "in": "run_branch_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2435
+              "line": 2710
             },
             {
-              "in": "run_branch_with_transport_and_git_sha",
+              "in": "run_branch_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2461
+              "line": 2731
             },
             {
-              "in": "run_branch_with_transport_and_git_sha",
+              "in": "run_branch_with_communication_and_git_sha",
               "kind": "err",
-              "line": 2545
+              "line": 2770
+            },
+            {
+              "in": "run_branch_with_communication_and_git_sha",
+              "kind": "err",
+              "line": 2857
             },
             {
               "in": "verify_branch_target_no_model_regent",
               "kind": "err",
-              "line": 2574
+              "line": 2886
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2633
+              "line": 2947
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2645
+              "line": 2959
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2652
+              "line": 2966
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2675
+              "line": 2984
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2684
+              "line": 2998
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2712
+              "line": 3011
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2719
+              "line": 3027
+            },
+            {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 3050
+            },
+            {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 3057
             },
             {
               "in": "load_pre_act_transcript_prefix",
               "kind": "err",
-              "line": 3024
+              "line": 3414
+            },
+            {
+              "in": "load_pre_act_transcript_prefix",
+              "kind": "err",
+              "line": 3435
             },
             {
               "in": "resolve_focal_seat",
               "kind": "err",
-              "line": 3095
+              "line": 3491
             }
           ],
-          "hash": "361c6a39c8c5c8be96542066d516a83236ee678e316f3a42eb5e1beb6f895d40",
+          "hash": "0604fefc6ed3719810c8314751086e5734b5458cd7b23acef5e3f2c57d757568",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
             "crates/league-eval/src/lib.rs",
+            "crates/league-eval/src/baselines.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/reply.rs",
             "crates/league-eval/src/schema.rs",
@@ -4867,6 +4975,7 @@
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/baselines.rs",
             "crates/league-eval/src/lib.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/reply.rs",
@@ -4881,7 +4990,7 @@
           "testsInside": true
         },
         {
-          "hash": "1024179d1bd7ab9b593203511126d59108b0f9555c0965ed3eea41f094dfcdda",
+          "hash": "024ed8281b0b83db0fbe97bd4ee65a7efb1b1feeb1644b4e80240c392100c9c4",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4893,6 +5002,7 @@
         {
           "exports": [
             "run_freeze",
+            "run_freeze_with_provenance",
             "run_join",
             "summarize_arm_talk_counts_from_slices",
             "write_freeze_file_with_writer",
@@ -4902,205 +5012,215 @@
             {
               "in": "validate",
               "kind": "err",
-              "line": 87
+              "line": 91
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 93
+              "line": 97
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 114
+              "line": 118
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 120
+              "line": 124
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 125
+              "line": 129
             },
             {
-              "in": "run_freeze",
+              "in": "detect_homogeneous_communication_in_provenance",
               "kind": "err",
-              "line": 338
+              "line": 492
             },
             {
-              "in": "run_freeze",
+              "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 352
+              "line": 516
             },
             {
-              "in": "run_freeze",
+              "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 358
+              "line": 532
             },
             {
-              "in": "run_freeze",
+              "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 378
+              "line": 538
             },
             {
-              "in": "run_freeze",
+              "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 388
+              "line": 558
+            },
+            {
+              "in": "run_freeze_with_provenance",
+              "kind": "err",
+              "line": 568
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "match-err",
-              "line": 450
+              "line": 631
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "match-err",
-              "line": 452
+              "line": 633
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "err",
-              "line": 453
+              "line": 634
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "err",
-              "line": 458
+              "line": 639
             },
             {
               "in": "load_and_verify_checkpoints_manifest",
               "kind": "err",
-              "line": 468
+              "line": 649
             },
             {
               "in": "validate_blind_inputs_dir_against_config",
               "kind": "err",
-              "line": 515
+              "line": 696
             },
             {
               "in": "validate_blind_inputs_dir_against_config",
               "kind": "err",
-              "line": 531
+              "line": 712
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 586
+              "line": 767
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 593
+              "line": 774
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 616
+              "line": 797
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 641
+              "line": 822
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 647
+              "line": 828
             },
             {
               "in": "verify_control_entry_wording_arm",
-              "kind": "err",
-              "line": 657
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 687
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 693
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 705
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 716
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 728
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 749
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 757
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 776
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 785
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 794
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 804
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 818
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 829
-            },
-            {
-              "in": "run_join",
               "kind": "err",
               "line": 838
             },
             {
-              "in": "run_join",
+              "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 847
+              "line": 868
+            },
+            {
+              "in": "verify_score_matches_arm_map",
+              "kind": "err",
+              "line": 874
+            },
+            {
+              "in": "verify_score_matches_arm_map",
+              "kind": "err",
+              "line": 886
+            },
+            {
+              "in": "verify_score_matches_arm_map",
+              "kind": "err",
+              "line": 897
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 858
+              "line": 909
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 866
+              "line": 930
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 938
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 957
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 966
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 975
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 985
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 999
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 1010
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 1019
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 1028
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 1039
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 1047
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 1093
             }
           ],
-          "hash": "c8482d9a175d2285fc2ba1bd65cb3b1a99d7e9b8bdd1ed8be299568270982722",
+          "hash": "d4afd4b72e631917337a939f5d3b2b22d89e33b3b63d1ba733f07311659e89a4",
           "importOrder": [
             "crates/league-scorer/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
@@ -5108,22 +5228,28 @@
             "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/serving.rs",
-            "crates/league-eval/src/talk_extract.rs"
+            "crates/league-eval/src/talk_extract.rs",
+            "crates/league-core/src/lib.rs",
+            "crates/league-relay/src/lib.rs"
           ],
           "importsFiles": [
+            "crates/league-core/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
             "crates/league-eval/src/error.rs",
             "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/talk_extract.rs",
+            "crates/league-relay/src/lib.rs",
             "crates/league-scorer/src/lib.rs"
           ],
-          "path": "crates/league-eval/src/freeze_gate.rs"
+          "path": "crates/league-eval/src/freeze_gate.rs",
+          "testsInside": true
         },
         {
-          "hash": "83069e9601e74c0680c02e8f5b69aa5d3f23f2dbfc7ba421eeb93492ff9e02eb",
+          "hash": "a20236c7d7fc9e64666cab2a142bb78cb05d7af25e6632cb7c2f89c936108cb9",
           "importsFiles": [
+            "crates/league-eval/src/baselines.rs",
             "crates/league-eval/src/blind_builder.rs",
             "crates/league-eval/src/cli.rs",
             "crates/league-eval/src/driver.rs",
@@ -5230,7 +5356,7 @@
                       "via": "run_cli_args"
                     },
                     {
-                      "line": 255,
+                      "line": 256,
                       "name": "Usage",
                       "receiver": "EvalError",
                       "target": {
@@ -5239,7 +5365,16 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 273,
+                      "line": 274,
+                      "name": "parse",
+                      "receiver": "CommunicationMode",
+                      "target": {
+                        "file": "crates/league-eval/src/records.rs"
+                      },
+                      "via": "cmd_play"
+                    },
+                    {
+                      "line": 278,
                       "name": "parse",
                       "receiver": "EvalArm",
                       "target": {
@@ -5248,7 +5383,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 279,
+                      "line": 284,
                       "name": "Usage",
                       "receiver": "EvalError",
                       "target": {
@@ -5257,7 +5392,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 888,
+                      "line": 914,
                       "name": "from_env",
                       "receiver": "ApiKey",
                       "target": {
@@ -5266,17 +5401,8 @@
                       "via": "execute_with_transport"
                     },
                     {
-                      "line": 894,
+                      "line": 920,
                       "name": "validate_vm_host_allowance",
-                      "target": {
-                        "file": "crates/league-relay/src/lib.rs"
-                      },
-                      "via": "execute_with_transport"
-                    },
-                    {
-                      "line": 897,
-                      "name": "load_with_allowed_hosts",
-                      "receiver": "SeatFile",
                       "target": {
                         "file": "crates/league-relay/src/lib.rs"
                       },
@@ -5330,7 +5456,7 @@
               "line": 852
             }
           ],
-          "hash": "7f37ffd29f7c9ac64dce22ef0859d8b71800e6d1d556f11e176db2167b22060d",
+          "hash": "4f8cec6045065b1d9bd3583a747614b39c897688bb63f026632ece64109d90a9",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -5370,17 +5496,22 @@
               "line": 38
             },
             {
-              "in": "validate_rates",
+              "in": "parse",
               "kind": "err",
-              "line": 214
+              "line": 74
             },
             {
               "in": "validate_rates",
               "kind": "err",
-              "line": 225
+              "line": 255
+            },
+            {
+              "in": "validate_rates",
+              "kind": "err",
+              "line": 266
             }
           ],
-          "hash": "f2e6b08d58bc4fbb523fcb98b0666d9bb57d3337e5c4fe0a03974a187f7f25f1",
+          "hash": "15b0921f970dcfd55a6a69d89732e02d04919de20ace27a3556ab653da207b91",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -5401,55 +5532,68 @@
           "exports": [
             "classify_wrong_round_from_raw_text",
             "parse_eval_act_reply",
+            "parse_eval_act_reply_for_communication",
+            "parse_eval_silent_act_reply",
             "parse_eval_talk_reply"
           ],
           "failurePaths": [
             {
               "in": "visit_map",
               "kind": "err",
-              "line": 197
+              "line": 198
             },
             {
               "in": "parse_strict_json_object",
               "kind": "err",
-              "line": 208
+              "line": 209
             },
             {
               "in": "parse_strict_json_object",
               "kind": "err",
-              "line": 211
+              "line": 212
             },
             {
               "in": "parse_strict_json_object",
               "kind": "err",
-              "line": 221
+              "line": 222
             },
             {
-              "in": "validate_common_reply_envelope_obj",
+              "in": "validate_reply_envelope_obj",
               "kind": "match-err",
-              "line": 443
+              "line": 458
             },
             {
               "in": "parse_eval_act_reply",
               "kind": "match-err",
-              "line": 521
+              "line": 536
+            },
+            {
+              "in": "parse_eval_silent_act_reply",
+              "kind": "match-err",
+              "line": 669
             },
             {
               "in": "parse_eval_talk_reply",
               "kind": "match-err",
-              "line": 586
+              "line": 760
             }
           ],
-          "hash": "9c2f9f4b56d0683eaa443d3fe02d923985202d0c715839ca70a3ba36b938f7df",
+          "hash": "bfceebe6c90c63ee7dab3c9289c1e2093942628a9d97a4c16f902ddefe7b4273",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
-            "crates/league-eval/src/wording.rs"
+            "crates/league-eval/src/records.rs",
+            "crates/league-eval/src/wording.rs",
+            "crates/league-eval/src/baselines.rs",
+            "crates/league-seat-types/src/lib.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/baselines.rs",
+            "crates/league-eval/src/records.rs",
             "crates/league-eval/src/wording.rs",
-            "crates/league-relay/src/lib.rs"
+            "crates/league-relay/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
           ],
           "path": "crates/league-eval/src/reply.rs",
           "testsInside": true
@@ -5457,7 +5601,9 @@
         {
           "exports": [
             "build_eval_response_format_config",
-            "build_eval_response_format_value"
+            "build_eval_response_format_value",
+            "build_eval_silent_response_format_config",
+            "build_eval_silent_response_format_value"
           ],
           "failurePaths": [
             {
@@ -5466,7 +5612,7 @@
               "line": 83
             }
           ],
-          "hash": "6cecd652224229af14c4e99364cf6c2a64e7fa185a8ddbd2c6a26d7af1208a5c",
+          "hash": "308ebdf2f3e060abf46ef56eae73d13f575500493a680a1a053d7c39680a7830",
           "importOrder": [
             "crates/league-relay/src/lib.rs",
             "crates/league-eval/src/error.rs",
@@ -5545,109 +5691,111 @@
             {
               "in": "validate_crate_git_sha_and_cleanliness",
               "kind": "err",
-              "line": 444
+              "line": 486
             },
             {
               "in": "validate_crate_git_sha_and_cleanliness",
               "kind": "err",
-              "line": 451
+              "line": 493
             },
             {
               "in": "validate_crate_git_sha_and_cleanliness",
               "kind": "err",
-              "line": 457
+              "line": 499
             },
             {
               "in": "resolve_verified_crate_git_sha_in",
               "kind": "err",
-              "line": 496
+              "line": 538
             },
             {
               "in": "resolve_verified_crate_git_sha_in",
               "kind": "err",
-              "line": 511
+              "line": 553
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 582
+              "line": 624
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 587
+              "line": 629
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 607
+              "line": 649
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 634
+              "line": 676
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 642
+              "line": 684
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 650
+              "line": 692
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 659
+              "line": 701
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 664
+              "line": 706
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 670
+              "line": 712
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 689
+              "line": 731
             },
             {
               "in": "load_and_validate_serving_manifest",
               "kind": "err",
-              "line": 853
+              "line": 895
             },
             {
               "in": "scrub_text_value",
               "kind": "err",
-              "line": 992
+              "line": 1034
             },
             {
               "in": "scrub_text_value",
               "kind": "err",
-              "line": 997
+              "line": 1039
             },
             {
               "in": "scrub_text_value",
               "kind": "err",
-              "line": 1008
+              "line": 1050
             }
           ],
-          "hash": "9788b73c6e1d144dcd67166a640cd48ea77372ec80138b0679a6c586045e0330",
+          "hash": "d600076f6246ba31a543df54c30f4f21fe8f1d06fab11386b4459652f080b5c6",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
             "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs",
             "crates/league-eval/src/wording.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs",
             "crates/league-eval/src/wording.rs",
             "crates/league-relay/src/lib.rs"
           ],
@@ -5847,18 +5995,28 @@
           "exports": [
             "build_act_negotiation_inputs",
             "render_preview_state_json",
-            "render_seat_view_markdown"
+            "render_seat_view_markdown",
+            "render_seat_view_markdown_for_communication"
           ],
-          "hash": "8845f162eab7f1848506e8bf980baf4a4f429d6f1483b5a907040c14fc93ebf6",
+          "failurePaths": [
+            {
+              "in": "render_seat_view_markdown_for_communication",
+              "kind": "err",
+              "line": 46
+            }
+          ],
+          "hash": "9279516e341a14e21d3333c0703b15fcc6d916528e2016a70b0e96e9872182ef",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
             "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs",
             "crates/league-eval/src/wording.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs",
             "crates/league-eval/src/wording.rs",
             "crates/league-relay/src/lib.rs"
           ],
@@ -5869,33 +6027,47 @@
           "exports": [
             "check_wrapper_digest",
             "eval_internal_slot_names",
+            "eval_silent_wording_slot",
             "eval_wording_slot",
-            "resolve_pinned_wrapper"
+            "resolve_pinned_wrapper",
+            "resolve_pinned_wrapper_for_communication"
           ],
           "failurePaths": [
             {
               "in": "check_wrapper_digest",
               "kind": "err",
-              "line": 42
+              "line": 57
             },
             {
               "in": "check_wrapper_digest",
               "kind": "err",
-              "line": 48
+              "line": 63
             },
             {
               "in": "check_wrapper_digest",
               "kind": "err",
-              "line": 56
+              "line": 71
+            },
+            {
+              "in": "check_digest_in_allowlist",
+              "kind": "err",
+              "line": 114
+            },
+            {
+              "in": "check_digest_in_allowlist",
+              "kind": "err",
+              "line": 122
             }
           ],
-          "hash": "aa97f10f7e502e6b73b2751387d80bea8574f8fd7f5c35f9aeaf2b22de095d2d",
+          "hash": "cf4dd556f1db06db7be81c33787453caa9440e4bbaea0355dc3442fc75b800e0",
           "importOrder": [
             "crates/league-relay/src/lib.rs",
-            "crates/league-eval/src/error.rs"
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs"
           ],
           "importsFiles": [
             "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/records.rs",
             "crates/league-relay/src/lib.rs"
           ],
           "path": "crates/league-eval/src/wording.rs",
@@ -5924,6 +6096,98 @@
           "testsInside": true
         },
         {
+          "hash": "2b17b802c13f006cfd578efac7c2c42a15480cd3ec1e69b415207db2a04a7ed3",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/d902d04_model_manifest.tsv"
+        },
+        {
+          "hash": "d5757486dff3981a6f60391c0002a0ec46382e164d548ad5a4a01eb032f11b04",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/decisions/day-01-act-Foundry.json"
+        },
+        {
+          "hash": "f12b167a98fd99e6f14848af9395d2167390e18a51b3b5451823f01b6e5b9d06",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/decisions/day-01-talk-Foundry.json"
+        },
+        {
+          "hash": "fbed8e31b9d7886831b9003500d4706c7c9e525a09327e28da3ee6aae9be67f6",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/manifest.json"
+        },
+        {
+          "hash": "8c35c7d74693ce6cc620f327e4d9286a1c2c39237230750a14f5de0adaea1ebc",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/relay/seats/Foundry.jsonl"
+        },
+        {
+          "hash": "b27734af100ed6bb6750a60935cfec89620ce79ee1ed87b74cf02cd78f42997d",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/relay/setup.json"
+        },
+        {
+          "hash": "12069d65a3c3ceda2a67607dd36f7d0e297df854cf11962abc4f06398be3615a",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/request_body_sha256s.json"
+        },
+        {
+          "hash": "71dff4c7de873d549ae5cedf101b3e841dfcf157bb00ca9319ff631f79d5520d",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/setup.json"
+        },
+        {
+          "hash": "70c16f7d312114ab466311dc123407c97baffb9fa80f03f790ab70cbe1d974d9",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/to-seat/day-01-act-Foundry.md"
+        },
+        {
+          "hash": "bd19d26768b9a1fdc6b17f078c0a460aa6c11da58b0dce664826e8e42ed2b63d",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/to-seat/day-01-act-Foundry.negotiation.json"
+        },
+        {
+          "hash": "9403ae5c6bdf2d21543b4223c765b0c08879bcf63b80499e116cf61ae5fa3b53",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/to-seat/day-01-act-Foundry.preview-state.json"
+        },
+        {
+          "hash": "0bcd62bf45edf9c819414581317bd114aca078be6ac72f8f394c44814e94dd02",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/expected/to-seat/day-01-talk-Foundry.md"
+        },
+        {
+          "hash": "9bf57143bef7af03447e2b5d264fdb950a0440d7699f5c5a62208b15c86a43b0",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/mock_dir/responses.json"
+        },
+        {
+          "hash": "4a5c5034c446fb650f10098f0d1ccb3fce29fdc7a8fcad7fd3eb20edca8beda4",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/seats.json"
+        },
+        {
+          "hash": "9be7d3b20768c0a808bdc0f98a0591e9964bfae95f7c740a98b6f197c42ff7f3",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/serving_manifest.json"
+        },
+        {
+          "hash": "1e22852bf5bad381b3ddfeda183ebc51f2cc974033f26bb3280a6bb8b2787fbd",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/turn0_game/eval-78.save.json"
+        },
+        {
+          "hash": "0f9f8e2303f3073aff9965a91100346a71988d183136a789915acdd7dab23fe0",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/turn0_game/eval-78.seal"
+        },
+        {
+          "hash": "71dff4c7de873d549ae5cedf101b3e841dfcf157bb00ca9319ff631f79d5520d",
+          "path": "crates/league-eval/tests/fixtures/d902d04_model_talk_turn1/turn0_game/setup.json"
+        },
+        {
+          "hash": "e17d4478ba2c8e21ad315fef259b2ca3207f43ed2c26a5ec4b1794aa334794d1",
+          "path": "crates/league-eval/tests/fixtures/d902d04_talk_turn0/d902d04_manifest.tsv"
+        },
+        {
+          "hash": "dde0583ad067012dfdaebe97a00e0c973e490685629c04ea63b1041b5c9aee74",
+          "path": "crates/league-eval/tests/fixtures/d902d04_talk_turn0/seats.json"
+        },
+        {
+          "hash": "cd85d72c8deab51db6d3d42cf1e5090a737af5f95157539815330116b1548db6",
+          "path": "crates/league-eval/tests/fixtures/d902d04_talk_turn0/turn0_game/eval-77.save.json"
+        },
+        {
+          "hash": "e76c22b6ff1bbb23da7687e416dc4558b53418798255990788fa5dccc0fb37fb",
+          "path": "crates/league-eval/tests/fixtures/d902d04_talk_turn0/turn0_game/eval-77.seal"
+        },
+        {
+          "hash": "a285912274c2d5b668c07625047f1e146e6b22b269331d58d828c81817a7cf2b",
+          "path": "crates/league-eval/tests/fixtures/d902d04_talk_turn0/turn0_game/setup.json"
+        },
+        {
           "hash": "5727faa205f05a87e05309cb878e0dbf16137e4a73be4271e6b732482f7fd3f4",
           "path": "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md"
         },
@@ -5945,7 +6209,7 @@
           "testsInside": true
         },
         {
-          "hash": "97a639e069af6eaf00a07a23bad9bd3f5b56615bcce3677caefa41878085735a",
+          "hash": "148037a2455cea4723ac1568b5c324a603d0bc974331d97ec0fafaf63a46b405",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -5959,7 +6223,7 @@
           "testsInside": true
         },
         {
-          "hash": "2bc0fdcfe3c35728cc1625c349fbb6dca7f6134f5e13d64708c8b3a8f0934673",
+          "hash": "16437e96b8c25240bc9c126eabc9976d9f92174d6d2c27196eab4600730a4266",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -5969,6 +6233,19 @@
           ],
           "library": "crates/league-eval/src/lib.rs",
           "path": "crates/league-eval/tests/scorer_s3b_mechanisms.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "0c353b824fdfd79d230af90b6b65dff6de0059dcb7fb8062a525ff91483d8e1d",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/lib.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
+          ],
+          "library": "crates/league-eval/src/lib.rs",
+          "path": "crates/league-eval/tests/silent_and_baselines.rs",
           "testsInside": true
         },
         {
@@ -5987,6 +6264,10 @@
         {
           "hash": "66d5665950b2ef9bad177dbcfbe132912fa99f09c328a40866502dbf16d6a06d",
           "path": "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md"
+        },
+        {
+          "hash": "d83afe6c02691beb2c1dfac0ce98956f57989bbcb6ea5d84934302f62ca9c7e3",
+          "path": "crates/league-eval/wrappers/v2_seat_brief_silent_2026_11_26_r1.md"
         }
       ],
       "globs": [
@@ -5997,20 +6278,20 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 44,
+          "reads": 49,
           "where": [
             "caller"
           ],
           "writes": 4
         }
       ],
-      "outsideReads": 44,
+      "outsideReads": 49,
       "outsideWrites": 4,
       "role": "code",
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 13,
+      "testedBy": 16,
       "unresolvedSites": 0
     },
     {
@@ -7214,17 +7495,12 @@
             {
               "in": "parse_args_with_key",
               "kind": "err",
-              "line": 603
-            },
-            {
-              "in": "parse_args_with_key",
-              "kind": "err",
               "line": 608
             },
             {
               "in": "parse_args_with_key",
               "kind": "err",
-              "line": 617
+              "line": 613
             },
             {
               "in": "parse_args_with_key",
@@ -7232,102 +7508,117 @@
               "line": 622
             },
             {
+              "in": "parse_args_with_key",
+              "kind": "err",
+              "line": 627
+            },
+            {
+              "in": "parse_communication_cli_flag",
+              "kind": "err",
+              "line": 659
+            },
+            {
+              "in": "parse_communication_cli_flag",
+              "kind": "err",
+              "line": 662
+            },
+            {
               "in": "take_flag_value",
               "kind": "err",
-              "line": 663
+              "line": 680
             },
             {
               "in": "post_chat_completions",
               "kind": "err",
-              "line": 711
+              "line": 728
             },
             {
               "in": "execute_cli",
               "kind": "match-err",
-              "line": 835
+              "line": 852
             },
             {
               "in": "execute_cli",
               "kind": "match-err",
-              "line": 861
+              "line": 878
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 909
+              "line": 926
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 952
+              "line": 969
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 958
+              "line": 975
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 967
+              "line": 984
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 972
+              "line": 989
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 981
+              "line": 998
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 1002
+              "line": 1024
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 1009
+              "line": 1031
             },
             {
               "in": "parse_prebook_check_args",
               "kind": "err",
-              "line": 1014
+              "line": 1036
             },
             {
               "in": "create",
               "kind": "match-err",
-              "line": 1052
+              "line": 1074
             },
             {
               "in": "create",
               "kind": "match-err",
-              "line": 1053
+              "line": 1075
             },
             {
               "in": "create",
               "kind": "err",
-              "line": 1054
+              "line": 1076
             },
             {
               "in": "create",
               "kind": "err",
-              "line": 1061
+              "line": 1083
             },
             {
               "in": "run_prebook_check",
               "kind": "err",
-              "line": 1268
+              "line": 1290
             },
             {
               "in": "run_cli_inner",
               "kind": "err",
-              "line": 1498
+              "line": 1520
             }
           ],
-          "hash": "798b1f68aeeca8f6503c140b17149632a727b8b1ba38bab0f80431511c07db3f",
+          "hash": "ec6f94803fd628df7ba8a58ef42b5931598a58303d8a291c5a6d376dc7a2b19a",
           "importsFiles": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/relay.rs",
@@ -7361,7 +7652,7 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "line": 663,
+                  "line": 680,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -7409,7 +7700,7 @@
                   "via": "try_consume_hygiene_flag"
                 },
                 {
-                  "line": 696,
+                  "line": 713,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -7417,7 +7708,7 @@
                   "via": "sanitize_flag_name"
                 },
                 {
-                  "line": 698,
+                  "line": 715,
                   "name": "truncate_after_redaction",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -7445,7 +7736,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 892,
+                  "line": 909,
                   "name": "default",
                   "receiver": "MemoryMode",
                   "target": {
@@ -7455,7 +7746,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 896,
+                  "line": 913,
                   "name": "default",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -7465,7 +7756,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 909,
+                  "line": 926,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
@@ -7475,7 +7766,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 944,
+                  "line": 961,
                   "name": "parse",
                   "receiver": "MemoryMode",
                   "target": {
@@ -7485,7 +7776,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 952,
+                  "line": 969,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -7495,7 +7786,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 990,
+                  "line": 1007,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/seats.rs"
@@ -7504,7 +7795,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 998,
+                  "line": 1015,
                   "name": "parse",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -7514,13 +7805,23 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 1002,
+                  "line": 659,
+                  "name": "SilentMarketEvalOnly",
+                  "receiver": "RelayError",
+                  "target": {
+                    "file": "crates/league-relay/src/error.rs"
+                  },
+                  "via": "parse_communication_cli_flag"
+                },
+                {
+                  "branch": "tokens[pos] == \"prebook-check\"",
+                  "line": 662,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_prebook_check_args"
+                  "via": "parse_communication_cli_flag"
                 },
                 {
                   "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
@@ -7559,16 +7860,6 @@
                     "file": "crates/league-relay/src/wording.rs"
                   },
                   "via": "parse_args_with_key"
-                },
-                {
-                  "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
-                  "line": 450,
-                  "name": "SecretInForbiddenPlace",
-                  "receiver": "RelayError",
-                  "target": {
-                    "file": "crates/league-relay/src/error.rs"
-                  },
-                  "via": "parse_args_with_key"
                 }
               ],
               "exported": true,
@@ -7597,7 +7888,7 @@
             {
               "calls": [
                 {
-                  "line": 663,
+                  "line": 680,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -7684,7 +7975,7 @@
                   }
                 },
                 {
-                  "line": 663,
+                  "line": 680,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -7732,7 +8023,7 @@
                   "via": "try_consume_hygiene_flag"
                 },
                 {
-                  "line": 696,
+                  "line": 713,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -7740,7 +8031,7 @@
                   "via": "sanitize_flag_name"
                 },
                 {
-                  "line": 698,
+                  "line": 715,
                   "name": "truncate_after_redaction",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -7766,7 +8057,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 892,
+                  "line": 909,
                   "name": "default",
                   "receiver": "MemoryMode",
                   "target": {
@@ -7776,7 +8067,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 896,
+                  "line": 913,
                   "name": "default",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -7786,7 +8077,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 909,
+                  "line": 926,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
@@ -7796,7 +8087,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 944,
+                  "line": 961,
                   "name": "parse",
                   "receiver": "MemoryMode",
                   "target": {
@@ -7806,7 +8097,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 952,
+                  "line": 969,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -7816,7 +8107,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 990,
+                  "line": 1007,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/seats.rs"
@@ -7825,7 +8116,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 998,
+                  "line": 1015,
                   "name": "parse",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -7835,13 +8126,23 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 1002,
+                  "line": 659,
+                  "name": "SilentMarketEvalOnly",
+                  "receiver": "RelayError",
+                  "target": {
+                    "file": "crates/league-relay/src/error.rs"
+                  },
+                  "via": "parse_communication_cli_flag"
+                },
+                {
+                  "branch": "tokens[pos] == \"prebook-check\"",
+                  "line": 662,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_prebook_check_args"
+                  "via": "parse_communication_cli_flag"
                 },
                 {
                   "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
@@ -7876,15 +8177,6 @@
                   "target": {
                     "file": "crates/league-relay/src/wording.rs"
                   }
-                },
-                {
-                  "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
-                  "line": 450,
-                  "name": "SecretInForbiddenPlace",
-                  "receiver": "RelayError",
-                  "target": {
-                    "file": "crates/league-relay/src/error.rs"
-                  }
                 }
               ],
               "exported": true,
@@ -7896,7 +8188,31 @@
             {
               "calls": [
                 {
-                  "line": 663,
+                  "line": 659,
+                  "name": "SilentMarketEvalOnly",
+                  "receiver": "RelayError",
+                  "target": {
+                    "file": "crates/league-relay/src/error.rs"
+                  }
+                },
+                {
+                  "line": 662,
+                  "name": "Usage",
+                  "receiver": "RelayError",
+                  "target": {
+                    "file": "crates/league-relay/src/error.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "parse_communication_cli_flag"
+            },
+            {
+              "calls": [
+                {
+                  "line": 680,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -7912,14 +8228,14 @@
             {
               "calls": [
                 {
-                  "line": 696,
+                  "line": 713,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 698,
+                  "line": 715,
                   "name": "truncate_after_redaction",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -7935,7 +8251,7 @@
               "calls": [
                 {
                   "branch": "let Some(raw_env) = read_named_env(env_reader, LEAGUE_LOG_L…",
-                  "line": 753,
+                  "line": 770,
                   "name": "parse",
                   "receiver": "LogLevel",
                   "target": {
@@ -7960,7 +8276,7 @@
                   "via": "infer_log_level_best_effort"
                 },
                 {
-                  "line": 780,
+                  "line": 797,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -7968,21 +8284,21 @@
                   }
                 },
                 {
-                  "line": 785,
+                  "line": 802,
                   "name": "collect_env_redaction_keys",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 800,
+                  "line": 817,
                   "name": "panic_hook_log_level",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 802,
+                  "line": 819,
                   "name": "set_panic_hook_log_level",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -8009,7 +8325,7 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "line": 663,
+                  "line": 680,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8057,7 +8373,7 @@
                   "via": "try_consume_hygiene_flag"
                 },
                 {
-                  "line": 696,
+                  "line": 713,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -8065,7 +8381,7 @@
                   "via": "sanitize_flag_name"
                 },
                 {
-                  "line": 698,
+                  "line": 715,
                   "name": "truncate_after_redaction",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -8093,7 +8409,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 892,
+                  "line": 909,
                   "name": "default",
                   "receiver": "MemoryMode",
                   "target": {
@@ -8103,7 +8419,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 896,
+                  "line": 913,
                   "name": "default",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -8113,7 +8429,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 909,
+                  "line": 926,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
@@ -8123,7 +8439,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 944,
+                  "line": 961,
                   "name": "parse",
                   "receiver": "MemoryMode",
                   "target": {
@@ -8133,7 +8449,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 952,
+                  "line": 969,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8143,7 +8459,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 990,
+                  "line": 1007,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/seats.rs"
@@ -8152,7 +8468,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 998,
+                  "line": 1015,
                   "name": "parse",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -8162,13 +8478,13 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 1002,
-                  "name": "Usage",
+                  "line": 659,
+                  "name": "SilentMarketEvalOnly",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_prebook_check_args"
+                  "via": "parse_communication_cli_flag"
                 }
               ],
               "exported": true,
@@ -8180,7 +8496,7 @@
             {
               "calls": [
                 {
-                  "line": 892,
+                  "line": 909,
                   "name": "default",
                   "receiver": "MemoryMode",
                   "target": {
@@ -8188,7 +8504,7 @@
                   }
                 },
                 {
-                  "line": 896,
+                  "line": 913,
                   "name": "default",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -8197,7 +8513,7 @@
                 },
                 {
                   "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
-                  "line": 909,
+                  "line": 926,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
@@ -8205,7 +8521,7 @@
                   }
                 },
                 {
-                  "line": 663,
+                  "line": 680,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8253,7 +8569,7 @@
                   "via": "try_consume_hygiene_flag"
                 },
                 {
-                  "line": 944,
+                  "line": 961,
                   "name": "parse",
                   "receiver": "MemoryMode",
                   "target": {
@@ -8261,7 +8577,7 @@
                   }
                 },
                 {
-                  "line": 952,
+                  "line": 969,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8270,7 +8586,7 @@
                 },
                 {
                   "branch": "scratchpad_requested.is_some_and(|prev| prev != req)",
-                  "line": 958,
+                  "line": 975,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8279,7 +8595,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 967,
+                  "line": 984,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8288,7 +8604,7 @@
                 },
                 {
                   "branch": "scratchpad_requested == Some(true)",
-                  "line": 972,
+                  "line": 989,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8297,7 +8613,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 981,
+                  "line": 998,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8305,14 +8621,14 @@
                   }
                 },
                 {
-                  "line": 990,
+                  "line": 1007,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/seats.rs"
                   }
                 },
                 {
-                  "line": 998,
+                  "line": 1015,
                   "name": "parse",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -8320,16 +8636,26 @@
                   }
                 },
                 {
-                  "line": 1002,
+                  "line": 659,
+                  "name": "SilentMarketEvalOnly",
+                  "receiver": "RelayError",
+                  "target": {
+                    "file": "crates/league-relay/src/error.rs"
+                  },
+                  "via": "parse_communication_cli_flag"
+                },
+                {
+                  "line": 662,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
-                  }
+                  },
+                  "via": "parse_communication_cli_flag"
                 },
                 {
                   "branch": "!other.starts_with('-')",
-                  "line": 1009,
+                  "line": 1031,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8337,7 +8663,7 @@
                   }
                 },
                 {
-                  "line": 696,
+                  "line": 713,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -8345,7 +8671,7 @@
                   "via": "sanitize_flag_name"
                 },
                 {
-                  "line": 698,
+                  "line": 715,
                   "name": "truncate_after_redaction",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -8353,7 +8679,7 @@
                   "via": "sanitize_flag_name"
                 },
                 {
-                  "line": 1014,
+                  "line": 1036,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8369,7 +8695,7 @@
             {
               "calls": [
                 {
-                  "line": 1147,
+                  "line": 1169,
                   "name": "wording_slot",
                   "target": {
                     "file": "crates/league-relay/src/wording.rs"
@@ -8384,7 +8710,7 @@
             {
               "calls": [
                 {
-                  "line": 1246,
+                  "line": 1268,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/seats.rs"
@@ -8400,7 +8726,7 @@
               "calls": [
                 {
                   "branch": "any_forbidden_local_key",
-                  "line": 1268,
+                  "line": 1290,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
@@ -8408,7 +8734,7 @@
                   }
                 },
                 {
-                  "line": 1246,
+                  "line": 1268,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/seats.rs"
@@ -8416,7 +8742,7 @@
                   "via": "infer_prebook_vm_hosts"
                 },
                 {
-                  "line": 1280,
+                  "line": 1302,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -8424,7 +8750,7 @@
                   }
                 },
                 {
-                  "line": 1282,
+                  "line": 1304,
                   "name": "load",
                   "receiver": "ResponseFormatConfig",
                   "target": {
@@ -8432,14 +8758,14 @@
                   }
                 },
                 {
-                  "line": 1291,
+                  "line": 1313,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 1291,
+                  "line": 1313,
                   "name": "Io",
                   "receiver": "RelayError",
                   "target": {
@@ -8447,14 +8773,14 @@
                   }
                 },
                 {
-                  "line": 1297,
+                  "line": 1319,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 1297,
+                  "line": 1319,
                   "name": "Io",
                   "receiver": "RelayError",
                   "target": {
@@ -8462,14 +8788,14 @@
                   }
                 },
                 {
-                  "line": 1306,
+                  "line": 1328,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 1306,
+                  "line": 1328,
                   "name": "Io",
                   "receiver": "RelayError",
                   "target": {
@@ -8477,7 +8803,7 @@
                   }
                 },
                 {
-                  "line": 1147,
+                  "line": 1169,
                   "name": "wording_slot",
                   "target": {
                     "file": "crates/league-relay/src/wording.rs"
@@ -8485,14 +8811,14 @@
                   "via": "build_prebook_mock_responses_json"
                 },
                 {
-                  "line": 1319,
+                  "line": 1341,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 1319,
+                  "line": 1341,
                   "name": "Io",
                   "receiver": "RelayError",
                   "target": {
@@ -8500,7 +8826,7 @@
                   }
                 },
                 {
-                  "line": 1349,
+                  "line": 1371,
                   "name": "new",
                   "receiver": "TurnConfig",
                   "target": {
@@ -8508,14 +8834,14 @@
                   }
                 },
                 {
-                  "line": 1368,
+                  "line": 1390,
                   "name": "validate_scratchpad_setup",
                   "target": {
                     "file": "crates/league-relay/src/relay.rs"
                   }
                 },
                 {
-                  "line": 1371,
+                  "line": 1393,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -8523,21 +8849,21 @@
                   }
                 },
                 {
-                  "line": 1372,
+                  "line": 1394,
                   "name": "run_turn_with_diag",
                   "target": {
                     "file": "crates/league-relay/src/relay.rs"
                   }
                 },
                 {
-                  "line": 1380,
+                  "line": 1402,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 1380,
+                  "line": 1402,
                   "name": "Io",
                   "receiver": "RelayError",
                   "target": {
@@ -8545,14 +8871,14 @@
                   }
                 },
                 {
-                  "line": 1386,
+                  "line": 1408,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
                   }
                 },
                 {
-                  "line": 1386,
+                  "line": 1408,
                   "name": "CorruptLog",
                   "receiver": "RelayError",
                   "target": {
@@ -8588,7 +8914,7 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "line": 663,
+                  "line": 680,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8636,7 +8962,7 @@
                   "via": "try_consume_hygiene_flag"
                 },
                 {
-                  "line": 696,
+                  "line": 713,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -8644,7 +8970,7 @@
                   "via": "sanitize_flag_name"
                 },
                 {
-                  "line": 698,
+                  "line": 715,
                   "name": "truncate_after_redaction",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -8672,7 +8998,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 892,
+                  "line": 909,
                   "name": "default",
                   "receiver": "MemoryMode",
                   "target": {
@@ -8682,7 +9008,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 896,
+                  "line": 913,
                   "name": "default",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -8692,7 +9018,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 909,
+                  "line": 926,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
@@ -8702,7 +9028,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 944,
+                  "line": 961,
                   "name": "parse",
                   "receiver": "MemoryMode",
                   "target": {
@@ -8712,7 +9038,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 952,
+                  "line": 969,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -8722,7 +9048,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 990,
+                  "line": 1007,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/seats.rs"
@@ -8731,7 +9057,7 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 998,
+                  "line": 1015,
                   "name": "parse",
                   "receiver": "PreviewToolMode",
                   "target": {
@@ -8741,13 +9067,23 @@
                 },
                 {
                   "branch": "tokens[pos] == \"prebook-check\"",
-                  "line": 1002,
+                  "line": 659,
+                  "name": "SilentMarketEvalOnly",
+                  "receiver": "RelayError",
+                  "target": {
+                    "file": "crates/league-relay/src/error.rs"
+                  },
+                  "via": "parse_communication_cli_flag"
+                },
+                {
+                  "branch": "tokens[pos] == \"prebook-check\"",
+                  "line": 662,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_prebook_check_args"
+                  "via": "parse_communication_cli_flag"
                 },
                 {
                   "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
@@ -8786,16 +9122,6 @@
                     "file": "crates/league-relay/src/wording.rs"
                   },
                   "via": "parse_args_with_key"
-                },
-                {
-                  "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
-                  "line": 450,
-                  "name": "SecretInForbiddenPlace",
-                  "receiver": "RelayError",
-                  "target": {
-                    "file": "crates/league-relay/src/error.rs"
-                  },
-                  "via": "parse_args_with_key"
                 }
               ],
               "exported": false,
@@ -8804,13 +9130,14 @@
               "name": "run_cli_inner",
               "truncated": true
             }
-          ]
+          ],
+          "testsInside": true
         },
         {
           "exports": [
             "scrub_structured_error_with_keys"
           ],
-          "hash": "ebe711dc30166a43576562e480506dde052c77fd93752c49235c8659c399db0a",
+          "hash": "d578b61733cb5027554c6321bfd963a84fd047183fbd0800e3e3835e4f1db03f",
           "importsFiles": [
             "crates/league-error/src/lib.rs",
             "crates/league-relay/src/secret.rs"
@@ -8818,7 +9145,7 @@
           "path": "crates/league-relay/src/error.rs"
         },
         {
-          "hash": "a1943fcb99179ca949ed11ceec4cb6ceaf854fb2069d180a2c82036c0cb77fb2",
+          "hash": "c19c6bf314ee3ef40282a27c0dc011a12790fd56176c87634f8e0a231304039c",
           "importsFiles": [
             "crates/league-relay/src/cli.rs",
             "crates/league-relay/src/error.rs",
@@ -8893,7 +9220,7 @@
                       "via": "infer_log_level_best_effort"
                     },
                     {
-                      "line": 780,
+                      "line": 797,
                       "name": "from_env_reader",
                       "receiver": "ApiKey",
                       "target": {
@@ -8901,21 +9228,21 @@
                       }
                     },
                     {
-                      "line": 785,
+                      "line": 802,
                       "name": "collect_env_redaction_keys",
                       "target": {
                         "file": "crates/league-relay/src/secret.rs"
                       }
                     },
                     {
-                      "line": 800,
+                      "line": 817,
                       "name": "panic_hook_log_level",
                       "target": {
                         "file": "crates/league-relay/src/secret.rs"
                       }
                     },
                     {
-                      "line": 802,
+                      "line": 819,
                       "name": "set_panic_hook_log_level",
                       "target": {
                         "file": "crates/league-relay/src/secret.rs"
@@ -8942,7 +9269,7 @@
                       "via": "parse_args_with_key"
                     },
                     {
-                      "line": 663,
+                      "line": 680,
                       "name": "Usage",
                       "receiver": "RelayError",
                       "target": {
@@ -9030,952 +9357,952 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 123
+              "line": 126
             },
             {
               "in": "parse",
               "kind": "err",
-              "line": 164
+              "line": 167
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 220
+              "line": 223
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 230
+              "line": 233
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 236
+              "line": 239
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 243
+              "line": 246
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 258
+              "line": 261
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 272
+              "line": 275
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 281
+              "line": 284
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 292
+              "line": 295
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 317
+              "line": 320
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 322
+              "line": 325
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 339
+              "line": 342
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 349
+              "line": 352
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 366
+              "line": 369
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 380
+              "line": 383
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 392
+              "line": 395
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 409
+              "line": 412
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 414
+              "line": 417
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 424
+              "line": 427
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 431
+              "line": 434
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 443
+              "line": 446
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 456
+              "line": 459
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 462
+              "line": 465
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 469
+              "line": 472
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 494
+              "line": 497
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 545
+              "line": 548
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 562
+              "line": 565
             },
             {
               "in": "reject_forbidden_ref_or_anchor_keyword",
               "kind": "err",
-              "line": 695
+              "line": 698
             },
             {
               "in": "reject_default_ignorable_code_point",
               "kind": "err",
-              "line": 728
+              "line": 731
             },
             {
               "in": "validate_model_visible_schema_text",
               "kind": "err",
-              "line": 1052
+              "line": 1055
             },
             {
               "in": "validate_model_visible_schema_text",
               "kind": "err",
-              "line": 1057
+              "line": 1060
             },
             {
               "in": "validate_property_key",
               "kind": "err",
-              "line": 1073
+              "line": 1076
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1089
+              "line": 1092
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1097
+              "line": 1100
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1102
+              "line": 1105
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1107
+              "line": 1110
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1142
+              "line": 1145
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1148
+              "line": 1151
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1153
+              "line": 1156
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1163
+              "line": 1166
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1169
+              "line": 1172
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1181
+              "line": 1184
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1228
+              "line": 1231
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1243
+              "line": 1246
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1248
+              "line": 1251
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1255
+              "line": 1258
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1269
+              "line": 1272
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1274
+              "line": 1277
             },
             {
               "in": "validate_pattern_properties",
               "kind": "err",
-              "line": 1643
+              "line": 1646
             },
             {
               "in": "validate_pattern_properties",
               "kind": "err",
-              "line": 1655
+              "line": 1658
             },
             {
               "in": "validate_property_names",
               "kind": "err",
-              "line": 1696
+              "line": 1699
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1743
+              "line": 1746
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1764
+              "line": 1767
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1771
+              "line": 1774
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1783
+              "line": 1786
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1788
+              "line": 1791
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1796
+              "line": 1799
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1817
+              "line": 1820
             },
             {
               "in": "validate_day",
               "kind": "err",
-              "line": 2208
+              "line": 2214
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3095
+              "line": 3110
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3097
+              "line": 3112
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3105
+              "line": 3120
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3106
+              "line": 3121
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3139
+              "line": 3154
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3145
+              "line": 3160
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3146
+              "line": 3161
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3166
+              "line": 3181
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3168
+              "line": 3183
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3173
+              "line": 3188
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3174
+              "line": 3189
             },
             {
               "in": "verify_identity",
               "kind": "err",
-              "line": 3198
+              "line": 3213
             },
             {
               "in": "verify_identity",
               "kind": "match-err",
-              "line": 3204
+              "line": 3219
             },
             {
               "in": "verify_identity",
               "kind": "err",
-              "line": 3204
+              "line": 3219
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3493
+              "line": 3508
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3507
+              "line": 3522
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3512
+              "line": 3527
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3517
+              "line": 3532
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3528
+              "line": 3543
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3534
+              "line": 3549
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3540
+              "line": 3555
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3546
+              "line": 3561
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3625
+              "line": 3640
             },
             {
               "in": "validate_eval_mode_seats",
               "kind": "err",
-              "line": 3666
+              "line": 3681
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3812
+              "line": 3841
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3821
+              "line": 3850
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3832
+              "line": 3861
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3876
+              "line": 3905
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3886
+              "line": 3915
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3896
+              "line": 3925
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3906
+              "line": 3935
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3917
+              "line": 3946
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3931
+              "line": 3957
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3940
+              "line": 3971
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3952
+              "line": 3980
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3965
+              "line": 3992
+            },
+            {
+              "in": "ensure_game_setup",
+              "kind": "err",
+              "line": 4005
             },
             {
               "in": "ensure_game_setup",
               "kind": "match-err",
-              "line": 3997
+              "line": 4037
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3999
+              "line": 4039
             },
             {
               "in": "ensure_game_setup",
               "kind": "match-err",
-              "line": 4001
+              "line": 4041
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 4003
+              "line": 4043
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 4054
+              "line": 4094
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 4055
+              "line": 4095
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 4064
+              "line": 4104
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4133
+              "line": 4173
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4134
+              "line": 4174
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4134
+              "line": 4174
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4145
+              "line": 4185
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4152
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "match-err",
-              "line": 4180
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "err",
-              "line": 4182
+              "line": 4192
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4186
+              "line": 4220
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4188
+              "line": 4222
+            },
+            {
+              "in": "write_reserved_entries_unlocked",
+              "kind": "match-err",
+              "line": 4226
+            },
+            {
+              "in": "write_reserved_entries_unlocked",
+              "kind": "err",
+              "line": 4228
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4210
+              "line": 4250
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4217
+              "line": 4257
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4253
+              "line": 4293
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "match-err",
-              "line": 4262
+              "line": 4302
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4264
+              "line": 4304
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "match-err",
-              "line": 4267
+              "line": 4307
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4269
+              "line": 4309
             },
             {
               "in": "open",
               "kind": "err",
-              "line": 4552
+              "line": 4592
             },
             {
               "in": "check_lock_identity",
               "kind": "match-err",
-              "line": 4609
+              "line": 4649
             },
             {
               "in": "ensure_run_resv_lock",
               "kind": "match-err",
-              "line": 4634
-            },
-            {
-              "in": "ensure_run_resv_lock",
-              "kind": "err",
-              "line": 4634
-            },
-            {
-              "in": "ensure_run_resv_lock",
-              "kind": "match-err",
-              "line": 4639
+              "line": 4674
             },
             {
               "in": "ensure_run_resv_lock",
               "kind": "err",
-              "line": 4639
+              "line": 4674
+            },
+            {
+              "in": "ensure_run_resv_lock",
+              "kind": "match-err",
+              "line": 4679
+            },
+            {
+              "in": "ensure_run_resv_lock",
+              "kind": "err",
+              "line": 4679
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "match-err",
-              "line": 4853
+              "line": 4893
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "match-err",
-              "line": 4883
+              "line": 4923
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "err",
-              "line": 4887
+              "line": 4927
             },
             {
               "in": "record_refusal",
               "kind": "err",
-              "line": 4899
+              "line": 4939
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 4928
+              "line": 4968
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4938
+              "line": 4978
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4959
+              "line": 4999
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 5000
+              "line": 5040
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 5017
+              "line": 5057
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 5021
+              "line": 5061
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 5076
+              "line": 5116
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5148
+              "line": 5188
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5156
+              "line": 5196
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5161
+              "line": 5201
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5211
+              "line": 5251
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5221
+              "line": 5261
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5229
+              "line": 5269
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 5288
+              "line": 5328
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5289
+              "line": 5329
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 5299
+              "line": 5339
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5300
+              "line": 5340
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5337
+              "line": 5377
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5348
+              "line": 5388
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5366
+              "line": 5406
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5387
+              "line": 5427
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5398
+              "line": 5438
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 5414
+              "line": 5454
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5415
+              "line": 5455
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5444
+              "line": 5480
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5451
+              "line": 5490
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5458
+              "line": 5497
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5465
+              "line": 5504
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5470
+              "line": 5511
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5475
+              "line": 5516
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5495
+              "line": 5521
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5501
+              "line": 5541
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5508
-            },
-            {
-              "in": "run_turn_with_diag",
-              "kind": "match-err",
-              "line": 5524
+              "line": 5547
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5533
+              "line": 5554
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "match-err",
+              "line": 5570
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5578
+              "line": 5579
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5589
+              "line": 5624
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5790
+              "line": 5635
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 5836
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5946
+              "line": 5992
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5955
+              "line": 6001
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5964
+              "line": 6010
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6041
+              "line": 6087
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6055
+              "line": 6101
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6086
+              "line": 6132
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6386
+              "line": 6436
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6425
+              "line": 6475
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6447
+              "line": 6497
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6457
+              "line": 6507
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6477
+              "line": 6527
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6535
+              "line": 6585
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6582
+              "line": 6632
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6610
+              "line": 6660
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6614
+              "line": 6664
             },
             {
               "in": "run_single_automated_seat",
               "kind": "err",
-              "line": 6689
+              "line": 6739
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6718
+              "line": 6768
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6765
+              "line": 6815
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6808
+              "line": 6858
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6910
+              "line": 6960
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6925
-            },
-            {
-              "in": "run_single_automated_seat",
-              "kind": "match-err",
-              "line": 6933
-            },
-            {
-              "in": "run_single_automated_seat",
-              "kind": "match-err",
-              "line": 6961
+              "line": 6975
             },
             {
               "in": "run_single_automated_seat",
@@ -9985,12 +10312,17 @@
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6995
+              "line": 7011
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7064
+              "line": 7033
+            },
+            {
+              "in": "run_single_automated_seat",
+              "kind": "match-err",
+              "line": 7045
             },
             {
               "in": "run_single_automated_seat",
@@ -10000,235 +10332,240 @@
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7331
+              "line": 7164
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7379
+              "line": 7394
+            },
+            {
+              "in": "run_single_automated_seat",
+              "kind": "match-err",
+              "line": 7442
             },
             {
               "in": "prepare_eval_local_prompt_telemetry",
               "kind": "err",
-              "line": 7606
+              "line": 7669
             },
             {
               "in": "prepare_eval_local_prompt_telemetry",
               "kind": "err",
-              "line": 7622
+              "line": 7685
             },
             {
               "in": "finish_eval_prompt_prep_error",
               "kind": "match-err",
-              "line": 7665
+              "line": 7728
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7711
+              "line": 7774
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7711
+              "line": 7774
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7712
+              "line": 7775
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7713
+              "line": 7776
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7719
+              "line": 7782
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7719
+              "line": 7782
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7730
+              "line": 7793
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7734
+              "line": 7797
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "match-err",
-              "line": 7867
+              "line": 7930
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "err",
-              "line": 7868
+              "line": 7931
             },
             {
               "in": "parse_single_tool_call_item",
               "kind": "err",
-              "line": 8101
+              "line": 8164
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8193
+              "line": 8256
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8199
+              "line": 8262
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8205
+              "line": 8268
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8215
-            },
-            {
-              "in": "evaluate_call_result",
-              "kind": "match-err",
-              "line": 8269
-            },
-            {
-              "in": "evaluate_call_result",
-              "kind": "match-err",
               "line": 8278
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8327
+              "line": 8332
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8355
+              "line": 8341
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8369
+              "line": 8390
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8423
+              "line": 8418
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8447
+              "line": 8432
+            },
+            {
+              "in": "evaluate_call_result",
+              "kind": "match-err",
+              "line": 8486
+            },
+            {
+              "in": "evaluate_call_result",
+              "kind": "match-err",
+              "line": 8510
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8515
+              "line": 8578
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8526
+              "line": 8589
             },
             {
               "in": "probe_tool_round_store",
               "kind": "match-err",
-              "line": 8547
+              "line": 8610
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8549
+              "line": 8612
             },
             {
               "in": "write_json_record_atomic",
               "kind": "err",
-              "line": 8670
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "match-err",
-              "line": 8679
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "err",
-              "line": 8681
+              "line": 8733
             },
             {
               "in": "write_json_record_atomic",
               "kind": "match-err",
-              "line": 8683
+              "line": 8742
             },
             {
               "in": "write_json_record_atomic",
               "kind": "err",
-              "line": 8685
+              "line": 8744
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "match-err",
+              "line": 8746
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "err",
+              "line": 8748
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8764
+              "line": 8827
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8773
+              "line": 8836
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8785
+              "line": 8848
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8795
+              "line": 8858
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8841
+              "line": 8904
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8850
+              "line": 8913
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8852
+              "line": 8915
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8854
+              "line": 8917
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8856
+              "line": 8919
             },
             {
               "in": "format_system_time_utc_rfc3339",
               "kind": "match-err",
-              "line": 8930
+              "line": 8993
             }
           ],
-          "hash": "61c7e54cfbe27f58cc91da0b083861b65472c774cb5ff116fa57c40e7488cbb6",
+          "hash": "55ab0be0fcbe41cda0c279092b164ac8678a99bcf2d5a00dbb067e6675fd25ab",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/seats.rs",
@@ -10705,6 +11042,9 @@
           "exports": [
             "build_control_turn_orders_tool_definition",
             "build_preview_turn_orders_tool_definition",
+            "build_silent_control_turn_orders_tool_definition",
+            "build_silent_preview_turn_orders_tool_definition",
+            "canonical_tool_definition_sha256",
             "cap_words_and_chars",
             "control_r1_wording_slot",
             "control_r1_wording_template",
@@ -10713,6 +11053,8 @@
             "escape_default_ignorable_code_points",
             "execute_control_tool_call",
             "execute_preview_tool_call",
+            "execute_silent_control_tool_call",
+            "execute_silent_preview_tool_call",
             "extract_scratchpad_update",
             "format_negotiation_block",
             "format_sanitized_scratchpad_section",
@@ -10721,6 +11063,7 @@
             "json_escape_untrusted_str",
             "load_negotiation_inputs_if_present",
             "parse_preview_tool_arguments",
+            "parse_silent_preview_tool_arguments",
             "preview_r1_wording_slot",
             "preview_r1_wording_template",
             "preview_seat_bundle_executions_for_table_for_test",
@@ -10793,63 +11136,65 @@
             {
               "in": "reject_unknown_keys",
               "kind": "err",
-              "line": 2286
+              "line": 2366
             },
             {
               "in": "parse_hex32",
               "kind": "err",
-              "line": 2334
+              "line": 2414
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 2364
+              "line": 2444
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 2372
+              "line": 2452
             },
             {
               "in": "parse_bond_opt",
               "kind": "err",
-              "line": 2399
+              "line": 2479
             },
             {
               "in": "parse_intent_target",
               "kind": "err",
-              "line": 2443
+              "line": 2523
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 2469
+              "line": 2549
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 2651
+              "line": 2731
             },
             {
               "in": "parse_bundle_obj",
               "kind": "err",
-              "line": 2851
+              "line": 2931
             },
             {
               "in": "execute_tool_call_with_preview",
               "kind": "match-err",
-              "line": 3620
+              "line": 3767
             }
           ],
-          "hash": "9380ada834f4324009e52dd07dfa4d40328a1022dff1f61713a1cbb4a9f50593",
+          "hash": "523c3a643d7fce7debdd8bb72ded4bc0b951acf31f42c1450990e3789bb6a0c5",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/secret.rs",
-            "crates/league-core/src/lib.rs"
+            "crates/league-core/src/lib.rs",
+            "crates/league-relay/src/relay.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/error.rs",
+            "crates/league-relay/src/relay.rs",
             "crates/league-relay/src/secret.rs"
           ],
           "path": "crates/league-relay/src/wording.rs"
@@ -10998,6 +11343,17 @@
             "crates/league-relay/src/main.rs"
           ],
           "testsInside": true
+        },
+        {
+          "hash": "bf63f9ca84d74682b7f9e7ac5e2f485b4f5f1e6a4e7b8d55e9d2b040bfc3a110",
+          "path": "crates/league-relay/tests/silent_refusal_cli.rs",
+          "spawns": [
+            "crates/league-relay/src/main.rs"
+          ],
+          "spawnsInstalled": [
+            "crates/league-relay/src/main.rs"
+          ],
+          "testsInside": true
         }
       ],
       "globs": [
@@ -11028,7 +11384,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 11,
+      "testedBy": 14,
       "unresolvedSites": 0
     },
     {
@@ -13919,7 +14275,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 6,
+      "testedBy": 7,
       "unresolvedSites": 0
     },
     {
@@ -14200,7 +14556,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 8,
+      "testedBy": 9,
       "unresolvedSites": 0
     },
     {
@@ -17424,7 +17780,7 @@
           "path": ".dockerignore"
         },
         {
-          "hash": "8ddd5c69b8f033a6294d6503963db19629636d44740f705fd11b0da2ef7121f0",
+          "hash": "6d63c2c0e416b6281b02adb361daa86438888c681719141266cee8ccffbc2853",
           "path": ".gitattributes"
         },
         {
@@ -17432,11 +17788,11 @@
           "path": ".gitignore"
         },
         {
-          "hash": "43564c3b22332f9b4883cb98b08a76bc7ceb573916da2bef7586785c007ebbf8",
+          "hash": "ac2a74c8721aeb155099daacb26be79b3eb597b49c72440f507ef579236c76ea",
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "6fe06705ff16fd7a4eb8646f5b632c6220faf862119d4b141c7569062038ff3d",
+          "hash": "90d94061388cc293e49a6091cdf8bafebf9bc6d3f79c44bd14f9dc5d7a727fed",
           "path": "CHANGELOG.md"
         },
         {
@@ -17444,11 +17800,11 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "e4c62d7d0caa9d7d57d114dff2cc535599de3a09028f02329776472330b3be98",
+          "hash": "398c1e255e694197be17db41534bf808ca6873dc2858343c22337e17661c325d",
           "path": "Cargo.lock"
         },
         {
-          "hash": "dbb3fd9f73ae17a3a4eaf4e4b9284326a9c926222d7e10360fea3cda444f769f",
+          "hash": "eb232d4eb15463531bc68f5dd31e31b0abedf29c77259d76a45b5551c91cb410",
           "path": "Cargo.toml"
         },
         {
@@ -17460,39 +17816,39 @@
           "path": "LICENSE"
         },
         {
-          "hash": "2d98aaceee9973837b3815747272aaea426d7aa29b726bbe1ef1d2003b9c3ca0",
+          "hash": "f623e3918cd81d3b4805eceef0f61e624f8f9f8f03b768d87af771a8d5fb63fb",
           "path": "README.es.md"
         },
         {
-          "hash": "6705f8f60f7a7f8e55936948e6acc70382e4b9981cfb46cfef084419523bebfc",
+          "hash": "1a6eee06dad9b77d0ef8829af5a482c5c05c20c2626798b6a833a121c9649ad3",
           "path": "README.fr.md"
         },
         {
-          "hash": "fdcf94fcfa11a9f9cac43c86948afc9a039fd13f73782440cbdc6a0b20d233dc",
+          "hash": "14db89e7dc7c419b541de44e6d93e06162fb0b08e2144623adda5ddb3215971b",
           "path": "README.hi.md"
         },
         {
-          "hash": "bd3a8486786bc8eca828badee079c8db2a66fc6304fcf23359c155c6e14cae3a",
+          "hash": "782464b69d7aa3e8ed1872d07ccaf1f2d4b143b22ae4dd7423a9d1ea80a0dc88",
           "path": "README.it.md"
         },
         {
-          "hash": "6eaa9e3e819b707a6a3c4e5a201cfb0328fe379123e85eaf3434995f4d2c62f9",
+          "hash": "35a4d1233c1c048c730973e7a99ec6d9b5d8e51cc18139a2b4755150904a4247",
           "path": "README.ja.md"
         },
         {
-          "hash": "bb64fd73ca196d0de807c61307a11bde1e65651ea29ebf804b35db86d334d9e5",
+          "hash": "1dc9ad26689ff416113865d0b9439d411ec2048f59605f5c4d3aa7b0238f4459",
           "path": "README.md"
         },
         {
-          "hash": "3d6555460f6653dcb85c79a53f332d04da2d674019b23521e3ca4ed43f7dcd7a",
+          "hash": "123f1c8f20607d297ded892d2f6c53680241eaa4f4ec4cf08e232d3df4978d7d",
           "path": "README.pt-BR.md"
         },
         {
-          "hash": "451ac9eb24c591451ba02962db69cc3abccd9332b437d90a3181d001a9ecbed2",
+          "hash": "b2cb37bf545744df73018950adeff30124c32f4a47b4d14b8d961639c49d7684",
           "path": "README.zh.md"
         },
         {
-          "hash": "d1e4d87e6ec88752fe56c03ade88e8dc1a226c11d5f5b7ebac1520feff0f0ad6",
+          "hash": "f1acf87e0d857b4dc159893738e4b753c9f3149eef317ab88cfcfd717453572b",
           "path": "SECURITY.md"
         },
         {
@@ -17901,7 +18257,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 24
+          "files": 26
         },
         {
           "boundary": "league-gen",
@@ -17916,7 +18272,7 @@
         {
           "boundary": "league-relay",
           "depth": 0,
-          "files": 11
+          "files": 12
         },
         {
           "boundary": "league-scorer",
@@ -17960,6 +18316,13 @@
           "job": "check",
           "matched": true,
           "path": "crates/league-core/src/club/host.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-core/src/commit.rs",
           "runKind": "executes",
           "via": "cargo test"
         },
@@ -18052,6 +18415,13 @@
         {
           "job": "check",
           "matched": true,
+          "path": "crates/league-eval/src/baselines.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
           "path": "crates/league-eval/src/driver.rs",
           "runKind": "executes",
           "via": "cargo test"
@@ -18060,6 +18430,13 @@
           "job": "check",
           "matched": true,
           "path": "crates/league-eval/src/error.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-eval/src/freeze_gate.rs",
           "runKind": "executes",
           "via": "cargo test"
         },
@@ -18241,6 +18618,13 @@
           "path": "crates/league-ledger/tests/vectors.rs",
           "runKind": "executes",
           "via": "cargo clippy"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-relay/src/cli.rs",
+          "runKind": "executes",
+          "via": "cargo test"
         },
         {
           "job": "audit",
@@ -18475,7 +18859,7 @@
           "via": "astro build"
         }
       ],
-      "runsCount": 62,
+      "runsCount": 66,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -18490,14 +18874,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 71,
+          "files": 77,
           "job": "check",
           "runner": "cargo test",
           "step": "Test (doc tests)"
         },
         {
           "coverage": true,
-          "files": 71,
+          "files": 77,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -18725,7 +19109,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 17
+          "files": 18
         },
         {
           "boundary": "league-relay",
@@ -19330,8 +19714,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "70422d047d71d656fceb1a5407c22a549ff83bc3",
-    "tracked": 658
+    "commit": "d2d291d36b8a9195a5ade275a2feba119bfc70a3",
+    "tracked": 685
   },
   "landings": [
     {
@@ -20666,7 +21050,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 109,
+  "testFiles": 138,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",
@@ -20702,19 +21086,19 @@
       "path": "site/src/content/docs/handbook/fairness.md"
     },
     {
-      "hash": "eff3b10fe29b99c2c2c5510ddc4ab693b9c0415a89600510cfb6f027db11d837",
+      "hash": "41712c01f85413b05ae45add7500d7d26c863acbab903ccb018d9c8db168d1dd",
       "path": "site/src/content/docs/handbook/getting-started.md"
     },
     {
-      "hash": "92f988cb0aedfb82e5f46f341bc03d340473c20e4c35059fe71e21e4faf0d009",
+      "hash": "e244fa4abe365f822aead5bcb6e7626d2eb0515c0c8225cec604f4dfa098970e",
       "path": "site/src/content/docs/handbook/index.md"
     },
     {
-      "hash": "fc55d57b97220a7b5fc83b3b67779820a7149cbcaa286beb4230f600d9e709e8",
+      "hash": "a14eb6310eb6701422bc9183e2a9af5d6ca3a9b51ef204f36465c2b75b911842",
       "path": "site/src/content/docs/handbook/playing-a-turn.md"
     },
     {
-      "hash": "d7873a8a4ff911eb13e87812063776b80c9d5d2053642a37b36d98c655a8a4db",
+      "hash": "637a39cb0446e3ab9a79d0b1e29918c9346cbcf10ebc91a9bab627a0ee72821a",
       "path": "site/src/content/docs/handbook/reference.md"
     },
     {
@@ -20739,7 +21123,7 @@
     },
     {
       "constantOnly": true,
-      "hash": "ec7cdc132b7721526aa938adf2b1b25825d36cac4d43b756ffb700fc432eeeff",
+      "hash": "75e6026d3d39279d39268b7fc572d912852727a42c739aee49b20ef4e1338d25",
       "path": "site/src/site-config.ts"
     },
     {

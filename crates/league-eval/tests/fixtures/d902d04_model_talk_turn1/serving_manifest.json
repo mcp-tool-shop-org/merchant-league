@@ -1,0 +1,67 @@
+{
+  "engine": "llama_server",
+  "server_version": "b11433",
+  "server_build_commit": "0000000000000000000000000000000000000000",
+  "server_info_provenance": "server_reported",
+  "model": {
+    "filename": "Qwen3-32B-Q4_K_M.gguf",
+    "quant": "Q4_K_M",
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "chat_template_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "provenance": "server_reported"
+  },
+  "machine": {
+    "gpu_name": "Synthetic Test GPU",
+    "gpu_uuid_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "sm_count": 128,
+    "gpu_driver": "550.54.15",
+    "cuda_runtime_version": "12.4",
+    "vram_mib": 24576,
+    "os_build": "Ubuntu 24.04",
+    "provenance": "operator_supplied"
+  },
+  "server_settings": {
+    "parallel_slots": 1,
+    "batch_size": 512,
+    "ubatch_size": 512,
+    "kv_unified": false,
+    "flash_attn": false,
+    "cache_type_k": "f16",
+    "cache_type_v": "f16",
+    "speculative_decoding": "none",
+    "ctx_size": 32768,
+    "ctx_shift": false,
+    "threads": 8,
+    "jinja": true,
+    "reasoning_mode": "auto",
+    "default_reasoning_budget": -1,
+    "reasoning_budget_message": "",
+    "provenance": "server_reported"
+  },
+  "cache_settings": {
+    "per_request_cache_prompt": false,
+    "no_cache_prompt_flag": true,
+    "cache_ram_mib": 0,
+    "cache_idle_slots": false,
+    "provenance": "server_reported"
+  },
+  "sampling": {
+    "temperature": 0.0,
+    "top_k": 20,
+    "top_p": 1.0,
+    "min_p": 0.0,
+    "repeat_penalty": 1.0,
+    "presence_penalty": 0.0,
+    "frequency_penalty": 0.0,
+    "seed": 4242,
+    "stop_sequences": [],
+    "max_tokens": 512,
+    "sampler_order": [
+      "top_k",
+      "top_p",
+      "min_p",
+      "temperature"
+    ],
+    "provenance": "operator_supplied"
+  }
+}

@@ -120,6 +120,78 @@ pub fn build_eval_response_format_config() -> Result<ResponseFormatConfig, EvalE
         .map_err(|e| EvalError::SchemaValidation(e.to_string()))
 }
 
+/// Build the raw `response_format` JSON value for the silent-market condition by deleting
+/// `messages`, `record_intent_pledge` / memo keys, and `condition_hash` / `preimage` keys from
+/// [`build_eval_response_format_value`] with zero new phrasing.
+pub fn build_eval_silent_response_format_value() -> Result<serde_json::Value, EvalError> {
+    let mut val = build_eval_response_format_value()?;
+    let props_key = preview_wording_slot("schema_kw_properties");
+    let req_key = preview_wording_slot("schema_kw_required");
+    let items_key = preview_wording_slot("schema_kw_items");
+    let k_messages = eval_wording_slot("eval_messages_key");
+    let k_ma = preview_wording_slot("key_market_actions");
+    let k_bundle = preview_wording_slot("key_bundle");
+    let k_action_kind = preview_wording_slot("key_action_kind");
+    let v_pledge = preview_wording_slot("val_action_record_intent_pledge");
+    let k_escrow_finishes = preview_wording_slot("key_escrow_finishes");
+    let deleted_ma_props = [
+        preview_wording_slot("key_condition_hash"),
+        preview_wording_slot("key_pledge_id"),
+        preview_wording_slot("key_recipient_seat"),
+        preview_wording_slot("key_target"),
+        preview_wording_slot("key_honor_weight"),
+        preview_wording_slot("key_memo_digest"),
+    ];
+    let k_preimage = preview_wording_slot("key_preimage");
+
+    let root = val.as_object_mut().ok_or_else(|| {
+        EvalError::SchemaValidation("eval response schema root must be object".to_owned())
+    })?;
+    if let Some(props) = root.get_mut(&props_key).and_then(|v| v.as_object_mut()) {
+        props.remove(k_messages);
+        if let Some(ma_props) = props
+            .get_mut(&k_ma)
+            .and_then(|v| v.get_mut(&items_key))
+            .and_then(|v| v.get_mut(&props_key))
+            .and_then(|v| v.as_object_mut())
+        {
+            if let Some(kind_enum) = ma_props
+                .get_mut(&k_action_kind)
+                .and_then(|v| v.get_mut("enum"))
+                .and_then(|v| v.as_array_mut())
+            {
+                kind_enum.retain(|item| item.as_str() != Some(v_pledge.as_str()));
+            }
+            for del_k in &deleted_ma_props {
+                ma_props.remove(del_k.as_str());
+            }
+        }
+        if let Some(ef_props) = props
+            .get_mut(&k_bundle)
+            .and_then(|v| v.get_mut(&props_key))
+            .and_then(|v| v.get_mut(&k_escrow_finishes))
+            .and_then(|v| v.get_mut(&items_key))
+            .and_then(|v| v.get_mut(&props_key))
+            .and_then(|v| v.as_object_mut())
+        {
+            ef_props.remove(&k_preimage);
+        }
+    }
+    if let Some(req) = root.get_mut(&req_key).and_then(|v| v.as_array_mut()) {
+        req.retain(|item| item.as_str() != Some(k_messages));
+    }
+    Ok(val)
+}
+
+/// Construct and validate the silent-market [`ResponseFormatConfig`] through `league-relay`.
+pub fn build_eval_silent_response_format_config() -> Result<ResponseFormatConfig, EvalError> {
+    let val = build_eval_silent_response_format_value()?;
+    let raw = serde_json::to_string(&val)
+        .map_err(|e| EvalError::SchemaValidation(format!("serialize silent schema JSON: {e}")))?;
+    ResponseFormatConfig::from_json_str(&raw, None)
+        .map_err(|e| EvalError::SchemaValidation(e.to_string()))
+}
+
 fn extract_tool_subtree(
     tool_props: &serde_json::Map<String, serde_json::Value>,
     key: &str,
@@ -154,5 +226,18 @@ mod tests {
             extract_tool_subtree(&empty_map, "missing_key"),
             Err(EvalError::SchemaValidation(_))
         ));
+
+        let silent_schema = match build_eval_silent_response_format_value() {
+            Ok(v) => v,
+            Err(err) => panic!("STOP_RULE: build_eval_silent_response_format_value failed: {err}"),
+        };
+        let silent_tool = league_relay::build_silent_preview_turn_orders_tool_definition();
+        let silent_params = &silent_tool["function"]["parameters"]["properties"];
+        assert_eq!(silent_schema["properties"][&k_ma], silent_params[&k_ma]);
+        assert_eq!(
+            silent_schema["properties"][&k_bundle],
+            silent_params[&k_bundle]
+        );
+        assert!(silent_schema["properties"].get("messages").is_none());
     }
 }

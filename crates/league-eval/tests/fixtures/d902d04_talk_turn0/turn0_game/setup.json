@@ -1,0 +1,15 @@
+{
+  "game_id": "19677ce3aedf95512c6e39de1f8ddbcd",
+  "table_id": 77,
+  "seed": 4242,
+  "turns": 32,
+  "seat_count": 4,
+  "arm": "off",
+  "eval_reply_wording_arm": "v2_eval_reply_2026_11_21_r1",
+  "relay_wording_arm": "v2_neutral_2026_11_15_r6",
+  "wrapper_version": "v2_seat_brief_2026_11_21_r3",
+  "wrapper_sha256": "66d5665950b2ef9bad177dbcfbe132912fa99f09c328a40866502dbf16d6a06d",
+  "memory_mode": "snapshot",
+  "seats_sha256": "dde0583ad067012dfdaebe97a00e0c973e490685629c04ea63b1041b5c9aee74",
+  "response_schema_sha256": "052a89fd5bd4624c9a7c7a599772bf22b8cb4fad27eda0e006ecf2579ee8b544"
+}

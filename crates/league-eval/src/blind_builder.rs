@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use league_core::{EvalActSubmission, EvalHost, Seat};
 use league_relay::{
     CallLogEntry, Round, SavedToolRoundCall, SavedToolRoundRecord, parse_preview_tool_arguments,
+    parse_silent_preview_tool_arguments,
 };
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest, ScorerConfig,
@@ -24,8 +25,10 @@ use league_scorer::{
 use serde::{Deserialize, Serialize};
 
 use crate::error::EvalError;
-use crate::records::{BranchArmOutcome, EvalArm, EvalDecisionRecord, EvalSetupFile};
-use crate::reply::parse_eval_act_reply;
+use crate::records::{
+    BranchArmOutcome, CommunicationMode, EvalArm, EvalDecisionRecord, EvalManifest, EvalSetupFile,
+};
+use crate::reply::parse_eval_act_reply_for_communication;
 use crate::talk_extract::{
     extract_talk_commitments_with_counts_for_state, resolve_eval_seat_guilds, talk_rules_v2_digest,
 };
@@ -79,6 +82,9 @@ pub struct ArmMapStateFile {
     pub schema_version: u32,
     /// Canonical arm-blind state identifier (`<source_game_id>-day-<DD>-seat-<idx>`).
     pub state_id: String,
+    /// Experimental communication condition (`talk` omitted when serialized; `silent` serialized).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Source `game_id` (`R5`).
     pub source_game_id: String,
     /// 1-based pre-act checkpoint turn.
@@ -199,7 +205,12 @@ fn committed_submission_from_decision(
     let Some(raw) = decision.raw_reply.as_deref() else {
         return Ok(EvalActSubmission::default());
     };
-    let parsed = parse_eval_act_reply(raw, decision.seat, decision.keeps_notes);
+    let parsed = parse_eval_act_reply_for_communication(
+        decision.communication,
+        raw,
+        decision.seat,
+        decision.keeps_notes,
+    );
     if parsed.refusal_code.is_some() {
         return Ok(EvalActSubmission::default());
     }
@@ -313,7 +324,13 @@ fn extract_first_draft_submission(
         {
             continue;
         }
-        if let Some(parsed_req) = parse_preview_tool_arguments(&call.arguments, decision.seat) {
+        let parsed_req = match decision.communication {
+            CommunicationMode::Talk => parse_preview_tool_arguments(&call.arguments, decision.seat),
+            CommunicationMode::Silent => {
+                parse_silent_preview_tool_arguments(&call.arguments, decision.seat)
+            }
+        };
+        if let Some(parsed_req) = parsed_req {
             return Ok(Some(EvalActSubmission {
                 market_actions: parsed_req.market_actions,
                 pass_b_actions: Vec::new(),
@@ -420,6 +437,58 @@ pub fn run_build_blind_inputs(
         ));
     }
 
+    let mut observed_comms: BTreeSet<CommunicationMode> = BTreeSet::new();
+    for source_dir in source_games.values() {
+        let setup_path = source_dir.join("setup.json");
+        if setup_path.is_file() {
+            let raw = fs::read_to_string(&setup_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", setup_path.display())))?;
+            let setup: EvalSetupFile = serde_json::from_str(&raw)
+                .map_err(|e| EvalError::Io(format!("parse {}: {e}", setup_path.display())))?;
+            observed_comms.insert(setup.communication);
+        }
+        let manifest_path = source_dir.join("manifest.json");
+        if manifest_path.is_file() {
+            let raw = fs::read_to_string(&manifest_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", manifest_path.display())))?;
+            let manifest: EvalManifest = serde_json::from_str(&raw)
+                .map_err(|e| EvalError::Io(format!("parse {}: {e}", manifest_path.display())))?;
+            observed_comms.insert(manifest.communication);
+        }
+    }
+    for item in &discovered {
+        observed_comms.insert(item.outcome.communication);
+        observed_comms.insert(item.outcome.decision.communication);
+        observed_comms.insert(item.decision.communication);
+        if let Some(src_dir) = source_games.get(&item.outcome.source_game_id)
+            && let Some(setup_path) =
+                resolve_setup_path_for_arm(&item.arm_dir, item.outcome.arm, src_dir)
+        {
+            let raw = fs::read_to_string(&setup_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", setup_path.display())))?;
+            let setup: EvalSetupFile = serde_json::from_str(&raw)
+                .map_err(|e| EvalError::Io(format!("parse {}: {e}", setup_path.display())))?;
+            observed_comms.insert(setup.communication);
+        }
+        let manifest_path = item.arm_dir.join("manifest.json");
+        if manifest_path.is_file() {
+            let raw = fs::read_to_string(&manifest_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", manifest_path.display())))?;
+            let manifest: EvalManifest = serde_json::from_str(&raw)
+                .map_err(|e| EvalError::Io(format!("parse {}: {e}", manifest_path.display())))?;
+            observed_comms.insert(manifest.communication);
+        }
+    }
+    if observed_comms.len() > 1 {
+        return Err(EvalError::MixedCommunicationConditions(
+            "cannot mix `talk` and `silent` runs in `build-blind-inputs`".to_owned(),
+        ));
+    }
+    let batch_comm = observed_comms
+        .into_iter()
+        .next()
+        .unwrap_or(CommunicationMode::Talk);
+
     let mut by_state: BTreeMap<String, Vec<DiscoveredOutcome>> = BTreeMap::new();
     for item in discovered {
         let sid = canonical_state_id(
@@ -515,15 +584,35 @@ pub fn run_build_blind_inputs(
         let bot_tie_seed = host.bot_tie_seed();
 
         let seat_guilds = resolve_eval_seat_guilds(source_game_dir, obs.spec.seat_count)?;
-        let talk_extracted = extract_talk_commitments_with_counts_for_state(
-            source_game_dir,
-            day,
-            focal_seat,
-            &seat_guilds,
-            &obs,
-        )?;
-        let talk_commitments = talk_extracted.commitments;
-        let talk_extraction_counts = talk_extracted.counts;
+        let (talk_commitments, talk_extraction_counts) = match batch_comm {
+            CommunicationMode::Talk => {
+                let talk_extracted = extract_talk_commitments_with_counts_for_state(
+                    source_game_dir,
+                    day,
+                    focal_seat,
+                    &seat_guilds,
+                    &obs,
+                )?;
+                (talk_extracted.commitments, talk_extracted.counts)
+            }
+            CommunicationMode::Silent => {
+                for g in &seat_guilds {
+                    let talk_dec = source_game_dir
+                        .join("decisions")
+                        .join(format!("day-{day_str}-talk-{g}.json"));
+                    let neg_json = source_game_dir
+                        .join("to-seat")
+                        .join(format!("day-{day_str}-act-{g}.negotiation.json"));
+                    if talk_dec.exists() || neg_json.exists() {
+                        return Err(EvalError::MixedCommunicationConditions(format!(
+                            "silent state `{state_id}` found unexpected talk/negotiation artefact in {}",
+                            source_game_dir.display()
+                        )));
+                    }
+                }
+                (Vec::new(), league_scorer::TalkExtractionCounts::default())
+            }
+        };
 
         let mut candidates =
             generate_arm_independent_candidates(&obs, &own_mandate, &config, bot_tie_seed)?;
@@ -606,6 +695,7 @@ pub fn run_build_blind_inputs(
         let arm_map_state = ArmMapStateFile {
             schema_version: BLIND_SCORING_SCHEMA_VERSION,
             state_id: state_id.clone(),
+            communication: batch_comm,
             source_game_id,
             day,
             focal_seat,

@@ -1,0 +1,161 @@
+{
+  "game_id": "1e3694b0ffcb8515fa199cfba4b2fee0",
+  "table_id": 78,
+  "day": 1,
+  "round": "act",
+  "seat": 0,
+  "guild": "Foundry",
+  "arm": "on",
+  "seat_kind": "Model",
+  "keeps_notes": false,
+  "notes_present": false,
+  "raw_reply": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}",
+  "attempts": 2,
+  "prompt_tokens": 80,
+  "completion_tokens": 27,
+  "wall_secs": 0.0004743,
+  "tool_calls_used": 1,
+  "parse_failure": false,
+  "refused_market_actions": 0,
+  "refused_bundle_legs": 0,
+  "cleared_non_empty_actions": false,
+  "intermediate_bundle_sha256s": [
+    "3cbd74f48d327e1e7b97a47a409bb5a7c25c132b4a191ecc8dd30e753bf158c8"
+  ],
+  "prompt_token_ids_sha256s": [
+    "98b417c16eda85a783fc8ddc73ed0f153b44385b53f665fd2ed348102b6f01a2",
+    "98b417c16eda85a783fc8ddc73ed0f153b44385b53f665fd2ed348102b6f01a2"
+  ],
+  "prompt_token_ids_source": "server_tokenize",
+  "prompt_token_ids_template_check": "double_apply_template_byte_equal",
+  "reply_token_ids": [
+    [
+      11
+    ],
+    [
+      11
+    ]
+  ],
+  "reply_top_logprobs": [
+    [
+      {
+        "token": "{",
+        "token_id": 11,
+        "logprob": -0.01,
+        "top_logprobs": [
+          {
+            "token": "t0",
+            "token_id": 200,
+            "logprob": -0.05
+          },
+          {
+            "token": "t1",
+            "token_id": 201,
+            "logprob": -0.1
+          },
+          {
+            "token": "t2",
+            "token_id": 202,
+            "logprob": -0.15
+          },
+          {
+            "token": "t3",
+            "token_id": 203,
+            "logprob": -0.2
+          },
+          {
+            "token": "t4",
+            "token_id": 204,
+            "logprob": -0.25
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "token": "{",
+        "token_id": 11,
+        "logprob": -0.01,
+        "top_logprobs": [
+          {
+            "token": "t0",
+            "token_id": 200,
+            "logprob": -0.05
+          },
+          {
+            "token": "t1",
+            "token_id": 201,
+            "logprob": -0.1
+          },
+          {
+            "token": "t2",
+            "token_id": 202,
+            "logprob": -0.15
+          },
+          {
+            "token": "t3",
+            "token_id": 203,
+            "logprob": -0.2
+          },
+          {
+            "token": "t4",
+            "token_id": 204,
+            "logprob": -0.25
+          }
+        ]
+      }
+    ]
+  ],
+  "no_reply": false,
+  "apply_report": {
+    "refused_market_actions": [],
+    "refused_pass_b_actions": [],
+    "refused_bundle_code": null
+  },
+  "club_bot_baseline": {
+    "market_actions": [
+      {
+        "PostOffer": {
+          "seat": 0,
+          "order": {
+            "side": "Buy",
+            "good": {
+              "Refined": 3
+            },
+            "amount": 3600,
+            "price_per_unit_cred": 3100,
+            "domain_id": null,
+            "is_hybrid": false
+          }
+        }
+      },
+      {
+        "PostOffer": {
+          "seat": 0,
+          "order": {
+            "side": "Buy",
+            "good": {
+              "Raw": 1
+            },
+            "amount": 683,
+            "price_per_unit_cred": 1960,
+            "domain_id": null,
+            "is_hybrid": false
+          }
+        }
+      }
+    ],
+    "bundle": {
+      "converter_runs": [],
+      "project_deliveries": [],
+      "atomic_swaps": [],
+      "contract_deliveries": [],
+      "dual_escrows": [],
+      "debt_repayment_cred": 0,
+      "escrow_finishes": [],
+      "check_cashes": [],
+      "council_vote": null,
+      "charter_bids": []
+    }
+  }
+}

@@ -1,0 +1,488 @@
+{
+  "format_version": 2,
+  "game_id": "1e3694b0ffcb8515fa199cfba4b2fee0",
+  "layout_seed": 4242,
+  "table_id": 78,
+  "turn": 1,
+  "phase": "TalkAndMarket",
+  "cancel_locked": false,
+  "trade_minister": 0,
+  "cartel_chair": null,
+  "spec": {
+    "table_id": 78,
+    "mode": "Eval",
+    "seat_count": 4,
+    "seats": [
+      {
+        "seat": 0,
+        "identity": "Human",
+        "initial_cred": 15200,
+        "raw_yield_per_turn": 10000,
+        "refined_project_value": 2000,
+        "upkeep_good": 3,
+        "upkeep_amount": 1800,
+        "initial_raw_tariff_bps": 800,
+        "initial_refined_tariff_bps": 600,
+        "perishable_decay_bps": 2000,
+        "regent": null,
+        "converters": [
+          {
+            "owner": 0,
+            "inputs": [
+              [
+                1,
+                2000
+              ],
+              [
+                2,
+                2000
+              ]
+            ],
+            "output_good": 0,
+            "output_amount": 3500,
+            "max_runs_per_turn": 4,
+            "is_secondary": false
+          }
+        ]
+      },
+      {
+        "seat": 1,
+        "identity": "AiSyndicate",
+        "initial_cred": 15200,
+        "raw_yield_per_turn": 10000,
+        "refined_project_value": 2000,
+        "upkeep_good": 0,
+        "upkeep_amount": 1800,
+        "initial_raw_tariff_bps": 800,
+        "initial_refined_tariff_bps": 600,
+        "perishable_decay_bps": 2000,
+        "regent": null,
+        "converters": [
+          {
+            "owner": 1,
+            "inputs": [
+              [
+                2,
+                2000
+              ],
+              [
+                3,
+                2000
+              ]
+            ],
+            "output_good": 1,
+            "output_amount": 3500,
+            "max_runs_per_turn": 4,
+            "is_secondary": false
+          }
+        ]
+      },
+      {
+        "seat": 2,
+        "identity": "AiSyndicate",
+        "initial_cred": 15200,
+        "raw_yield_per_turn": 10000,
+        "refined_project_value": 2000,
+        "upkeep_good": 1,
+        "upkeep_amount": 1800,
+        "initial_raw_tariff_bps": 800,
+        "initial_refined_tariff_bps": 600,
+        "perishable_decay_bps": 2000,
+        "regent": null,
+        "converters": [
+          {
+            "owner": 2,
+            "inputs": [
+              [
+                3,
+                2000
+              ],
+              [
+                0,
+                2000
+              ]
+            ],
+            "output_good": 2,
+            "output_amount": 3500,
+            "max_runs_per_turn": 4,
+            "is_secondary": false
+          }
+        ]
+      },
+      {
+        "seat": 3,
+        "identity": "AiSyndicate",
+        "initial_cred": 15200,
+        "raw_yield_per_turn": 10000,
+        "refined_project_value": 2000,
+        "upkeep_good": 2,
+        "upkeep_amount": 1800,
+        "initial_raw_tariff_bps": 800,
+        "initial_refined_tariff_bps": 600,
+        "perishable_decay_bps": 2000,
+        "regent": null,
+        "converters": [
+          {
+            "owner": 3,
+            "inputs": [
+              [
+                0,
+                2000
+              ],
+              [
+                1,
+                2000
+              ]
+            ],
+            "output_good": 3,
+            "output_amount": 3500,
+            "max_runs_per_turn": 4,
+            "is_secondary": false
+          }
+        ]
+      }
+    ],
+    "projects": [
+      {
+        "id": 1,
+        "inputs": [
+          [
+            0,
+            1000
+          ],
+          [
+            1,
+            1000
+          ]
+        ],
+        "equity_points": 4800
+      },
+      {
+        "id": 2,
+        "inputs": [
+          [
+            1,
+            1000
+          ],
+          [
+            2,
+            1000
+          ]
+        ],
+        "equity_points": 4800
+      },
+      {
+        "id": 3,
+        "inputs": [
+          [
+            2,
+            1000
+          ],
+          [
+            3,
+            1000
+          ]
+        ],
+        "equity_points": 4800
+      },
+      {
+        "id": 4,
+        "inputs": [
+          [
+            3,
+            1000
+          ],
+          [
+            0,
+            1000
+          ]
+        ],
+        "equity_points": 4800
+      },
+      {
+        "id": 100,
+        "inputs": [
+          [
+            0,
+            500
+          ],
+          [
+            1,
+            500
+          ],
+          [
+            2,
+            500
+          ],
+          [
+            3,
+            500
+          ]
+        ],
+        "equity_points": 5600
+      }
+    ],
+    "closing_hazard_bps": [
+      3500,
+      3500,
+      3500,
+      3500,
+      3500,
+      3500,
+      3500,
+      3500
+    ],
+    "mandate_deck": [
+      {
+        "card_id": 1,
+        "kind": {
+          "MaintainCleanCredit": {
+            "min_tier": "Bbb"
+          }
+        },
+        "difficulty_completion_bps": 10000,
+        "bonus_equity": 3000
+      },
+      {
+        "card_id": 2,
+        "kind": {
+          "MinProjectEquity": {
+            "target": 16000
+          }
+        },
+        "difficulty_completion_bps": 8000,
+        "bonus_equity": 4000
+      },
+      {
+        "card_id": 3,
+        "kind": {
+          "MinRefinedVariety": {
+            "distinct_goods": 2,
+            "min_each": 1500
+          }
+        },
+        "difficulty_completion_bps": 7000,
+        "bonus_equity": 4500
+      },
+      {
+        "card_id": 4,
+        "kind": {
+          "MinActivePartners": {
+            "min_partners": 2
+          }
+        },
+        "difficulty_completion_bps": 6000,
+        "bonus_equity": 5000
+      },
+      {
+        "card_id": 5,
+        "kind": {
+          "MaintainCleanCredit": {
+            "min_tier": "Aaa"
+          }
+        },
+        "difficulty_completion_bps": 4000,
+        "bonus_equity": 6000
+      },
+      {
+        "card_id": 6,
+        "kind": {
+          "MinRefinedVariety": {
+            "distinct_goods": 2,
+            "min_each": 3000
+          }
+        },
+        "difficulty_completion_bps": 2500,
+        "bonus_equity": 6750
+      },
+      {
+        "card_id": 7,
+        "kind": {
+          "MinProjectEquity": {
+            "target": 28000
+          }
+        },
+        "difficulty_completion_bps": 1500,
+        "bonus_equity": 7250
+      },
+      {
+        "card_id": 8,
+        "kind": {
+          "MinProjectEquity": {
+            "target": 36000
+          }
+        },
+        "difficulty_completion_bps": 0,
+        "bonus_equity": 8000
+      }
+    ],
+    "drand_schedule": null,
+    "eval_vrf_pubkey": "b6c1deca81d2c67c99458ae738bf5bb827880630fc3718e94f23eac78c2ea868",
+    "town_import_premium_bps": 22500,
+    "works_stipend_per_unit_cred": 350,
+    "mandate_alpha_bps": 250,
+    "cancel_lock_bps": 2500,
+    "wash_round_trip_min_units": 1000,
+    "wash_freeze_bond_cred": 500,
+    "wash_freeze_bounty_cred": 500
+  },
+  "parities": {
+    "cred_per_unit": 1000,
+    "raw_per_unit": [
+      1750,
+      1750,
+      1750,
+      1750
+    ],
+    "refined_per_unit": [
+      2000,
+      2000,
+      2000,
+      2000
+    ]
+  },
+  "seats": [
+    {
+      "seat": 0,
+      "identity": "Human",
+      "cred": 15200,
+      "cred_debt": 0,
+      "raw": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "refined": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "project_equity": 0,
+      "raw_tariff_bps": 800,
+      "refined_tariff_bps": 600,
+      "credit_tier": "Aaa",
+      "hard_credit_defaults": 0,
+      "bond_breaches": 0,
+      "broken_promises": 0,
+      "honor_penalties": 0,
+      "consecutive_misses": 0,
+      "consecutive_zero_production_turns": 0,
+      "wash_frozen_until_turn": 0
+    },
+    {
+      "seat": 1,
+      "identity": "AiSyndicate",
+      "cred": 15200,
+      "cred_debt": 0,
+      "raw": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "refined": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "project_equity": 0,
+      "raw_tariff_bps": 800,
+      "refined_tariff_bps": 600,
+      "credit_tier": "Aaa",
+      "hard_credit_defaults": 0,
+      "bond_breaches": 0,
+      "broken_promises": 0,
+      "honor_penalties": 0,
+      "consecutive_misses": 0,
+      "consecutive_zero_production_turns": 0,
+      "wash_frozen_until_turn": 0
+    },
+    {
+      "seat": 2,
+      "identity": "AiSyndicate",
+      "cred": 15200,
+      "cred_debt": 0,
+      "raw": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "refined": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "project_equity": 0,
+      "raw_tariff_bps": 800,
+      "refined_tariff_bps": 600,
+      "credit_tier": "Aaa",
+      "hard_credit_defaults": 0,
+      "bond_breaches": 0,
+      "broken_promises": 0,
+      "honor_penalties": 0,
+      "consecutive_misses": 0,
+      "consecutive_zero_production_turns": 0,
+      "wash_frozen_until_turn": 0
+    },
+    {
+      "seat": 3,
+      "identity": "AiSyndicate",
+      "cred": 15200,
+      "cred_debt": 0,
+      "raw": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "refined": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "project_equity": 0,
+      "raw_tariff_bps": 800,
+      "refined_tariff_bps": 600,
+      "credit_tier": "Aaa",
+      "hard_credit_defaults": 0,
+      "bond_breaches": 0,
+      "broken_promises": 0,
+      "honor_penalties": 0,
+      "consecutive_misses": 0,
+      "consecutive_zero_production_turns": 0,
+      "wash_frozen_until_turn": 0
+    }
+  ],
+  "offers": {},
+  "checks": {},
+  "escrows": {},
+  "dual_escrows": {},
+  "pledges": {},
+  "audited_pledges": [],
+  "domains": [],
+  "council_platforms": {},
+  "charters": [],
+  "active_shocks": [],
+  "public_forecasts": [],
+  "next_offer_id": 1,
+  "next_check_id": 1,
+  "next_escrow_id": 1,
+  "delivery_ledger": [],
+  "last_potentials": [
+    15200,
+    15200,
+    15200,
+    15200
+  ],
+  "pending_town_import_cred_spent": 0,
+  "fill_log": [],
+  "pending_wash_freezes": [],
+  "eval_vrf_pubkey": "b6c1deca81d2c67c99458ae738bf5bb827880630fc3718e94f23eac78c2ea868",
+  "public_receipts": []
+}

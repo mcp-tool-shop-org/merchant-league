@@ -1,20 +1,20 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-24 from commit 70422d0 by Atlas 1.26.0.
+Mapped at 2026-11-26 from commit d2d291d by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-16 parts, mostly Rust (416 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+16 parts, mostly Rust (419 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-24 (9ca990b)
+## What changed since 2026-11-26 (812fd7e)
 
-Nothing structural changed since 2026-11-24; 13 files changed content.
+Nothing structural changed since 2026-11-26; 18 files added and 17 changed content.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 15 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 77 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
+1. **CI.** On a pull request; on a push to main touching 15 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 83 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-eval** (a command people run). Runs crates/league-eval/src/main.rs.
 4. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
@@ -27,7 +27,7 @@ Nothing structural changed since 2026-11-24; 13 files changed content.
 
 ## What happens through CI
 
-1. The workflow runs 6 files in scripts, 18 files in league-core, crates/league-error/ in league-error, 14 files in league-eval, 10 files in league-gen, and 30 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
+1. The workflow runs 6 files in scripts, 19 files in league-core, crates/league-error/ in league-error, 17 files in league-eval, 10 files in league-gen, and 32 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
 2. It writes to site/audit-report.json, which is not tracked.
 
 ## Who reads the results
@@ -67,11 +67,11 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 ## What tends to change together
 
-- **crates/league-eval/src/driver.rs** and **crates/league-eval/tests/play_and_branch.rs** changed together in 7 of 7 commits, inside the league-eval part.
-- **crates/league-eval/src/cli.rs** and **crates/league-eval/src/lib.rs** changed together in 6 of 6 commits, inside the league-eval part.
-- **crates/league-scorer/src/cli.rs** and **crates/league-scorer/src/error.rs** changed together in 6 of 6 commits, inside the league-scorer part.
-- **crates/league-scorer/src/cli.rs** and **crates/league-scorer/src/rollout.rs** changed together in 6 of 6 commits, inside the league-scorer part.
-- **crates/league-scorer/src/error.rs** and **crates/league-scorer/src/rollout.rs** changed together in 6 of 6 commits, inside the league-scorer part.
+- **crates/league-eval/src/cli.rs** and **crates/league-eval/src/lib.rs** changed together in 7 of 7 commits, inside the league-eval part.
+- **crates/league-scorer/src/cli.rs** and **crates/league-scorer/src/error.rs** changed together in 5 of 5 commits, inside the league-scorer part.
+- **crates/league-scorer/src/cli.rs** and **crates/league-scorer/src/lib.rs** changed together in 5 of 5 commits, inside the league-scorer part.
+- **crates/league-scorer/src/cli.rs** and **crates/league-scorer/src/rollout.rs** changed together in 5 of 5 commits, inside the league-scorer part.
+- **crates/league-scorer/src/error.rs** and **crates/league-scorer/src/lib.rs** changed together in 5 of 5 commits, inside the league-scorer part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
@@ -112,9 +112,9 @@ Read those in order to follow one run of league-eval end to end. This path follo
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 53 writes and 55 reads use paths built at run time and are not named here.
+- 53 writes and 67 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
-- 22 writes and 84 reads go to a path their caller passes, not to this repository.
+- 22 writes and 89 reads go to a path their caller passes, not to this repository.
 - 2 writes and 1 read go to a temporary directory, not to this repository.
 - 4 commands are built at run time and not followed.
 - There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.

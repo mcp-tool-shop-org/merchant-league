@@ -52,6 +52,47 @@ impl EvalArm {
     }
 }
 
+/// Evaluation communication condition (`--communication <talk|silent>`), orthogonal to [`EvalArm`].
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CommunicationMode {
+    /// Normal two-round table with inter-seat talk and pledges (`default`).
+    #[default]
+    Talk,
+    /// No-press open-market condition with talk, whispers, negotiation sidecars, memos, and hash-locked escrows disabled.
+    Silent,
+}
+
+impl CommunicationMode {
+    /// Parse `"talk"` or `"silent"` (case-insensitive).
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "talk" => Ok(Self::Talk),
+            "silent" => Ok(Self::Silent),
+            other => Err(format!(
+                "unknown communication condition '{other}': expected 'talk' or 'silent'"
+            )),
+        }
+    }
+
+    /// Canonical lowercase CLI / manifest string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Talk => "talk",
+            Self::Silent => "silent",
+        }
+    }
+
+    /// Returns `true` when `self` is [`Self::Talk`] (used for `skip_serializing_if` byte-identity).
+    #[must_use]
+    pub const fn is_talk(&self) -> bool {
+        matches!(self, Self::Talk)
+    }
+}
+
 /// Cumulative counts of structured-reply refusal codes and refused bundles (`1.9`, `R7`, `A1`, `B1`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefusalCodeCounts {
@@ -340,7 +381,10 @@ pub struct EvalDecisionRecord {
     pub guild: String,
     /// Active arm (`"off"`, `"control"`, `"on"`).
     pub arm: EvalArm,
-    /// `"ClubBot"` or `"Model"`.
+    /// Communication condition (`"talk"` or `"silent"`, omitted on JSON when `"talk"`).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
+    /// `"ClubBot"`, `"Model"`, or scripted baseline `"file"` policy name.
     pub seat_kind: String,
     /// Whether this seat was configured to keep `"notes"`.
     pub keeps_notes: bool,
@@ -446,6 +490,9 @@ pub struct EvalSetupFile {
     pub seat_count: u8,
     /// Arm (`"off"`, `"control"`, `"on"`).
     pub arm: EvalArm,
+    /// Communication condition (`"talk"` or `"silent"`, omitted on JSON when `"talk"`).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Evaluation reply wording arm identifier (`v2_eval_reply_2026_11_21_r1`).
     pub eval_reply_wording_arm: String,
     /// Relay wording arm locked in `relay/setup.json`.
@@ -461,6 +508,9 @@ pub struct EvalSetupFile {
     /// SHA-256 hex digest of the unified `ResponseFormatConfig`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema_sha256: Option<String>,
+    /// Canonical SHA-256 hex digest of the active silent-market tool schema (omitted in Talk mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_schema_sha256: Option<String>,
     /// SHA-256 hex digest of the canonical validated [`ServingManifestRecord`], if supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serving_manifest_sha256: Option<String>,
@@ -488,6 +538,9 @@ pub struct EvalManifest {
     pub seed: u64,
     /// Arm active during this game.
     pub arm: EvalArm,
+    /// Communication condition (`"talk"` or `"silent"`, omitted on JSON when `"talk"`).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Evaluation reply wording arm (`v2_eval_reply_2026_11_21_r1`).
     pub eval_reply_wording_arm: String,
     /// Relay wording arm.
@@ -568,6 +621,9 @@ pub struct BranchManifest {
     pub pass_b_limit: String,
     /// Evaluated arms in execution order.
     pub arms: Vec<EvalArm>,
+    /// Communication condition (`"talk"` or `"silent"`, omitted on JSON when `"talk"`).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// SHA-256 digests of all wording arms, wrapper, and unified response schema.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wording_digests: Option<WordingArmDigests>,
@@ -611,6 +667,9 @@ pub struct BranchArmOutcome {
     pub focal_guild: String,
     /// Arm evaluated (`"off"`, `"control"`, `"on"`).
     pub arm: EvalArm,
+    /// Communication condition (`"talk"` or `"silent"`, omitted on JSON when `"talk"`).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Focal decision record.
     pub decision: EvalDecisionRecord,
     /// Public sweep receipt produced when replaying this arm from the pre-act checkpoint.

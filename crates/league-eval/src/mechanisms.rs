@@ -28,7 +28,7 @@ use crate::freeze_gate::{
     JoinedDecisionRow, PerArmTalkCountsSummary, summarize_arm_talk_counts_from_slices,
 };
 use crate::records::{BranchArmOutcome, EvalDecisionRecord, EvalSetupFile};
-use crate::reply::{parse_eval_act_reply, parse_eval_talk_reply};
+use crate::reply::{parse_eval_act_reply_for_communication, parse_eval_talk_reply};
 use crate::talk_extract::{extract_talk_commitments_from_messages, resolve_eval_seat_guilds};
 
 /// Minimum `EvalDecisionRecord::tool_calls_used` for a decision to count as having used at least
@@ -1002,7 +1002,12 @@ fn accepted_pass_a_offers(decision: &EvalDecisionRecord) -> Vec<OfferProposal> {
     let Some(raw_reply) = decision.raw_reply.as_deref() else {
         return Vec::new();
     };
-    let parsed = parse_eval_act_reply(raw_reply, decision.seat, decision.keeps_notes);
+    let parsed = parse_eval_act_reply_for_communication(
+        decision.communication,
+        raw_reply,
+        decision.seat,
+        decision.keeps_notes,
+    );
     if parsed.refusal_code.is_some() {
         return Vec::new();
     }

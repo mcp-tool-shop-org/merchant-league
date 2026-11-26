@@ -135,6 +135,8 @@ pub enum RelayError {
     /// In Evaluation Mode (`eval_mode == true`), a seat set `reasoning.exclude_from_transcript: true`,
     /// which would strip `<think>` blocks prior to validation/recording.
     EvalThinkStrippingForbidden(String),
+    /// Silent-market condition requested outside Evaluation Mode (`eval_mode == false`).
+    SilentMarketEvalOnly(String),
 }
 
 impl RelayError {
@@ -157,6 +159,7 @@ impl RelayError {
             Self::UnrecordedCharge { .. } => "UNRECORDED_CHARGE",
             Self::ToolRoundStoreWriteFailed { .. } => "TOOL_ROUND_STORE_WRITE_FAILED",
             Self::EvalThinkStrippingForbidden(_) => "EVAL_THINK_STRIPPING_FORBIDDEN",
+            Self::SilentMarketEvalOnly(_) => "SILENT_MARKET_EVAL_ONLY",
         }
     }
 
@@ -205,6 +208,9 @@ impl RelayError {
             Self::EvalThinkStrippingForbidden(_) => {
                 "set `reasoning.exclude_from_transcript` to `false` or omit `reasoning` on every seat when `eval_mode` is enabled"
             }
+            Self::SilentMarketEvalOnly(_) => {
+                "run silent-market experiments via `league-eval play --communication silent`; omit `--communication silent` in Play mode"
+            }
         }
     }
 
@@ -227,7 +233,8 @@ impl RelayError {
             | Self::SeatConfig(_)
             | Self::IncompatibleSetup(_)
             | Self::PreviewState { .. }
-            | Self::EvalThinkStrippingForbidden(_) => 1,
+            | Self::EvalThinkStrippingForbidden(_)
+            | Self::SilentMarketEvalOnly(_) => 1,
             Self::Io(_)
             | Self::CorruptLog(_)
             | Self::TurnLocked { .. }
@@ -333,6 +340,9 @@ impl fmt::Display for RelayError {
             }
             RelayError::EvalThinkStrippingForbidden(msg) => {
                 write!(f, "eval think-tag stripping forbidden: {msg}")
+            }
+            RelayError::SilentMarketEvalOnly(msg) => {
+                write!(f, "silent market requires evaluation mode: {msg}")
             }
         }
     }
