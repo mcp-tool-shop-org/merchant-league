@@ -2609,5 +2609,145 @@ mod tests {
         assert_eq!(stances.get(&1), Some(&PeerStance::Defect));
         assert_eq!(stances.get(&2), Some(&PeerStance::Defect));
         assert_eq!(stances.get(&3), Some(&PeerStance::Defect));
+
+        // Additional edge branches: mul_units_parity bounds, EvalFileSeatModel accessors,
+        // commitment formatting/applicability guards, OwnToSeatHistory malformed inputs, and Turn 6 always-defect.
+        assert_eq!(mul_units_parity(0, 100), 0);
+        assert_eq!(mul_units_parity(Units::MAX, Units::MAX), Units::MAX);
+        assert_eq!(mul_units_parity(-Units::MAX, Units::MAX), Units::MIN);
+        assert_eq!(EvalFileSeatModel::ClubBot.as_str(), "ClubBot");
+        assert!(EvalFileSeatModel::ClubBot.uses_standing_regent());
+        assert!(!EvalFileSeatModel::RandomLegal.uses_standing_regent());
+        assert!(!EvalFileSeatModel::ClubBot.requires_talk());
+        assert!(!EvalFileSeatModel::RandomLegal.requires_talk());
+        assert!(!EvalFileSeatModel::AlwaysDefect.requires_talk());
+        assert!(EvalFileSeatModel::TitForTat.requires_talk());
+        assert!(format_talk_commitment_body(OfferSide::Buy, 1, AssetId::Cred, 1).is_none());
+        assert_eq!(
+            format_talk_commitment_body(OfferSide::Sell, 1, AssetId::Refined(0), 2).as_deref(),
+            Some("i agree to sell 1 refined_0 at 2 cred.")
+        );
+
+        let mut check_state = obs.seats[0].clone();
+        check_state.cred = 10 * UNIT_SCALE;
+        assert!(!seat_holds_free_for_offer(
+            &check_state,
+            &OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Cred,
+                amount: UNIT_SCALE,
+                price_per_unit_cred: UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            }
+        ));
+        check_state.refined[0] = UNIT_SCALE;
+        assert!(seat_holds_free_for_offer(
+            &check_state,
+            &OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Refined(0),
+                amount: UNIT_SCALE,
+                price_per_unit_cred: UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            }
+        ));
+        assert!(seat_holds_free_for_offer(
+            &check_state,
+            &OfferProposal {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                amount: UNIT_SCALE,
+                price_per_unit_cred: 2 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            }
+        ));
+
+        let plain_order = OfferProposal {
+            side: OfferSide::Sell,
+            good: AssetId::Raw(1),
+            amount: UNIT_SCALE,
+            price_per_unit_cred: UNIT_SCALE,
+            domain_id: None,
+            is_hybrid: false,
+        };
+        let dom_order = OfferProposal {
+            domain_id: Some(1),
+            ..plain_order.clone()
+        };
+        let mut app_view = hist.pre_act_by_day[&1].clone();
+        assert!(!commitment_applicable_in_view(&app_view, 99, &plain_order));
+        app_view.pending_wash_freezes.push(PendingWashFreeze {
+            inspector: 0,
+            target_seat: 1,
+            turn: 1,
+            bond_cred: UNIT_SCALE,
+        });
+        assert!(!commitment_applicable_in_view(&app_view, 1, &plain_order));
+        app_view.pending_wash_freezes.clear();
+        app_view.seats[1].wash_frozen_until_turn = 1;
+        assert!(!commitment_applicable_in_view(&app_view, 1, &plain_order));
+        app_view.seats[1].wash_frozen_until_turn = 0;
+        app_view.seats[1].credit_tier = CreditTier::D;
+        assert!(!commitment_applicable_in_view(&app_view, 1, &dom_order));
+        app_view.seats[1].credit_tier = CreditTier::B;
+        app_view.domains = vec![CartelDomain {
+            domain_id: 1,
+            members: BTreeSet::from([0, 2]),
+        }];
+        assert!(!commitment_applicable_in_view(&app_view, 1, &dom_order));
+        app_view.domains[0].members.insert(1);
+        app_view.seats[1].raw[1] = 2 * UNIT_SCALE;
+        assert!(commitment_applicable_in_view(&app_view, 1, &dom_order));
+
+        let bad_dir = std::env::temp_dir().join(format!("ml_baselines_bad_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&bad_dir);
+        let Ok(()) = fs::create_dir_all(&bad_dir) else {
+            panic!("mkdir bad_dir");
+        };
+        let Ok(()) = fs::write(bad_dir.join("day-01-talk-Foundry.md"), "no json brace") else {
+            panic!("write bad talk md");
+        };
+        assert!(OwnToSeatHistory::load(&bad_dir, "Foundry", 1).is_err());
+        let _ = fs::remove_file(bad_dir.join("day-01-talk-Foundry.md"));
+        let Ok(()) = fs::write(bad_dir.join("day-01-act-Foundry.negotiation.json"), "{bad") else {
+            panic!("write bad neg json");
+        };
+        assert!(OwnToSeatHistory::load(&bad_dir, "Foundry", 1).is_err());
+        let _ = fs::remove_dir_all(&bad_dir);
+
+        let mut ad_t6_obs = obs.clone();
+        ad_t6_obs.turn = 6;
+        ad_t6_obs.seats[0].cred_debt = UNIT_SCALE;
+        ad_t6_obs.checks.insert(
+            70,
+            CreditCheck {
+                check_id: 70,
+                drawer: 1,
+                payee: 0,
+                asset: AssetId::Cred,
+                send_max: UNIT_SCALE,
+                deliver_min: UNIT_SCALE,
+                due_turn: 6,
+                expiration_turn: 8,
+                status: CheckStatus::Open,
+            },
+        );
+        let Ok(t6_mandate) = rec_host.mandate_for_seat(Seat(0)) else {
+            panic!("t6 mandate");
+        };
+        let Ok(ad_t6) = decide_always_defect_act(
+            9002,
+            &ad_t6_obs,
+            t6_mandate,
+            &guilds,
+            CommunicationMode::Talk,
+            None,
+        ) else {
+            panic!("always_defect turn 6");
+        };
+        assert!(preview_clean(&ad_t6_obs, &ad_t6.market_actions, &ad_t6.bundle).is_some());
     }
 }

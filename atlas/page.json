@@ -103,23 +103,31 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 2,
+      "changed": 4,
       "moved": 0,
       "parts": 1,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-eval/src/freeze_gate.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-eval/src/freeze_gate.rs"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-26; 2 files changed content.",
+        "sentence": "4 files changed content, across 1 part.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "0dc654137b9436cdd3053b62e2f2cee040b3e7bc",
-      "generatedAt": "2026-11-26T10:31:26.428Z"
+      "commit": "37c6029a82870d8ab0c545c5ef81ba93cbbd5524",
+      "generatedAt": "2026-11-26T11:10:24.295Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -203,7 +211,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "37c6029a82870d8ab0c545c5ef81ba93cbbd5524",
+  "commit": "812fd7e858d7eedeea2215d0610454eee8c641ba",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (419 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -312,6 +320,7 @@
         "crates/league-eval/src/baselines.rs",
         "crates/league-eval/src/driver.rs",
         "crates/league-eval/src/error.rs",
+        "crates/league-eval/src/freeze_gate.rs",
         "crates/league-eval/src/reply.rs",
         "crates/league-eval/src/schema.rs",
         "crates/league-eval/src/serving.rs",
@@ -346,8 +355,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 53,
-      "runsMore": 82,
+      "runsCount": 54,
+      "runsMore": 83,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -750,7 +759,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-26T11:10:24.295Z",
+  "generatedAt": "2026-11-26T12:10:20.057Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "53 writes and 67 reads use paths built at run time and are not named here.",
@@ -799,11 +808,11 @@
   "startReason": "This path follows league-eval (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 119,
+  "testFiles": 120,
   "testedBy": {
     "league-core": 33,
     "league-error": 11,
-    "league-eval": 15,
+    "league-eval": 16,
     "league-gen": 10,
     "league-ledger": 8,
     "league-relay": 14,

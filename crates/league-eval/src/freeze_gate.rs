@@ -345,6 +345,14 @@ fn default_scorer_crate_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../league-scorer")
 }
 
+#[derive(Clone, Copy)]
+enum ProvenanceFileKind {
+    Setup,
+    Manifest,
+    Decision,
+    Outcome,
+}
+
 fn collect_run_provenance_comms(
     dir: &Path,
     seen: &mut BTreeSet<CommunicationMode>,
@@ -352,10 +360,10 @@ fn collect_run_provenance_comms(
     use crate::records::{BranchArmOutcome, BranchManifest, EvalDecisionRecord};
 
     for (file_name, kind) in [
-        ("setup.json", "setup"),
-        ("manifest.json", "manifest"),
-        ("decision.json", "decision"),
-        ("outcome.json", "outcome"),
+        ("setup.json", ProvenanceFileKind::Setup),
+        ("manifest.json", ProvenanceFileKind::Manifest),
+        ("decision.json", ProvenanceFileKind::Decision),
+        ("outcome.json", ProvenanceFileKind::Outcome),
     ] {
         let path = dir.join(file_name);
         if !path.is_file() {
@@ -364,11 +372,11 @@ fn collect_run_provenance_comms(
         let raw = fs::read_to_string(&path)
             .map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
         match kind {
-            "setup" => {
+            ProvenanceFileKind::Setup => {
                 let s: EvalSetupFile = parse_json_prose_safe(&raw, &path)?;
                 seen.insert(s.communication);
             }
-            "manifest" => {
+            ProvenanceFileKind::Manifest => {
                 if let Ok(m) = serde_json::from_str::<EvalManifest>(&raw) {
                     seen.insert(m.communication);
                 } else {
@@ -376,16 +384,15 @@ fn collect_run_provenance_comms(
                     seen.insert(b.communication);
                 }
             }
-            "decision" => {
+            ProvenanceFileKind::Decision => {
                 let d: EvalDecisionRecord = parse_json_prose_safe(&raw, &path)?;
                 seen.insert(d.communication);
             }
-            "outcome" => {
+            ProvenanceFileKind::Outcome => {
                 let o: BranchArmOutcome = parse_json_prose_safe(&raw, &path)?;
                 seen.insert(o.communication);
                 seen.insert(o.decision.communication);
             }
-            _ => {}
         }
     }
     let mut subdirs = Vec::new();
@@ -1309,4 +1316,231 @@ fn summarize_arm_talk_counts(arm_rows: &[&JoinedDecisionRow]) -> PerArmTalkCount
         .map(|row| (row.state_id.as_str(), &row.talk_extraction_counts))
         .collect();
     summarize_arm_talk_counts_from_slices(&pairs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::records::{
+        BranchArmOutcome, BranchManifest, BranchSummary, EvalDecisionRecord, RefusalCodeCounts,
+        WrongPartCounter,
+    };
+    use league_core::{EvalHost, TableId};
+    use league_relay::Round;
+
+    #[test]
+    fn provenance_communication_helpers_cover_branch_manifest_and_arm_map_paths() {
+        let tmp = std::env::temp_dir().join(format!("ml_fg_prov_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let sub_off = tmp.join("off");
+        let skipped_relay = tmp.join("relay");
+        let Ok(()) = fs::create_dir_all(&sub_off) else {
+            panic!("mkdir sub_off");
+        };
+        let Ok(()) = fs::create_dir_all(&skipped_relay) else {
+            panic!("mkdir skipped_relay");
+        };
+        // Should be skipped when collecting provenance files:
+        let Ok(()) = fs::write(skipped_relay.join("setup.json"), "not json") else {
+            panic!("write relay/setup.json");
+        };
+
+        let mut host = match EvalHost::from_standard_setup_with_model_seats(
+            TableId(1),
+            4,
+            7,
+            11,
+            &[true, true, true, true],
+        ) {
+            Ok(h) => h,
+            Err(e) => panic!("host: {e}"),
+        };
+        if let Err(e) = host.apply_act_submissions(&BTreeMap::new()) {
+            panic!("apply empty: {e}");
+        }
+        let receipt = match host.sweep_turn() {
+            Ok(r) => r,
+            Err(e) => panic!("sweep: {e}"),
+        };
+
+        let dec = EvalDecisionRecord {
+            game_id: "fg-prov".to_owned(),
+            table_id: 1,
+            day: 1,
+            round: Round::Act,
+            seat: 0,
+            guild: "Foundry".to_owned(),
+            arm: EvalArm::Off,
+            communication: CommunicationMode::Silent,
+            seat_kind: "ClubBot".to_owned(),
+            keeps_notes: false,
+            notes_present: false,
+            raw_reply: None,
+            discarded_reply_path: None,
+            discarded_reply_sha256: None,
+            attempts: 0,
+            failed_attempts: Vec::new(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            wall_secs: None,
+            tool_calls_used: 0,
+            parse_failure: false,
+            refused_market_actions: 0,
+            refused_bundle_legs: 0,
+            cleared_non_empty_actions: false,
+            intermediate_bundle_sha256s: Vec::new(),
+            prompt_token_ids_sha256s: Vec::new(),
+            prompt_token_ids_source: None,
+            prompt_token_ids_template_check: None,
+            reply_token_ids: Vec::new(),
+            reply_top_logprobs: Vec::new(),
+            loaded_history_sha256: BTreeMap::new(),
+            refusal_code: None,
+            refusal_reason: None,
+            invalid_recipients: Vec::new(),
+            no_reply: false,
+            apply_report: None,
+            refused_bundle: None,
+            club_bot_baseline: None,
+        };
+        let outcome = BranchArmOutcome {
+            source_game_id: "fg-prov".to_owned(),
+            table_id: 1,
+            day: 1,
+            focal_seat: 0,
+            focal_guild: "Foundry".to_owned(),
+            arm: EvalArm::Off,
+            communication: CommunicationMode::Silent,
+            decision: dec.clone(),
+            receipt,
+        };
+        let branch_manifest = BranchManifest {
+            crate_git_sha: "a".repeat(40),
+            wrapper_version: "v2_seat_brief_silent_2026_11_26_r1".to_owned(),
+            wrapper_sha256: "b".repeat(64),
+            pass_b_limit: "0".to_owned(),
+            arms: vec![EvalArm::Off],
+            communication: CommunicationMode::Silent,
+            wording_digests: None,
+            serving: None,
+            serving_env_snapshot: BTreeMap::new(),
+            seat_regents: BTreeMap::new(),
+            turn_regent_audit_by_arm: BTreeMap::new(),
+            voided: false,
+            void_error_code: None,
+            voided_games_by_arm: BTreeMap::new(),
+            summary: BranchSummary::default(),
+        };
+        let eval_setup = EvalSetupFile {
+            game_id: "fg-prov".to_owned(),
+            table_id: 1,
+            seed: 7,
+            turns: 1,
+            seat_count: 4,
+            arm: EvalArm::Off,
+            communication: CommunicationMode::Silent,
+            eval_reply_wording_arm: "v2_eval_silent_reply_2026_11_26_r1".to_owned(),
+            relay_wording_arm: "off".to_owned(),
+            wrapper_version: "v2_seat_brief_silent_2026_11_26_r1".to_owned(),
+            wrapper_sha256: "b".repeat(64),
+            memory_mode: "snapshot".to_owned(),
+            seats_sha256: "c".repeat(64),
+            response_schema_sha256: None,
+            serving_manifest_sha256: None,
+        };
+        let eval_manifest = EvalManifest {
+            game_id: "fg-prov".to_owned(),
+            table_id: 1,
+            seed: 7,
+            arm: EvalArm::Off,
+            communication: CommunicationMode::Silent,
+            eval_reply_wording_arm: "v2_eval_silent_reply_2026_11_26_r1".to_owned(),
+            relay_wording_arm: "off".to_owned(),
+            wrapper_version: "v2_seat_brief_silent_2026_11_26_r1".to_owned(),
+            wrapper_sha256: "b".repeat(64),
+            pass_b_limit: "0".to_owned(),
+            played_turns: 1,
+            crate_git_sha: "a".repeat(40),
+            wording_digests: None,
+            serving: None,
+            serving_env_snapshot: BTreeMap::new(),
+            seats: Vec::new(),
+            seat_regents: BTreeMap::new(),
+            turn_regent_audit: Vec::new(),
+            voided: false,
+            void_error_code: None,
+            voided_games_by_arm: BTreeMap::new(),
+            refusal_counts_by_seat: BTreeMap::<String, RefusalCodeCounts>::new(),
+            refusal_counts_by_arm: BTreeMap::<String, RefusalCodeCounts>::new(),
+            wrong_part_refusals: WrongPartCounter::default(),
+        };
+
+        let manifest_path = tmp.join("manifest.json");
+        let setup_path = sub_off.join("setup.json");
+        let arm_manifest_path = sub_off.join("manifest.json");
+        let decision_path = sub_off.join("decision.json");
+        let outcome_path = sub_off.join("outcome.json");
+        let write_json = |p: &Path, val: String| {
+            if let Err(e) = fs::write(p, val) {
+                panic!("write {}: {e}", p.display());
+            }
+        };
+        write_json(
+            &manifest_path,
+            serde_json::to_string(&branch_manifest).unwrap_or_default(),
+        );
+        write_json(
+            &setup_path,
+            serde_json::to_string(&eval_setup).unwrap_or_default(),
+        );
+        write_json(
+            &arm_manifest_path,
+            serde_json::to_string(&eval_manifest).unwrap_or_default(),
+        );
+        write_json(
+            &decision_path,
+            serde_json::to_string(&dec).unwrap_or_default(),
+        );
+        write_json(
+            &outcome_path,
+            serde_json::to_string(&outcome).unwrap_or_default(),
+        );
+
+        let mut seen = BTreeSet::new();
+        if let Err(e) = collect_run_provenance_comms(&tmp, &mut seen) {
+            panic!("collect_run_provenance_comms: {e}");
+        }
+        assert_eq!(seen, BTreeSet::from([CommunicationMode::Silent]));
+
+        let arm_map = ArmMapStateFile {
+            schema_version: BLIND_SCORING_SCHEMA_VERSION,
+            state_id: "fg-prov-day-01-seat-0".to_owned(),
+            communication: CommunicationMode::Silent,
+            source_game_id: "fg-prov".to_owned(),
+            day: 1,
+            focal_seat: 0,
+            scorer_seed: 7,
+            pre_act_save_sha256: "d".repeat(64),
+            pre_act_seal_sha256: "e".repeat(64),
+            pre_act_pair_sha256: "f".repeat(64),
+            blind_input_sha256: "0".repeat(64),
+            blind_candidate_ids: Vec::new(),
+            entries: vec![ArmMapEntry {
+                arm: EvalArm::Off,
+                replicate: 0,
+                committed_candidate_id: "1".repeat(64),
+                first_draft_candidate_id: None,
+                decision_path,
+                outcome_path,
+                setup_path: Some(setup_path),
+                manifest_path: Some(arm_manifest_path),
+            }],
+        };
+        let mut arm_seen = BTreeSet::new();
+        if let Err(e) = collect_arm_map_entry_comms(&arm_map, &mut arm_seen) {
+            panic!("collect_arm_map_entry_comms: {e}");
+        }
+        assert_eq!(arm_seen, BTreeSet::from([CommunicationMode::Silent]));
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }

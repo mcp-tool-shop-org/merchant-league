@@ -2872,7 +2872,7 @@
               "line": 2112
             }
           ],
-          "hash": "947ca6f37a8a74663fcd3d9477138343d91008c55277a77f4023a7c112a26b25",
+          "hash": "30a78d5be4177d11718507ea469c109425481efb1e357be3e14a84c0b4d66ce3",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -5037,72 +5037,67 @@
             {
               "in": "detect_homogeneous_communication_in_provenance",
               "kind": "err",
-              "line": 485
+              "line": 492
             },
             {
               "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 509
+              "line": 516
             },
             {
               "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 525
+              "line": 532
             },
             {
               "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 531
+              "line": 538
             },
             {
               "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 551
+              "line": 558
             },
             {
               "in": "run_freeze_with_provenance",
               "kind": "err",
-              "line": 561
+              "line": 568
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "match-err",
-              "line": 624
+              "line": 631
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "match-err",
-              "line": 626
+              "line": 633
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "err",
-              "line": 627
+              "line": 634
             },
             {
               "in": "write_freeze_file_with_writer_and_remover",
               "kind": "err",
-              "line": 632
+              "line": 639
             },
             {
               "in": "load_and_verify_checkpoints_manifest",
               "kind": "err",
-              "line": 642
+              "line": 649
             },
             {
               "in": "validate_blind_inputs_dir_against_config",
               "kind": "err",
-              "line": 689
+              "line": 696
             },
             {
               "in": "validate_blind_inputs_dir_against_config",
               "kind": "err",
-              "line": 705
-            },
-            {
-              "in": "verify_control_entry_wording_arm",
-              "kind": "err",
-              "line": 760
+              "line": 712
             },
             {
               "in": "verify_control_entry_wording_arm",
@@ -5112,115 +5107,120 @@
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 790
+              "line": 774
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 815
+              "line": 797
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 821
+              "line": 822
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 831
+              "line": 828
+            },
+            {
+              "in": "verify_control_entry_wording_arm",
+              "kind": "err",
+              "line": 838
             },
             {
               "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 861
+              "line": 868
             },
             {
               "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 867
+              "line": 874
             },
             {
               "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 879
+              "line": 886
             },
             {
               "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 890
+              "line": 897
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 902
+              "line": 909
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 923
+              "line": 930
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 931
+              "line": 938
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 950
+              "line": 957
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 959
+              "line": 966
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 968
+              "line": 975
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 978
+              "line": 985
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 992
+              "line": 999
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 1003
+              "line": 1010
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 1012
+              "line": 1019
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 1021
+              "line": 1028
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 1032
+              "line": 1039
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 1040
+              "line": 1047
             },
             {
               "in": "run_join",
               "kind": "err",
-              "line": 1086
+              "line": 1093
             }
           ],
-          "hash": "cc4cee7d039dd64688b87378668cad7f048b6c906ff9f3571f7f8d5258fb56c0",
+          "hash": "3b17bcfa7e1340855863e452b6e64e3d524959ff10385d2eb5da47d3c42718de",
           "importOrder": [
             "crates/league-scorer/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
@@ -5228,18 +5228,23 @@
             "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/serving.rs",
-            "crates/league-eval/src/talk_extract.rs"
+            "crates/league-eval/src/talk_extract.rs",
+            "crates/league-core/src/lib.rs",
+            "crates/league-relay/src/lib.rs"
           ],
           "importsFiles": [
+            "crates/league-core/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
             "crates/league-eval/src/error.rs",
             "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/talk_extract.rs",
+            "crates/league-relay/src/lib.rs",
             "crates/league-scorer/src/lib.rs"
           ],
-          "path": "crates/league-eval/src/freeze_gate.rs"
+          "path": "crates/league-eval/src/freeze_gate.rs",
+          "testsInside": true
         },
         {
           "hash": "a20236c7d7fc9e64666cab2a142bb78cb05d7af25e6632cb7c2f89c936108cb9",
@@ -5573,18 +5578,22 @@
               "line": 760
             }
           ],
-          "hash": "70fbe1efdbb9f34bf9ed3175722f37748b33fb52c94af78963dcc3fb812c7c19",
+          "hash": "bfceebe6c90c63ee7dab3c9289c1e2093942628a9d97a4c16f902ddefe7b4273",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
             "crates/league-eval/src/records.rs",
-            "crates/league-eval/src/wording.rs"
+            "crates/league-eval/src/wording.rs",
+            "crates/league-eval/src/baselines.rs",
+            "crates/league-seat-types/src/lib.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/baselines.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/wording.rs",
-            "crates/league-relay/src/lib.rs"
+            "crates/league-relay/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
           ],
           "path": "crates/league-eval/src/reply.rs",
           "testsInside": true
@@ -6155,7 +6164,7 @@
           "testsInside": true
         },
         {
-          "hash": "c615ca0d3c12da2ee08cd9df04669a9e9358d1e4ee969752fafd2d74fe5cb22e",
+          "hash": "6813ba0fef063ef77c55b340b2d5603118f65c4340c98f4ba2d8faa3dd95faa3",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -6210,7 +6219,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 15,
+      "testedBy": 16,
       "unresolvedSites": 0
     },
     {
@@ -18340,6 +18349,13 @@
           "via": "cargo test"
         },
         {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-eval/src/freeze_gate.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
           "job": "audit",
           "matched": true,
           "path": "crates/league-eval/src/lib.rs",
@@ -18758,7 +18774,7 @@
           "via": "astro build"
         }
       ],
-      "runsCount": 65,
+      "runsCount": 66,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -18773,14 +18789,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 76,
+          "files": 77,
           "job": "check",
           "runner": "cargo test",
           "step": "Test (doc tests)"
         },
         {
           "coverage": true,
-          "files": 76,
+          "files": 77,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -19613,7 +19629,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "37c6029a82870d8ab0c545c5ef81ba93cbbd5524",
+    "commit": "812fd7e858d7eedeea2215d0610454eee8c641ba",
     "tracked": 667
   },
   "landings": [
@@ -20949,7 +20965,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 119,
+  "testFiles": 120,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",

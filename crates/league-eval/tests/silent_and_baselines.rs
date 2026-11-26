@@ -1140,6 +1140,22 @@ fn pipeline_refuses_mixed_communication_and_runs_pure_silent()
     };
     assert_eq!(mixed_bi.code(), "MIXED_COMMUNICATION_CONDITIONS");
 
+    // Unexpected talk/negotiation artifact inside a silent source run must refuse (`blind_builder`).
+    let planted_talk = silent_dir.join("decisions/day-01-talk-Foundry.json");
+    fs::write(&planted_talk, "{}")?;
+    let Err(planted_mixed_bi) = run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![silent_dir.clone(), silent_branch.clone()],
+        out_blind_dir: tmp.join("mixed_blind_planted"),
+        out_arm_map_dir: tmp.join("mixed_arm_map_planted"),
+        out_checkpoints_dir: None,
+        config_path: cfg_path.clone(),
+        scorer_seed: 12,
+    }) else {
+        panic!("expected MIXED_COMMUNICATION_CONDITIONS for unexpected talk file in silent dir");
+    };
+    assert_eq!(planted_mixed_bi.code(), "MIXED_COMMUNICATION_CONDITIONS");
+    fs::remove_file(&planted_talk)?;
+
     // Pure silent pipeline succeeds end-to-end.
     let blind_dir = tmp.join("blind");
     let arm_map_dir = tmp.join("arm_map");

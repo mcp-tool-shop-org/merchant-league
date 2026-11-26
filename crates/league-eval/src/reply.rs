@@ -941,5 +941,135 @@ mod tests {
             false,
         );
         assert_eq!(ok_talk.refusal_code, None);
+
+        // Talk exceeding EVAL_MESSAGES_MAX_ITEMS and non-object message item -> `TALK_REPLY_INVALID`:
+        let too_many_msgs = r#"{"messages":[{"to_guild":"Quarry","body":"1"},{"to_guild":"Harbor","body":"2"},{"to_guild":"Mint","body":"3"},{"to_guild":"Quarry","body":"4"}],"market_actions":[],"bundle":{}}"#;
+        let err_many = parse_eval_talk_reply(too_many_msgs, 0, "Foundry", &seated, false);
+        assert_eq!(
+            err_many.refusal_code,
+            Some(ReplyRefusalCode::TalkReplyInvalid)
+        );
+
+        // Silent mode forbids raw `condition_hash` and `preimage` keys as well as direct order helper checks:
+        let strip_messages_from_talk = |sub: &EvalActSubmission| -> String {
+            let Ok(raw) = crate::baselines::encode_canonical_eval_reply(
+                crate::records::CommunicationMode::Talk,
+                &[],
+                sub,
+            ) else {
+                panic!("encode talk reply for silent forbidden key test");
+            };
+            let Ok(mut map) = serde_json::from_str::<Map<String, Value>>(&raw) else {
+                panic!("parse encoded talk map");
+            };
+            map.remove("messages");
+            serde_json::to_string(&map).unwrap_or_default()
+        };
+        let silent_cond_hash = strip_messages_from_talk(&EvalActSubmission {
+            market_actions: vec![MarketAction::CreateEscrow {
+                seat: 0,
+                escrow: league_seat_types::EscrowProposal {
+                    destination: 1,
+                    asset: league_core::AssetId::Cred,
+                    amount: 1000,
+                    finish_after_turn: Some(2),
+                    cancel_after_turn: 4,
+                    condition_hash: Some(league_seat_types::CommitmentHash([0x11; 32])),
+                    bond: None,
+                },
+            }],
+            pass_b_actions: Vec::new(),
+            bundle: SealedOrderBundle::default(),
+        });
+        let err_ch = parse_eval_silent_act_reply(&silent_cond_hash, 0, false);
+        assert_eq!(err_ch.refusal_code, Some(ReplyRefusalCode::ActReplyInvalid));
+        assert!(
+            err_ch
+                .refusal_reason
+                .as_deref()
+                .is_some_and(|r| r.contains("condition_hash")),
+            "{:?}",
+            err_ch.refusal_reason
+        );
+
+        let silent_preimage = strip_messages_from_talk(&EvalActSubmission {
+            market_actions: Vec::new(),
+            pass_b_actions: Vec::new(),
+            bundle: SealedOrderBundle {
+                escrow_finishes: vec![league_seat_types::EscrowFinishUnlock {
+                    escrow_id: 1,
+                    preimage: Some(league_seat_types::PreimageSecret([0x22; 32])),
+                }],
+                ..SealedOrderBundle::default()
+            },
+        });
+        let err_pre = parse_eval_silent_act_reply(&silent_preimage, 0, false);
+        assert_eq!(
+            err_pre.refusal_code,
+            Some(ReplyRefusalCode::ActReplyInvalid)
+        );
+        assert!(
+            err_pre
+                .refusal_reason
+                .as_deref()
+                .is_some_and(|r| r.contains("preimage")),
+            "{:?}",
+            err_pre.refusal_reason
+        );
+
+        assert!(
+            validate_silent_orders_no_communication(&[], &SealedOrderBundle::default()).is_none()
+        );
+        assert!(
+            validate_silent_orders_no_communication(
+                &[MarketAction::RecordIntentPledge {
+                    seat: 0,
+                    pledge: league_seat_types::IntentPledge {
+                        pledge_id: 1,
+                        promisor: 0,
+                        counterparty: 1,
+                        target: league_seat_types::IntentTarget::VoteForSeat {
+                            office_turn: 4,
+                            candidate: 1,
+                        },
+                        honor_weight: 10,
+                        memo_digest: [0x11; 32],
+                    },
+                }],
+                &SealedOrderBundle::default(),
+            )
+            .is_some_and(|s| s.contains("record_intent_pledge"))
+        );
+        assert!(
+            validate_silent_orders_no_communication(
+                &[MarketAction::CreateEscrow {
+                    seat: 0,
+                    escrow: league_seat_types::EscrowProposal {
+                        destination: 1,
+                        asset: league_core::AssetId::Cred,
+                        amount: 1000,
+                        finish_after_turn: Some(2),
+                        cancel_after_turn: 4,
+                        condition_hash: Some(league_seat_types::CommitmentHash([0x22; 32])),
+                        bond: None,
+                    },
+                }],
+                &SealedOrderBundle::default(),
+            )
+            .is_some_and(|s| s.contains("condition_hash"))
+        );
+        assert!(
+            validate_silent_orders_no_communication(
+                &[],
+                &SealedOrderBundle {
+                    escrow_finishes: vec![league_seat_types::EscrowFinishUnlock {
+                        escrow_id: 1,
+                        preimage: Some(league_seat_types::PreimageSecret([0x33; 32])),
+                    }],
+                    ..SealedOrderBundle::default()
+                },
+            )
+            .is_some_and(|s| s.contains("preimage"))
+        );
     }
 }
