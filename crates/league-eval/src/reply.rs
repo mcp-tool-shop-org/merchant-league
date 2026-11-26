@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use league_core::{EvalActSubmission, SealedOrderBundle};
+use league_core::{EvalActSubmission, MarketAction, SealedOrderBundle};
 use league_relay::{
     Round, UntrustedWhisper, parse_preview_tool_arguments, preview_wording_slot, wording_slot,
 };
@@ -15,6 +15,7 @@ use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::records::CommunicationMode;
 use crate::wording::{EVAL_MESSAGES_MAX_ITEMS, eval_wording_slot};
 
 /// Named refusal codes defined by the Item 9 reply contract (`1.3`, `A1`, `B1`).
@@ -325,6 +326,15 @@ fn validate_common_reply_envelope_obj(
     asking_seat: u8,
     keeps_notes: bool,
 ) -> (Option<CommonReplyEnvelope>, Option<String>, bool) {
+    validate_reply_envelope_obj(obj, asking_seat, keeps_notes, true)
+}
+
+fn validate_reply_envelope_obj(
+    obj: &Map<String, Value>,
+    asking_seat: u8,
+    keeps_notes: bool,
+    allow_messages: bool,
+) -> (Option<CommonReplyEnvelope>, Option<String>, bool) {
     let k_notes = wording_slot("scratchpad_schema_key");
     let k_messages = eval_wording_slot("eval_messages_key");
     let k_to_guild = eval_wording_slot("eval_to_guild_key");
@@ -335,7 +345,7 @@ fn validate_common_reply_envelope_obj(
     let notes_present = keeps_notes && obj.get(&k_notes).is_some_and(Value::is_string);
 
     for k in obj.keys() {
-        let allowed = k == k_messages
+        let allowed = (allow_messages && k == k_messages)
             || k == k_ma.as_str()
             || k == k_bundle.as_str()
             || (keeps_notes && k == &k_notes);
@@ -359,65 +369,70 @@ fn validate_common_reply_envelope_obj(
         );
     }
 
-    let Some(msg_arr) = obj.get(k_messages).and_then(Value::as_array) else {
-        return (
-            None,
-            Some(format!("missing or non-array '{k_messages}' property")),
-            notes_present,
-        );
-    };
-    if msg_arr.len() > EVAL_MESSAGES_MAX_ITEMS {
-        return (
-            None,
-            Some(format!(
-                "'{k_messages}' has {} items, exceeding maxItems={EVAL_MESSAGES_MAX_ITEMS}",
-                msg_arr.len()
-            )),
-            notes_present,
-        );
-    }
-
-    let mut messages = Vec::with_capacity(msg_arr.len());
-    for (idx, item) in msg_arr.iter().enumerate() {
-        let Some(m_obj) = item.as_object() else {
+    let messages = if allow_messages {
+        let Some(msg_arr) = obj.get(k_messages).and_then(Value::as_array) else {
             return (
                 None,
-                Some(format!("'{k_messages}[{idx}]' must be a JSON object")),
+                Some(format!("missing or non-array '{k_messages}' property")),
                 notes_present,
             );
         };
-        for mk in m_obj.keys() {
-            if mk != k_to_guild && mk != k_body {
-                return (
-                    None,
-                    Some(format!(
-                        "'{k_messages}[{idx}]' contains unexpected key '{mk}'"
-                    )),
-                    notes_present,
-                );
-            }
-        }
-        let Some(to_guild) = m_obj.get(k_to_guild).and_then(Value::as_str) else {
+        if msg_arr.len() > EVAL_MESSAGES_MAX_ITEMS {
             return (
                 None,
                 Some(format!(
-                    "'{k_messages}[{idx}]' missing string '{k_to_guild}'"
+                    "'{k_messages}' has {} items, exceeding maxItems={EVAL_MESSAGES_MAX_ITEMS}",
+                    msg_arr.len()
                 )),
                 notes_present,
             );
-        };
-        let Some(body) = m_obj.get(k_body).and_then(Value::as_str) else {
-            return (
-                None,
-                Some(format!("'{k_messages}[{idx}]' missing string '{k_body}'")),
-                notes_present,
-            );
-        };
-        messages.push(ParsedEvalMessage {
-            to_guild: to_guild.to_owned(),
-            body: body.to_owned(),
-        });
-    }
+        }
+
+        let mut parsed_msgs = Vec::with_capacity(msg_arr.len());
+        for (idx, item) in msg_arr.iter().enumerate() {
+            let Some(m_obj) = item.as_object() else {
+                return (
+                    None,
+                    Some(format!("'{k_messages}[{idx}]' must be a JSON object")),
+                    notes_present,
+                );
+            };
+            for mk in m_obj.keys() {
+                if mk != k_to_guild && mk != k_body {
+                    return (
+                        None,
+                        Some(format!(
+                            "'{k_messages}[{idx}]' contains unexpected key '{mk}'"
+                        )),
+                        notes_present,
+                    );
+                }
+            }
+            let Some(to_guild) = m_obj.get(k_to_guild).and_then(Value::as_str) else {
+                return (
+                    None,
+                    Some(format!(
+                        "'{k_messages}[{idx}]' missing string '{k_to_guild}'"
+                    )),
+                    notes_present,
+                );
+            };
+            let Some(body) = m_obj.get(k_body).and_then(Value::as_str) else {
+                return (
+                    None,
+                    Some(format!("'{k_messages}[{idx}]' missing string '{k_body}'")),
+                    notes_present,
+                );
+            };
+            parsed_msgs.push(ParsedEvalMessage {
+                to_guild: to_guild.to_owned(),
+                body: body.to_owned(),
+            });
+        }
+        parsed_msgs
+    } else {
+        Vec::new()
+    };
 
     let Some(ma_val) = obj.get(&k_ma) else {
         return (
@@ -562,6 +577,165 @@ pub fn parse_eval_act_reply(raw: &str, asking_seat: u8, keeps_notes: bool) -> Pa
         refusal_reason: None,
         notes_present: env.notes_present,
         is_wrong_part: false,
+    }
+}
+
+fn validate_silent_raw_forbidden_keys(obj: &Map<String, Value>) -> Option<String> {
+    let k_ma = preview_wording_slot("key_market_actions");
+    let k_bundle = preview_wording_slot("key_bundle");
+    let k_escrow_finishes = preview_wording_slot("key_escrow_finishes");
+    let k_preimage = preview_wording_slot("key_preimage");
+    let forbidden_ma_keys = [
+        preview_wording_slot("key_condition_hash"),
+        preview_wording_slot("key_pledge_id"),
+        preview_wording_slot("key_recipient_seat"),
+        preview_wording_slot("key_target"),
+        preview_wording_slot("key_honor_weight"),
+        preview_wording_slot("key_memo_digest"),
+    ];
+    if let Some(ma_arr) = obj.get(&k_ma).and_then(Value::as_array) {
+        for (idx, item) in ma_arr.iter().enumerate() {
+            if let Some(m) = item.as_object() {
+                for fk in &forbidden_ma_keys {
+                    if m.contains_key(fk.as_str()) {
+                        return Some(format!(
+                            "silent condition forbids '{fk}' inside '{k_ma}[{idx}]'"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(ef_arr) = obj
+        .get(&k_bundle)
+        .and_then(|v| v.get(&k_escrow_finishes))
+        .and_then(Value::as_array)
+    {
+        for (idx, item) in ef_arr.iter().enumerate() {
+            if item
+                .as_object()
+                .is_some_and(|m| m.contains_key(&k_preimage))
+            {
+                return Some(format!(
+                    "silent condition forbids '{k_preimage}' inside '{k_bundle}.{k_escrow_finishes}[{idx}]'"
+                ));
+            }
+        }
+    }
+    None
+}
+
+fn validate_silent_orders_no_communication(
+    market_actions: &[MarketAction],
+    bundle: &SealedOrderBundle,
+) -> Option<String> {
+    for (idx, act) in market_actions.iter().enumerate() {
+        match act {
+            MarketAction::RecordIntentPledge { .. } => {
+                return Some(format!(
+                    "silent condition forbids record_intent_pledge at market_actions[{idx}]"
+                ));
+            }
+            MarketAction::CreateEscrow { escrow, .. } if escrow.condition_hash.is_some() => {
+                return Some(format!(
+                    "silent condition forbids condition_hash in create_escrow at market_actions[{idx}]"
+                ));
+            }
+            _ => {}
+        }
+    }
+    for (idx, fin) in bundle.escrow_finishes.iter().enumerate() {
+        if fin.preimage.is_some() {
+            return Some(format!(
+                "silent condition forbids preimage in escrow_finishes[{idx}]"
+            ));
+        }
+    }
+    None
+}
+
+/// Strictly parse a delivered `act` reply in the silent-market condition.
+///
+/// Rejects any `"messages"` property (`ActReplyHasMessages` when non-empty, `ActReplyInvalid` when
+/// empty), `record_intent_pledge` / memo keys, `condition_hash`, and `preimage`.
+#[must_use]
+pub fn parse_eval_silent_act_reply(
+    raw: &str,
+    asking_seat: u8,
+    keeps_notes: bool,
+) -> ParsedActReply {
+    let obj = match parse_strict_json_object(raw) {
+        Ok(o) => o,
+        Err(reason) => {
+            return ParsedActReply {
+                submission: EvalActSubmission::default(),
+                refusal_code: Some(ReplyRefusalCode::ActReplyInvalid),
+                refusal_reason: Some(reason),
+                notes_present: false,
+                is_wrong_part: false,
+            };
+        }
+    };
+    let k_notes = wording_slot("scratchpad_schema_key");
+    let notes_present = keeps_notes && obj.get(&k_notes).is_some_and(Value::is_string);
+    if let Some((code, reason)) = detect_raw_wrong_round_obj(Round::Act, &obj) {
+        return ParsedActReply {
+            submission: EvalActSubmission::default(),
+            refusal_code: Some(code),
+            refusal_reason: Some(reason),
+            notes_present,
+            is_wrong_part: true,
+        };
+    }
+
+    let (env_opt, err_opt, env_notes_present) =
+        validate_reply_envelope_obj(&obj, asking_seat, keeps_notes, false);
+    let Some(env) = env_opt else {
+        return ParsedActReply {
+            submission: EvalActSubmission::default(),
+            refusal_code: Some(ReplyRefusalCode::ActReplyInvalid),
+            refusal_reason: err_opt,
+            notes_present: env_notes_present,
+            is_wrong_part: false,
+        };
+    };
+
+    if let Some(reason) = validate_silent_raw_forbidden_keys(&obj)
+        .or_else(|| validate_silent_orders_no_communication(&env.market_actions, &env.bundle))
+    {
+        return ParsedActReply {
+            submission: EvalActSubmission::default(),
+            refusal_code: Some(ReplyRefusalCode::ActReplyInvalid),
+            refusal_reason: Some(reason),
+            notes_present: env.notes_present,
+            is_wrong_part: false,
+        };
+    }
+
+    ParsedActReply {
+        submission: EvalActSubmission {
+            market_actions: env.market_actions,
+            pass_b_actions: Vec::new(),
+            bundle: env.bundle,
+        },
+        refusal_code: None,
+        refusal_reason: None,
+        notes_present: env.notes_present,
+        is_wrong_part: false,
+    }
+}
+
+/// Dispatch `act` reply parsing according to [`CommunicationMode`].
+#[must_use]
+pub fn parse_eval_act_reply_for_communication(
+    communication: CommunicationMode,
+    raw: &str,
+    asking_seat: u8,
+    keeps_notes: bool,
+) -> ParsedActReply {
+    match communication {
+        CommunicationMode::Talk => parse_eval_act_reply(raw, asking_seat, keeps_notes),
+        CommunicationMode::Silent => parse_eval_silent_act_reply(raw, asking_seat, keeps_notes),
     }
 }
 

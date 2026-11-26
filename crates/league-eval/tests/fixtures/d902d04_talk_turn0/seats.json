@@ -1,0 +1,24 @@
+{
+  "seats": [
+    {
+      "backend": "file",
+      "guild": "Foundry",
+      "model": "ClubBot"
+    },
+    {
+      "backend": "file",
+      "guild": "Quarry",
+      "model": "ClubBot"
+    },
+    {
+      "backend": "file",
+      "guild": "Harbor",
+      "model": "ClubBot"
+    },
+    {
+      "backend": "file",
+      "guild": "Mint",
+      "model": "ClubBot"
+    }
+  ]
+}

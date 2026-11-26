@@ -2260,6 +2260,8 @@ pub struct TurnConfig {
     /// Evaluation Mode switch (`false` by default; `league-eval` sets `true`): single HTTP attempt
     /// per round, raw + discarded reply sidecars kept in every arm, and `exclude_from_transcript` banned.
     pub eval_mode: bool,
+    /// Evaluation Mode silent-market flag (`false` by default; refused when `eval_mode == false`).
+    pub silent_market: bool,
     /// Wire key used for `reasoning.budget_tokens` on `local` seats (`thinking_token_budget` in Play
     /// mode by default; `reasoning_budget_tokens` when Eval selects from a `llama-server` manifest).
     pub local_reasoning_budget_key: LocalReasoningBudgetKey,
@@ -2296,6 +2298,7 @@ impl TurnConfig {
             log_level: LogLevel::default(),
             preview_tool: PreviewToolMode::default(),
             eval_mode: false,
+            silent_market: false,
             local_reasoning_budget_key: LocalReasoningBudgetKey::default(),
             extra_redaction_keys: Vec::new(),
         }
@@ -2353,6 +2356,12 @@ impl TurnConfig {
     /// raw and discarded sidecars in every arm, and refuses `reasoning.exclude_from_transcript: true`.
     pub fn with_eval_mode(mut self, eval_mode: bool) -> Self {
         self.eval_mode = eval_mode;
+        self
+    }
+
+    /// Enable or disable Evaluation Mode silent-market flag (`false` default; refused in Play mode).
+    pub fn with_silent_market(mut self, silent_market: bool) -> Self {
+        self.silent_market = silent_market;
         self
     }
 
@@ -5436,6 +5445,12 @@ pub(crate) fn run_turn_with_diag(
     diag_sink: Option<&RelayDiagSink>,
 ) -> Result<TurnSummary, RelayError> {
     let turn_started = Instant::now();
+    if config.silent_market && !config.eval_mode {
+        return Err(RelayError::SilentMarketEvalOnly(
+            "silent market condition is only supported in Evaluation Mode (`league-eval`), not Play mode"
+                .to_owned(),
+        ));
+    }
     validate_day(&config.day)?;
     validate_eval_mode_seats(config, redaction_key)?;
     let scratchpad_plan = resolve_table_scratchpad_plan(config)?;

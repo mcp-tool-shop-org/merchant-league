@@ -26,7 +26,7 @@ pub use club::{
 };
 pub use eval::{
     EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION, EvalActApplyOutcome, EvalActSubmission,
-    EvalHost, EvalSaveSnapshot, EvalSeatApplyReport,
+    EvalHost, EvalSaveSnapshot, EvalSeatApplyReport, PolicyChaChaRng,
 };
 
 pub use commit::{

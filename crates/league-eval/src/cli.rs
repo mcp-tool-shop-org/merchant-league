@@ -13,11 +13,11 @@ use league_relay::{
 
 use crate::blind_builder::{BuildBlindInputsOptions, run_build_blind_inputs};
 use crate::driver::{
-    BranchOptions, NoopTransport, PlayOptions, run_branch_with_transport_and_git_sha,
-    run_play_with_transport_and_git_sha, validate_eval_seats_file,
+    BranchOptions, NoopTransport, PlayOptions, run_branch_with_communication_and_git_sha,
+    run_play_with_communication_and_git_sha, validate_eval_seats_file,
 };
-use crate::freeze_gate::{FreezeOptions, JoinOptions, run_freeze, run_join};
-use crate::records::{EvalArm, summarize_branch_outcomes};
+use crate::freeze_gate::{FreezeOptions, JoinOptions, run_freeze_with_provenance, run_join};
+use crate::records::{CommunicationMode, EvalArm, summarize_branch_outcomes};
 use crate::select::{SelectOptions, run_select};
 use crate::serving::CrateGitShaSource;
 use crate::verify_checkpoints::{VerifyCheckpointsOptions, run_verify_checkpoints};
@@ -32,8 +32,8 @@ USAGE:
   league-eval --version | -V
 
 COMMANDS:
-  play                Play up to `--turns` full turns from standard setup or turn-0 fork under `--arm <off|control|on>`
-  branch              Replay a frozen pre-act checkpoint across `--arms <off,control,on>` holding peer actions fixed
+  play                Play up to `--turns` full turns from standard setup or turn-0 fork under `--arm <off|control|on>` and `--communication <talk|silent>`
+  branch              Replay a frozen pre-act checkpoint across `--arms <off,control,on>` and `--communication <talk|silent>` holding peer actions fixed
   select              Deterministically select stratified early/mid/late pre-act checkpoints across games
   build-blind-inputs  Build anonymized `blind_inputs/` and disjoint `arm_map/` from run directories
   verify-checkpoints  Verify pre-act checkpoints causally and atomically write read-only `verified_checkpoints.json`
@@ -237,6 +237,7 @@ fn cmd_play(
     let mut wrapper_path: Option<PathBuf> = None;
     let mut wrapper_version: Option<String> = None;
     let mut serving_manifest_path: Option<PathBuf> = None;
+    let mut communication = CommunicationMode::Talk;
     let mut arm: Option<EvalArm> = None;
     let mut table_id: u64 = 1;
     let mut seed: Option<u64> = None;
@@ -267,6 +268,10 @@ fn cmd_play(
             "--serving-manifest" => {
                 serving_manifest_path =
                     Some(PathBuf::from(take_value(&mut iter, "--serving-manifest")?));
+            }
+            "--communication" => {
+                let raw = take_value(&mut iter, "--communication")?;
+                communication = CommunicationMode::parse(&raw).map_err(EvalError::Usage)?;
             }
             "--arm" => {
                 let raw = take_value(&mut iter, "--arm")?;
@@ -353,7 +358,13 @@ fn cmd_play(
             run_opts.live = eff_live;
             run_opts.cap_credits = eff_credits;
             run_opts.cap_gpu_secs = eff_gpu;
-            run_play_with_transport_and_git_sha(&run_opts, transport, key, git_sha)
+            run_play_with_communication_and_git_sha(
+                &run_opts,
+                communication,
+                transport,
+                key,
+                git_sha,
+            )
         },
     )?;
 
@@ -384,6 +395,7 @@ fn cmd_branch(
     let mut seats_path: Option<PathBuf> = None;
     let mut wrapper_path: Option<PathBuf> = None;
     let mut serving_manifest_path: Option<PathBuf> = None;
+    let mut communication = CommunicationMode::Talk;
     let mut arms: Vec<EvalArm> = Vec::new();
     let mut out_dir: Option<PathBuf> = None;
     let mut memory_mode = MemoryMode::Snapshot;
@@ -413,6 +425,10 @@ fn cmd_branch(
             "--serving-manifest" => {
                 serving_manifest_path =
                     Some(PathBuf::from(take_value(&mut iter, "--serving-manifest")?));
+            }
+            "--communication" => {
+                let raw = take_value(&mut iter, "--communication")?;
+                communication = CommunicationMode::parse(&raw).map_err(EvalError::Usage)?;
             }
             "--arm" | "--arms" => {
                 let raw = take_value(&mut iter, &arg)?;
@@ -483,7 +499,13 @@ fn cmd_branch(
             run_opts.live = eff_live;
             run_opts.cap_credits = eff_credits;
             run_opts.cap_gpu_secs = eff_gpu;
-            run_branch_with_transport_and_git_sha(&run_opts, transport, key, git_sha)
+            run_branch_with_communication_and_git_sha(
+                &run_opts,
+                communication,
+                transport,
+                key,
+                git_sha,
+            )
         },
     )?;
 
@@ -729,6 +751,8 @@ fn cmd_freeze(
     let mut out_path: Option<PathBuf> = None;
     let mut verified_checkpoints_path: Option<PathBuf> = None;
     let mut scorer_crate_dir: Option<PathBuf> = None;
+    let mut arm_map_dir: Option<PathBuf> = None;
+    let mut run_dirs: Vec<PathBuf> = Vec::new();
 
     let mut iter = args.iter().cloned();
     while let Some(arg_os) = iter.next() {
@@ -756,6 +780,8 @@ fn cmd_freeze(
                 scorer_crate_dir =
                     Some(PathBuf::from(take_value(&mut iter, "--scorer-crate-dir")?));
             }
+            "--arm-map" => arm_map_dir = Some(PathBuf::from(take_value(&mut iter, "--arm-map")?)),
+            "--run" => run_dirs.push(PathBuf::from(take_value(&mut iter, "--run")?)),
             other => {
                 return Err(EvalError::Usage(format!("unknown `freeze` flag '{other}'")));
             }
@@ -779,7 +805,7 @@ fn cmd_freeze(
         })?,
         scorer_crate_dir,
     };
-    let freeze = run_freeze(&opts, git_sha)?;
+    let freeze = run_freeze_with_provenance(&opts, arm_map_dir.as_deref(), &run_dirs, git_sha)?;
     writeln!(
         stdout,
         "freeze_written={} config_sha256={} manifest_sha256={} verified_checkpoints_sha256={}",

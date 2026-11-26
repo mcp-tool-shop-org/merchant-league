@@ -15,7 +15,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::EvalError;
-use crate::wording::{EVAL_REPLY_WORDING, EVAL_REPLY_WORDING_ARM};
+use crate::records::CommunicationMode;
+use crate::wording::{
+    EVAL_REPLY_WORDING, EVAL_REPLY_WORDING_ARM, EVAL_SILENT_REPLY_WORDING,
+    EVAL_SILENT_REPLY_WORDING_ARM,
+};
 
 const HOME_PLACEHOLDER: &str = "<home>";
 const REDACTED_TOKEN: &str = "[REDACTED]";
@@ -403,6 +407,28 @@ impl WordingArmDigests {
             wrapper_sha256: wrapper_sha256.to_owned(),
             response_schema_sha256: response_schema_sha256.to_owned(),
         }
+    }
+
+    /// Compute wording, wrapper, and schema SHA-256 digests matching [`CommunicationMode`].
+    #[must_use]
+    pub fn compute_for_communication(
+        communication: CommunicationMode,
+        active_relay_wording_arm: &str,
+        wrapper_version: &str,
+        wrapper_sha256: &str,
+        response_schema_sha256: &str,
+    ) -> Self {
+        let mut out = Self::compute(
+            active_relay_wording_arm,
+            wrapper_version,
+            wrapper_sha256,
+            response_schema_sha256,
+        );
+        if communication == CommunicationMode::Silent {
+            out.eval_reply_arm = EVAL_SILENT_REPLY_WORDING_ARM.to_owned();
+            out.eval_reply_wording_sha256 = hash_wording_entries(EVAL_SILENT_REPLY_WORDING);
+        }
+        out
     }
 }
 

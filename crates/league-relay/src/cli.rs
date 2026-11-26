@@ -598,6 +598,11 @@ where
                 preview_tool = PreviewToolMode::parse(val)?;
                 idx += step;
             }
+            "--communication" => {
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
+                parse_communication_cli_flag(val)?;
+                idx += step;
+            }
             other => {
                 if !other.starts_with('-') {
                     return Err(RelayError::Usage(
@@ -646,6 +651,18 @@ where
         error_format,
         log_level,
     }))
+}
+
+fn parse_communication_cli_flag(raw: &str) -> Result<(), RelayError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "talk" => Ok(()),
+        "silent" => Err(RelayError::SilentMarketEvalOnly(
+            "`--communication silent` is refused in Play mode; use `league-eval`".to_owned(),
+        )),
+        _ => Err(RelayError::Usage(
+            "--communication must be 'talk' or 'silent'".to_owned(),
+        )),
+    }
 }
 
 fn take_flag_value<'a>(
@@ -996,6 +1013,11 @@ fn parse_prebook_check_args(
             "--preview-tool" => {
                 let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
                 preview_tool = PreviewToolMode::parse(val)?;
+                idx += step;
+            }
+            "--communication" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                parse_communication_cli_flag(val)?;
                 idx += step;
             }
             "--live" => {
@@ -1558,4 +1580,63 @@ where
     };
     diag_lines.extend(diag_sink.drain_redacted(redaction_keys));
     Ok(CliRunOutcome::Turn(turn_res?))
+}
+
+#[cfg(test)]
+mod silent_flag_tests {
+    use super::*;
+    use crate::relay::run_turn;
+    use crate::seats::SeatFile;
+    use std::path::PathBuf;
+
+    #[test]
+    fn play_mode_refuses_silent_communication_flag_and_turn_config() {
+        assert!(parse_communication_cli_flag("talk").is_ok());
+        assert!(matches!(
+            parse_communication_cli_flag("bogus"),
+            Err(RelayError::Usage(_))
+        ));
+
+        for sub in ["turn", "prebook-check"] {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let code = execute_cli(
+                ["--error-format", "json", sub, "--communication", "silent"],
+                |_| None,
+                &mut out,
+                &mut err,
+            );
+            assert_eq!(code, EXIT_USER_ERROR);
+            let err_str = String::from_utf8_lossy(&err);
+            assert!(
+                err_str.contains("SILENT_MARKET_EVAL_ONLY"),
+                "expected SILENT_MARKET_EVAL_ONLY in {err_str}"
+            );
+        }
+
+        let seats = match SeatFile::from_json_str(
+            r#"{"seats":[{"guild":"Foundry","backend":"file","model":"ClubBot"}]}"#,
+            None,
+        ) {
+            Ok(s) => s,
+            Err(e) => panic!("parse ClubBot seat: {e}"),
+        };
+        let cfg = TurnConfig::new(
+            PathBuf::from("nonexistent"),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            None,
+            false,
+            None,
+        )
+        .with_silent_market(true);
+        let err = match run_turn(&cfg, &NoopManualTransport, None) {
+            Err(e) => e,
+            Ok(_) => panic!("silent_market without eval_mode must refuse"),
+        };
+        assert_eq!(err.code(), "SILENT_MARKET_EVAL_ONLY");
+        assert_eq!(err.exit_code(), EXIT_USER_ERROR);
+        assert!(err.hint().contains("league-eval"));
+    }
 }

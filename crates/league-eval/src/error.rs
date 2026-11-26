@@ -128,6 +128,22 @@ pub enum EvalError {
     MissingVerifiedCheckpoints(String),
     /// `freeze` or `join` refused because `verified_checkpoints.json` disagrees with `scorer_freeze.json`, blind inputs, or build ID (`exit 1`).
     VerifiedCheckpointsMismatch(String),
+    /// `branch` refused because `--communication` disagrees with the source checkpoint condition (`exit 1`).
+    CommunicationConditionMismatch {
+        /// Communication condition recorded on the source checkpoint game.
+        checkpoint_condition: String,
+        /// Requested branch communication condition.
+        requested_condition: String,
+    },
+    /// A scripted baseline `"file"` seat requiring talk mode (such as `"tit-for-tat"`) was configured under `--communication silent` (`exit 1`).
+    BaselineRequiresTalk {
+        /// Guild name of the offending baseline seat.
+        guild: String,
+        /// Baseline model name (`"tit-for-tat"`).
+        model: String,
+    },
+    /// `build-blind-inputs`, `freeze`, or `join` refused because inputs mix `talk` and `silent` communication conditions (`exit 1`).
+    MixedCommunicationConditions(String),
     /// Underlying `league-scorer` error.
     Scorer(ScorerError),
     /// Underlying `EvalHost` / `league-core` error.
@@ -194,6 +210,9 @@ impl EvalError {
             Self::VerifiedCheckpointsExists(_) => "VERIFIED_CHECKPOINTS_EXISTS",
             Self::MissingVerifiedCheckpoints(_) => "MISSING_VERIFIED_CHECKPOINTS",
             Self::VerifiedCheckpointsMismatch(_) => "VERIFIED_CHECKPOINTS_MISMATCH",
+            Self::CommunicationConditionMismatch { .. } => "COMMUNICATION_CONDITION_MISMATCH",
+            Self::BaselineRequiresTalk { .. } => "BASELINE_REQUIRES_TALK",
+            Self::MixedCommunicationConditions(_) => "MIXED_COMMUNICATION_CONDITIONS",
             Self::Scorer(err) => err.code(),
             Self::Engine(err) => err.code(),
             Self::Relay(err) => err.code(),
@@ -243,7 +262,10 @@ impl EvalError {
             | Self::CheckpointVerify { .. }
             | Self::VerifiedCheckpointsExists(_)
             | Self::MissingVerifiedCheckpoints(_)
-            | Self::VerifiedCheckpointsMismatch(_) => EXIT_USER_ERROR,
+            | Self::VerifiedCheckpointsMismatch(_)
+            | Self::CommunicationConditionMismatch { .. }
+            | Self::BaselineRequiresTalk { .. }
+            | Self::MixedCommunicationConditions(_) => EXIT_USER_ERROR,
             Self::Scorer(err) => err.exit_code(),
             Self::Relay(err) => err.exit_code(),
             Self::InvalidWrongPartRate(_)
@@ -274,7 +296,7 @@ impl fmt::Display for EvalError {
             ),
             Self::UnsupportedFileSeatModel { guild, model } => write!(
                 f,
-                "UNSUPPORTED_FILE_SEAT_MODEL: file seat '{guild}' has model {:?}; only \"ClubBot\" is permitted under league-eval",
+                "UNSUPPORTED_FILE_SEAT_MODEL: file seat '{guild}' has model {:?}; only \"ClubBot\", \"random-legal\", \"always-defect\", or \"tit-for-tat\" is permitted under league-eval",
                 model
             ),
             Self::MissingWrapper(msg) => write!(f, "MISSING_WRAPPER: {}", scrub_secret_text(msg)),
@@ -453,6 +475,26 @@ impl fmt::Display for EvalError {
                     scrub_secret_text(msg)
                 )
             }
+            Self::CommunicationConditionMismatch {
+                checkpoint_condition,
+                requested_condition,
+            } => write!(
+                f,
+                "COMMUNICATION_CONDITION_MISMATCH: checkpoint communication condition is '{}' but branch requested '{}'",
+                scrub_secret_text(checkpoint_condition),
+                scrub_secret_text(requested_condition)
+            ),
+            Self::BaselineRequiresTalk { guild, model } => write!(
+                f,
+                "BASELINE_REQUIRES_TALK: file baseline seat '{}' ('{}') requires communication condition 'talk' and is refused in 'silent'",
+                scrub_secret_text(guild),
+                scrub_secret_text(model)
+            ),
+            Self::MixedCommunicationConditions(msg) => write!(
+                f,
+                "MIXED_COMMUNICATION_CONDITIONS: {}",
+                scrub_secret_text(msg)
+            ),
             Self::Scorer(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
             Self::Engine(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
             Self::Relay(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
@@ -499,7 +541,7 @@ impl ToStructuredError for EvalError {
             Self::UnsupportedFileSeatModel { .. } => StructuredError::new(
                 self.code(),
                 self.to_string(),
-                "set `backend: \"file\", \"model\": \"ClubBot\"` for bot seats or `\"local\"` for Evaluation Mode model seats",
+                "set `backend: \"file\", \"model\": \"ClubBot\" | \"random-legal\" | \"always-defect\" | \"tit-for-tat\"` for scripted file seats or `\"local\"` for model seats",
                 false,
             ),
             Self::MissingWrapper(_) => StructuredError::new(
@@ -781,6 +823,24 @@ impl ToStructuredError for EvalError {
                 "ensure `--verified-checkpoints` matches the frozen verified_checkpoints_sha256, build ID, and blind inputs",
                 false,
             ),
+            Self::CommunicationConditionMismatch { .. } => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "pass `--communication` matching the source checkpoint's `setup.json` communication condition",
+                false,
+            ),
+            Self::BaselineRequiresTalk { .. } => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "use `--communication talk` or select a baseline permitted under `--communication silent` (`ClubBot`, `random-legal`, or `always-defect`)",
+                false,
+            ),
+            Self::MixedCommunicationConditions(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "keep `talk` and `silent` evaluation runs in separate blind-input, freeze, and join batches",
+                false,
+            ),
             Self::Scorer(err) => err.to_structured_error(),
             Self::Engine(err) => err.to_structured_error(),
             Self::Relay(err) => err.to_structured_error(),
@@ -854,6 +914,39 @@ mod tests {
                 "PROMPT_TOKEN_COUNT_MISMATCH",
                 EXIT_RUNTIME_ERROR,
                 "usage.prompt_tokens",
+            ),
+            (
+                EvalError::UnsupportedFileSeatModel {
+                    guild: "Foundry".to_owned(),
+                    model: Some("bad-bot".to_owned()),
+                },
+                "UNSUPPORTED_FILE_SEAT_MODEL",
+                EXIT_USER_ERROR,
+                "ClubBot",
+            ),
+            (
+                EvalError::CommunicationConditionMismatch {
+                    checkpoint_condition: "talk".to_owned(),
+                    requested_condition: "silent".to_owned(),
+                },
+                "COMMUNICATION_CONDITION_MISMATCH",
+                EXIT_USER_ERROR,
+                "--communication",
+            ),
+            (
+                EvalError::BaselineRequiresTalk {
+                    guild: "Foundry".to_owned(),
+                    model: "tit-for-tat".to_owned(),
+                },
+                "BASELINE_REQUIRES_TALK",
+                EXIT_USER_ERROR,
+                "--communication talk",
+            ),
+            (
+                EvalError::MixedCommunicationConditions("mixed talk and silent".to_owned()),
+                "MIXED_COMMUNICATION_CONDITIONS",
+                EXIT_USER_ERROR,
+                "separate",
             ),
         ];
 

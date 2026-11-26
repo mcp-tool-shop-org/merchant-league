@@ -26,9 +26,10 @@ use crate::blind_builder::{ArmMapEntry, ArmMapStateFile};
 use crate::error::EvalError;
 use crate::mechanisms::{
     DecisionMechanismMetrics, MECHANISM_DATA_LIMITS, PerArmMechanismSummary,
-    compute_decision_mechanisms, index_source_game_dirs, summarize_arm_mechanisms,
+    compute_decision_mechanisms, index_source_game_dirs, parse_json_prose_safe,
+    summarize_arm_mechanisms,
 };
-use crate::records::{EvalArm, EvalManifest, EvalSetupFile};
+use crate::records::{CommunicationMode, EvalArm, EvalManifest, EvalSetupFile};
 use crate::serving::{CrateGitShaSource, resolve_crate_git_sha_from};
 use crate::talk_extract::talk_rules_v2_digest;
 
@@ -61,6 +62,9 @@ pub struct FreezeOptions {
 pub struct ScorerFreezeFile {
     /// Sorted manifest SHA-256 over `blind_inputs/*.json`.
     pub blind_inputs_manifest_sha256: String,
+    /// Experimental communication condition (`talk` omitted when serialized; `silent` serialized).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Exact control wording arm label (`r2` legality check).
     pub control_wording_arm: String,
     /// Canonical compact-JSON SHA-256 of frozen [`ScorerConfig`].
@@ -159,6 +163,9 @@ pub struct JoinedDecisionRow {
     pub day: u8,
     /// Zero-based focal seat index.
     pub focal_seat: u8,
+    /// Experimental communication condition (`talk` omitted when serialized; `silent` serialized).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Arm (`off`, `control`, `on`).
     pub arm: EvalArm,
     /// Deterministic zero-based replicate index within `(state_id, arm)`.
@@ -235,6 +242,9 @@ pub struct PerArmTalkCountsSummary {
 /// Descriptive per-arm summary row (`§7.1` last bullet).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PerArmSummaryRow {
+    /// Experimental communication condition (`talk` omitted when serialized; `silent` serialized).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Arm (`off`, `control`, `on`).
     pub arm: EvalArm,
     /// Total joined decisions.
@@ -266,6 +276,9 @@ pub struct PerArmSummaryRow {
 pub struct PerArmSummaryFile {
     /// Schema version (`1`).
     pub schema_version: u32,
+    /// Experimental communication condition (`talk` omitted when serialized; `silent` serialized).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Explicit note that post-unblinding tables are descriptive only (`§7.1`).
     pub inferential_status: String,
     /// Freeze SHA-256 of the verified `scorer_freeze.json`.
@@ -294,6 +307,9 @@ pub struct PerArmSummaryFile {
 pub struct JoinedDecisionsFile {
     /// Schema version (`1`).
     pub schema_version: u32,
+    /// Experimental communication condition (`talk` omitted when serialized; `silent` serialized).
+    #[serde(default, skip_serializing_if = "CommunicationMode::is_talk")]
+    pub communication: CommunicationMode,
     /// Explicit note that post-unblinding tables are descriptive only (`§7.1`).
     pub inferential_status: String,
     /// SHA-256 of `scorer_freeze.json`.
@@ -329,9 +345,164 @@ fn default_scorer_crate_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../league-scorer")
 }
 
+fn collect_run_provenance_comms(
+    dir: &Path,
+    seen: &mut BTreeSet<CommunicationMode>,
+) -> Result<(), EvalError> {
+    use crate::records::{BranchArmOutcome, BranchManifest, EvalDecisionRecord};
+
+    for (file_name, kind) in [
+        ("setup.json", "setup"),
+        ("manifest.json", "manifest"),
+        ("decision.json", "decision"),
+        ("outcome.json", "outcome"),
+    ] {
+        let path = dir.join(file_name);
+        if !path.is_file() {
+            continue;
+        }
+        let raw = fs::read_to_string(&path)
+            .map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
+        match kind {
+            "setup" => {
+                let s: EvalSetupFile = parse_json_prose_safe(&raw, &path)?;
+                seen.insert(s.communication);
+            }
+            "manifest" => {
+                if let Ok(m) = serde_json::from_str::<EvalManifest>(&raw) {
+                    seen.insert(m.communication);
+                } else {
+                    let b: BranchManifest = parse_json_prose_safe(&raw, &path)?;
+                    seen.insert(b.communication);
+                }
+            }
+            "decision" => {
+                let d: EvalDecisionRecord = parse_json_prose_safe(&raw, &path)?;
+                seen.insert(d.communication);
+            }
+            "outcome" => {
+                let o: BranchArmOutcome = parse_json_prose_safe(&raw, &path)?;
+                seen.insert(o.communication);
+                seen.insert(o.decision.communication);
+            }
+            _ => {}
+        }
+    }
+    let mut subdirs = Vec::new();
+    let entries =
+        fs::read_dir(dir).map_err(|e| EvalError::Io(format!("read {}: {e}", dir.display())))?;
+    for entry_res in entries {
+        let entry = entry_res.map_err(|e| EvalError::Io(format!("read dir entry: {e}")))?;
+        let ft = entry
+            .file_type()
+            .map_err(|e| EvalError::Io(format!("inspect entry type: {e}")))?;
+        if ft.is_dir() {
+            subdirs.push(entry.path());
+        }
+    }
+    subdirs.sort();
+    for sub in subdirs {
+        let skip = sub
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| {
+                matches!(
+                    name,
+                    "relay" | "to-seat" | "from-seat" | "receipts" | "checkpoints" | "decisions"
+                )
+            });
+        if !skip {
+            collect_run_provenance_comms(&sub, seen)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_arm_map_entry_comms(
+    arm_map: &ArmMapStateFile,
+    seen: &mut BTreeSet<CommunicationMode>,
+) -> Result<(), EvalError> {
+    use crate::records::{BranchArmOutcome, EvalDecisionRecord};
+
+    seen.insert(arm_map.communication);
+    for entry in &arm_map.entries {
+        if let Some(ref setup_path) = entry.setup_path
+            && setup_path.is_file()
+        {
+            let raw = fs::read_to_string(setup_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", setup_path.display())))?;
+            let setup: EvalSetupFile = parse_json_prose_safe(&raw, setup_path)?;
+            seen.insert(setup.communication);
+        }
+        if let Some(ref manifest_path) = entry.manifest_path
+            && manifest_path.is_file()
+        {
+            let raw = fs::read_to_string(manifest_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", manifest_path.display())))?;
+            let manifest: EvalManifest = parse_json_prose_safe(&raw, manifest_path)?;
+            seen.insert(manifest.communication);
+        }
+        if entry.decision_path.is_file() {
+            let raw = fs::read_to_string(&entry.decision_path).map_err(|e| {
+                EvalError::Io(format!("read {}: {e}", entry.decision_path.display()))
+            })?;
+            let dec: EvalDecisionRecord = parse_json_prose_safe(&raw, &entry.decision_path)?;
+            seen.insert(dec.communication);
+        }
+        if entry.outcome_path.is_file() {
+            let raw = fs::read_to_string(&entry.outcome_path).map_err(|e| {
+                EvalError::Io(format!("read {}: {e}", entry.outcome_path.display()))
+            })?;
+            let outcome: BranchArmOutcome = parse_json_prose_safe(&raw, &entry.outcome_path)?;
+            seen.insert(outcome.communication);
+            seen.insert(outcome.decision.communication);
+        }
+    }
+    Ok(())
+}
+
+fn detect_homogeneous_communication_in_provenance(
+    arm_map_dir: Option<&Path>,
+    run_dirs: &[PathBuf],
+) -> Result<Option<CommunicationMode>, EvalError> {
+    let mut seen: BTreeSet<CommunicationMode> = BTreeSet::new();
+    if let Some(dir) = arm_map_dir {
+        let paths = collect_json_files(dir, "--arm-map")?;
+        for path in paths {
+            let raw = fs::read_to_string(&path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
+            let state: ArmMapStateFile = serde_json::from_str(&raw)
+                .map_err(|e| EvalError::Io(format!("parse {}: {e}", path.display())))?;
+            collect_arm_map_entry_comms(&state, &mut seen)?;
+        }
+    }
+    for run_dir in run_dirs {
+        if run_dir.is_dir() {
+            collect_run_provenance_comms(run_dir, &mut seen)?;
+        }
+    }
+    if seen.len() > 1 {
+        return Err(EvalError::MixedCommunicationConditions(
+            "cannot mix `talk` and `silent` communication conditions in `freeze`".to_owned(),
+        ));
+    }
+    Ok(seen.into_iter().next())
+}
+
 /// Validates clean workspace & blind inputs and writes write-once `scorer_freeze.json` (`§8.2` step 3).
 pub fn run_freeze(
     opts: &FreezeOptions,
+    git_sha: &CrateGitShaSource<'_>,
+) -> Result<ScorerFreezeFile, EvalError> {
+    run_freeze_with_provenance(opts, None, &[], git_sha)
+}
+
+/// Variant of [`run_freeze`] that additionally verifies homogeneous `--arm-map` / `--run`
+/// communication conditions and records the resulting condition on `scorer_freeze.json`.
+pub fn run_freeze_with_provenance(
+    opts: &FreezeOptions,
+    arm_map_dir: Option<&Path>,
+    run_dirs: &[PathBuf],
     git_sha: &CrateGitShaSource<'_>,
 ) -> Result<ScorerFreezeFile, EvalError> {
     if opts.control_wording_arm.trim().is_empty() {
@@ -339,6 +510,8 @@ pub fn run_freeze(
             "`--control-wording-arm <label>` cannot be empty".to_owned(),
         ));
     }
+    let provenance_comm = detect_homogeneous_communication_in_provenance(arm_map_dir, run_dirs)?
+        .unwrap_or(CommunicationMode::Talk);
 
     let scorer_git_sha = resolve_crate_git_sha_from(git_sha)?;
 
@@ -394,6 +567,7 @@ pub fn run_freeze(
 
     let freeze = ScorerFreezeFile {
         blind_inputs_manifest_sha256,
+        communication: provenance_comm,
         control_wording_arm: opts.control_wording_arm.clone(),
         scorer_config_sha256,
         scorer_git_sha,
@@ -887,6 +1061,34 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
 
     let source_games = index_source_game_dirs(&opts.source_game_dirs)?;
 
+    let mut observed_join_comms: BTreeSet<CommunicationMode> = BTreeSet::new();
+    observed_join_comms.insert(freeze.communication);
+    for arm_map in arm_maps.values() {
+        collect_arm_map_entry_comms(arm_map, &mut observed_join_comms)?;
+    }
+    for source_dir in source_games.values() {
+        let setup_path = source_dir.join("setup.json");
+        if setup_path.is_file() {
+            let raw = fs::read_to_string(&setup_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", setup_path.display())))?;
+            let setup: EvalSetupFile = parse_json_prose_safe(&raw, &setup_path)?;
+            observed_join_comms.insert(setup.communication);
+        }
+        let manifest_path = source_dir.join("manifest.json");
+        if manifest_path.is_file() {
+            let raw = fs::read_to_string(&manifest_path)
+                .map_err(|e| EvalError::Io(format!("read {}: {e}", manifest_path.display())))?;
+            let manifest: EvalManifest = parse_json_prose_safe(&raw, &manifest_path)?;
+            observed_join_comms.insert(manifest.communication);
+        }
+    }
+    if observed_join_comms.len() > 1 {
+        return Err(EvalError::MixedCommunicationConditions(
+            "cannot mix `talk` and `silent` communication conditions in `join`".to_owned(),
+        ));
+    }
+    let join_comm = freeze.communication;
+
     let mut rows = Vec::new();
     for (state_id, arm_map) in &arm_maps {
         let score = &scores_by_state[state_id];
@@ -919,6 +1121,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
                 state_id: state_id.clone(),
                 day: arm_map.day,
                 focal_seat: arm_map.focal_seat,
+                communication: join_comm,
                 arm: entry.arm,
                 replicate: entry.replicate,
                 committed_candidate_id: entry.committed_candidate_id.clone(),
@@ -971,6 +1174,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         let mechanisms = summarize_arm_mechanisms(&arm_rows);
 
         arm_summaries.push(PerArmSummaryRow {
+            communication: join_comm,
             arm,
             n_decisions,
             n_non_prescreened,
@@ -991,6 +1195,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
 
     let summary_file = PerArmSummaryFile {
         schema_version: BLIND_SCORING_SCHEMA_VERSION,
+        communication: join_comm,
         inferential_status: DESCRIPTIVE_ONLY_INFERENTIAL_STATUS.to_owned(),
         freeze_sha256: freeze_sha256.clone(),
         verified_checkpoints_sha256: freeze.verified_checkpoints_sha256.clone(),
@@ -1005,6 +1210,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
     };
     let decisions_file = JoinedDecisionsFile {
         schema_version: BLIND_SCORING_SCHEMA_VERSION,
+        communication: join_comm,
         inferential_status: DESCRIPTIVE_ONLY_INFERENTIAL_STATUS.to_owned(),
         freeze_sha256,
         verified_checkpoints_sha256: freeze.verified_checkpoints_sha256,
