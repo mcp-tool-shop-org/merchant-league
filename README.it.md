@@ -14,7 +14,7 @@
 
 Un gioco di commercio e politica a turni lenti, per quattro-sei giocatori, ambientato sulla **Testnet** di XRP Ledger. I giocatori possono essere persone o avversari controllati dall'IA, seduti allo stesso tavolo e soggetti alle stesse regole.
 
-**Stato: prototipo, in fase di sviluppo attivo.** La **modalità Club** offline in `league-tui` è giocabile partendo dal codice sorgente su un terminale condiviso (da 4 a 6 posti umani e `ClubBot`, dalla lobby fino alla classifica di fine stagione e all'esportazione delle partite; le comunicazioni private sono posticipate dopo `v0.1.0`). La modalità di gioco sulla Testnet pubblica non è ancora stata creata. **v0.1.0** è la prima versione prototipo con tag: solo codice sorgente, senza binari pubblicati né immagine del container pubblicata. Solo Testnet: niente denaro reale e nessun percorso verso la Mainnet.
+**Stato: prototipo, in fase di sviluppo attivo.** La **modalità Club** offline in `league-tui` è giocabile partendo dal codice sorgente su un terminale condiviso (da 4 a 6 posti umani e `ClubBot`, dalla lobby fino alla classifica di fine stagione e all'esportazione delle partite; le comunicazioni private non sono ancora nella modalità Club). La modalità di gioco sulla Testnet pubblica non è ancora stata creata. Le versioni con tag sono prototipi di solo codice sorgente, senza binari pubblicati né immagine del container pubblicata. Solo Testnet: niente denaro reale e nessun percorso verso la Mainnet.
 
 ## Il gioco
 

@@ -14,7 +14,7 @@
 
 A slow-turn trading and politics game for four to six seats, played on the XRP Ledger **Testnet**. Seats can be people or AI players, at the same table and under the same rules.
 
-**Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are deferred past `v0.1.0`), and the automated **Evaluation Mode** harness (`league-eval` over `league-relay` and `league-core`'s `EvalHost`) drives `play`, `branch`, and `select` workflows across `off`, `control`, and `on` arms with pinned seat briefs and serving-manifest checks (CI runs mock transports only, with no model calls). Public-Testnet Game mode is not built yet. **v0.1.0** is the first tagged prototype release: source only, with no published binaries and no published container image. Testnet only: no real money, and no path to Mainnet.
+**Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are not in Club Mode yet), and the automated **Evaluation Mode** harness (`league-eval` over `league-relay` and `league-core`'s `EvalHost`) drives `play`, `branch`, and `select` workflows across `off`, `control`, and `on` arms with pinned seat briefs and serving-manifest checks (CI runs mock transports only, with no model calls). Public-Testnet Game mode is not built yet. Tagged releases are source-only prototypes, with no published binaries and no published container image. Testnet only: no real money, and no path to Mainnet.
 
 ## The game
 
