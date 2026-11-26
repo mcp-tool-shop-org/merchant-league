@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use league_core::{EvalActSubmission, EvalHost, Seat};
 use league_relay::{
     CallLogEntry, Round, SavedToolRoundCall, SavedToolRoundRecord, parse_preview_tool_arguments,
+    parse_silent_preview_tool_arguments,
 };
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest, ScorerConfig,
@@ -323,7 +324,13 @@ fn extract_first_draft_submission(
         {
             continue;
         }
-        if let Some(parsed_req) = parse_preview_tool_arguments(&call.arguments, decision.seat) {
+        let parsed_req = match decision.communication {
+            CommunicationMode::Talk => parse_preview_tool_arguments(&call.arguments, decision.seat),
+            CommunicationMode::Silent => {
+                parse_silent_preview_tool_arguments(&call.arguments, decision.seat)
+            }
+        };
+        if let Some(parsed_req) = parsed_req {
             return Ok(Some(EvalActSubmission {
                 market_actions: parsed_req.market_actions,
                 pass_b_actions: Vec::new(),

@@ -18,15 +18,21 @@ use league_eval::{
     FreezeOptions, JoinOptions, JoinedDecisionsFile, NoopTransport, OwnToSeatHistory, PeerStance,
     PerArmSummaryFile, PlayOptions, ScorerFreezeFile, VerifyCheckpointsOptions,
     compute_tit_for_tat_stances, decide_always_defect_act, decide_scripted_baseline_talk,
-    decide_tit_for_tat_act, execute_cli_with_git_sha, parse_eval_act_reply_for_communication,
-    parse_eval_silent_act_reply, persist_eval_game_state,
-    run_branch_with_communication_and_git_sha, run_build_blind_inputs, run_freeze_with_provenance,
-    run_join, run_play_with_communication_and_git_sha, run_play_with_transport_and_git_sha,
+    decide_tit_for_tat_act, execute_cli_with_git_sha, extract_talk_commitments_from_messages,
+    parse_eval_act_reply_for_communication, parse_eval_silent_act_reply, persist_eval_game_state,
+    render_seat_view_markdown_for_communication, run_branch_with_communication_and_git_sha,
+    run_build_blind_inputs, run_freeze_with_provenance, run_join,
+    run_play_with_communication_and_git_sha, run_play_with_transport_and_git_sha,
     run_verify_checkpoints,
 };
 use league_relay::{
-    CONTROL_WORDING_ARM, MemoryMode, NegotiationInputs, RawHttpResponse, Transport, TransportError,
-    UntrustedWhisper, sha256_hex,
+    CONTROL_WORDING_ARM, GameSetupRecord, MemoryMode, MockDirTransport, NegotiationInputs,
+    RawHttpResponse, Round, Transport, TransportError, UntrustedWhisper,
+    build_control_turn_orders_tool_definition, build_preview_turn_orders_tool_definition,
+    build_silent_control_turn_orders_tool_definition,
+    build_silent_preview_turn_orders_tool_definition, canonical_tool_definition_sha256,
+    execute_silent_control_tool_call, execute_silent_preview_tool_call,
+    parse_silent_preview_tool_arguments, sha256_hex,
 };
 use league_scorer::{BlindScoringRequest, ScorerConfig, execute_blind_request};
 use league_seat_types::FinalScoreboard;
@@ -472,7 +478,95 @@ fn silent_market_omits_talk_and_refuses_communication_actions()
                         !text.contains("Negotiation & BATNA"),
                         "silent file `{rel}` leaked Negotiation & BATNA header"
                     );
+                    assert!(
+                        !text.contains("=== IF YOU MAKE NO NEW DEALS THIS TURN ==="),
+                        "silent file `{rel}` leaked rendered no-new-deals header"
+                    );
+                    assert!(
+                        !text.contains("=== MESSAGES FROM OTHER SEATS ==="),
+                        "silent file `{rel}` leaked rendered messages-from-other-seats header"
+                    );
                 }
+            }
+
+            let eval_setup: EvalSetupFile =
+                serde_json::from_str(&fs::read_to_string(game_dir.join("setup.json"))?)?;
+            let digests = manifest
+                .wording_digests
+                .as_ref()
+                .ok_or("missing wording_digests")?;
+            let expected_silent_control_sha = canonical_tool_definition_sha256(
+                &build_silent_control_turn_orders_tool_definition(),
+            );
+            let expected_silent_preview_sha = canonical_tool_definition_sha256(
+                &build_silent_preview_turn_orders_tool_definition(),
+            );
+            assert_eq!(
+                digests.silent_control_tool_sha256.as_deref(),
+                Some(expected_silent_control_sha.as_str())
+            );
+            assert_eq!(
+                digests.silent_preview_tool_sha256.as_deref(),
+                Some(expected_silent_preview_sha.as_str())
+            );
+
+            let reqs = transport
+                .requests
+                .lock()
+                .map_err(|_| "requests lock poisoned")?;
+            assert!(!reqs.is_empty());
+            let first_req: Value = serde_json::from_str(&reqs[0])?;
+            if let Some(tname) = tool_name {
+                let relay_setup: GameSetupRecord =
+                    serde_json::from_str(&fs::read_to_string(game_dir.join("relay/setup.json"))?)?;
+                let expected_tool = match arm {
+                    EvalArm::Control => build_silent_control_turn_orders_tool_definition(),
+                    EvalArm::On => build_silent_preview_turn_orders_tool_definition(),
+                    EvalArm::Off => unreachable!(),
+                };
+                let expected_tool_sha = canonical_tool_definition_sha256(&expected_tool);
+                assert_eq!(
+                    eval_setup.tool_schema_sha256.as_deref(),
+                    Some(expected_tool_sha.as_str())
+                );
+                assert_eq!(
+                    relay_setup.tool_schema_sha256.as_deref(),
+                    Some(expected_tool_sha.as_str())
+                );
+                let tools_arr = first_req["tools"]
+                    .as_array()
+                    .ok_or("expected tools array in silent request")?;
+                assert_eq!(tools_arr.len(), 1);
+                assert_eq!(tools_arr[0]["function"]["name"], tname);
+                assert_eq!(tools_arr[0], expected_tool);
+
+                let tools_wire_json = serde_json::to_string(tools_arr)?;
+                for forbidden_tok in [
+                    "record_intent_pledge",
+                    "condition_hash",
+                    "memo_digest",
+                    "pledge_id",
+                    "reveal_preimage",
+                    "honor_weight",
+                    "preimage",
+                    "\"target\"",
+                ] {
+                    assert!(
+                        !tools_wire_json.contains(forbidden_tok),
+                        "silent wire tools JSON for arm `{}` leaked `{forbidden_tok}`",
+                        arm.as_str()
+                    );
+                }
+                let ma_props_str = serde_json::to_string(
+                    &tools_arr[0]["function"]["parameters"]["properties"]["market_actions"],
+                )?;
+                assert!(
+                    !ma_props_str.contains("recipient_seat"),
+                    "silent market_actions tool subtree leaked recipient_seat"
+                );
+            } else {
+                assert!(first_req.get("tools").is_none());
+                assert!(eval_setup.tool_schema_sha256.is_none());
             }
 
             // Check relay transcript has zero Round::Talk entries and act has no messages key.
@@ -503,6 +597,306 @@ fn silent_market_omits_talk_and_refuses_communication_actions()
             }
         }
     }
+
+    // Talk-mode wire tools JSON for both `control` and `on` remains byte-for-byte unchanged,
+    // and omits silent-only digest fields from manifests and setups.
+    let talk_wrapper = write_wrapper_for(&tmp, CommunicationMode::Talk);
+    for (arm, expected_talk_tool) in [
+        (
+            EvalArm::Control,
+            build_control_turn_orders_tool_definition(),
+        ),
+        (EvalArm::On, build_preview_turn_orders_tool_definition()),
+    ] {
+        let game_dir = tmp.join(format!("talk_tool_{}", arm.as_str()));
+        let opts = default_play_opts(
+            game_dir.clone(),
+            seats_path.clone(),
+            talk_wrapper.clone(),
+            Some(serving.clone()),
+            arm,
+            1,
+        );
+        let talk_transport =
+            SilentAwareMockTransport::new(None, json!({ "messages": [{ "to_guild": "Quarry", "body": "hi" }], "market_actions": [], "bundle": {} }).to_string());
+        // Respond properly per round: empty messages in act, valid messages in talk.
+        struct TalkRoundMock {
+            requests: Mutex<Vec<String>>,
+        }
+        impl Transport for TalkRoundMock {
+            fn post_chat_completions(
+                &self,
+                _url: &str,
+                body: &str,
+                _timeout: Duration,
+            ) -> Result<RawHttpResponse, TransportError> {
+                self.requests
+                    .lock()
+                    .map_err(|_| TransportError::Network("lock poisoned".to_owned()))?
+                    .push(body.to_owned());
+                let reply = json!({
+                    "messages": [],
+                    "market_actions": [],
+                    "bundle": {}
+                });
+                Ok(RawHttpResponse {
+                    status: 200,
+                    body: chat_resp(&reply.to_string()).to_string(),
+                })
+            }
+            fn apply_template(
+                &self,
+                _url: &str,
+                body: &str,
+                _timeout: Duration,
+            ) -> Result<String, TransportError> {
+                Ok(format!("TEMPLATED:{body}"))
+            }
+            fn tokenize_prompt(
+                &self,
+                _url: &str,
+                _content: &str,
+                _a: bool,
+                _p: bool,
+                _t: Duration,
+            ) -> Result<Vec<u64>, TransportError> {
+                Ok((100_u64..140).collect())
+            }
+        }
+        drop(talk_transport);
+        let talk_transport = TalkRoundMock {
+            requests: Mutex::new(Vec::new()),
+        };
+        let talk_manifest = run_play_with_communication_and_git_sha(
+            &opts,
+            CommunicationMode::Talk,
+            &talk_transport,
+            None,
+            &test_git_sha(),
+        )?;
+        let talk_digests = talk_manifest
+            .wording_digests
+            .as_ref()
+            .ok_or("talk wording_digests")?;
+        assert!(talk_digests.silent_control_tool_sha256.is_none());
+        assert!(talk_digests.silent_preview_tool_sha256.is_none());
+        let talk_setup: EvalSetupFile =
+            serde_json::from_str(&fs::read_to_string(game_dir.join("setup.json"))?)?;
+        assert!(talk_setup.tool_schema_sha256.is_none());
+        let talk_relay_setup: GameSetupRecord =
+            serde_json::from_str(&fs::read_to_string(game_dir.join("relay/setup.json"))?)?;
+        assert!(talk_relay_setup.tool_schema_sha256.is_none());
+
+        let talk_reqs = talk_transport
+            .requests
+            .lock()
+            .map_err(|_| "talk requests lock")?;
+        let act_req = talk_reqs
+            .iter()
+            .filter_map(|raw| serde_json::from_str::<Value>(raw).ok())
+            .find(|v| v.get("tools").is_some())
+            .ok_or("expected act request with tools in talk mode")?;
+        assert_eq!(act_req["tools"][0], expected_talk_tool);
+    }
+
+    // Silent preview/draft simulation refuses removed action kinds and keys (including null).
+    let host_tool = EvalHost::from_standard_setup_with_model_seats(
+        TableId(88),
+        4,
+        11,
+        22,
+        &[true, true, true, true],
+    )?;
+    let obs_tool = host_tool.observe_seat(Seat(0))?;
+    let preview_state = obs_tool.to_public_preview_state();
+    let refused_tool_payloads = [
+        json!({
+            "market_actions": [{
+                "action_kind": "record_intent_pledge",
+                "pledge_id": 1,
+                "recipient_seat": 1,
+                "target": { "target_kind": "price_floor", "good": { "asset_kind": "raw", "good_index": 0 }, "price_per_unit_cred": 100 },
+                "honor_weight": 1,
+                "memo_digest": "11".repeat(32)
+            }],
+            "bundle": {}
+        }),
+        json!({
+            "market_actions": [{
+                "action_kind": "post_offer",
+                "side": "sell",
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "amount": 1_000,
+                "price_per_unit_cred": 100,
+                "condition_hash": null
+            }],
+            "bundle": {}
+        }),
+        json!({
+            "market_actions": [{
+                "action_kind": "create_escrow",
+                "destination": 1,
+                "asset": { "asset_kind": "cred" },
+                "amount": 1_000,
+                "finish_after_turn": 2,
+                "cancel_after_turn": 5,
+                "condition_hash": "22".repeat(32)
+            }],
+            "bundle": {}
+        }),
+        json!({
+            "market_actions": [],
+            "bundle": {
+                "escrow_finishes": [{
+                    "escrow_id": 1,
+                    "preimage": null
+                }]
+            }
+        }),
+        json!({
+            "market_actions": [{
+                "action_kind": "post_offer",
+                "memo_digest": null,
+                "pledge_id": null,
+                "recipient_seat": null,
+                "target": null,
+                "honor_weight": null
+            }],
+            "bundle": {}
+        }),
+    ];
+    for payload in &refused_tool_payloads {
+        let raw_args = payload.to_string();
+        assert!(
+            parse_silent_preview_tool_arguments(&raw_args, 0).is_none(),
+            "silent parser unexpectedly accepted tool args: {raw_args}"
+        );
+        let preview_err: Value =
+            serde_json::from_str(&execute_silent_preview_tool_call(&preview_state, &raw_args))?;
+        assert_eq!(preview_err["status"], "refused");
+        assert_eq!(preview_err["error_code"], "MALFORMED_TOOL_CALL");
+        let control_err: Value =
+            serde_json::from_str(&execute_silent_control_tool_call(&preview_state, &raw_args))?;
+        assert_eq!(control_err["status"], "refused");
+        assert_eq!(control_err["error_code"], "MALFORMED_TOOL_CALL");
+    }
+    let clean_tool_ok: Value = serde_json::from_str(&execute_silent_preview_tool_call(
+        &preview_state,
+        &json!({ "market_actions": [], "bundle": {} }).to_string(),
+    ))?;
+    assert_eq!(clean_tool_ok["status"], "ok");
+
+    // End-to-end silent `play` tool round with removed key as `null` yields MALFORMED_TOOL_CALL
+    // across both `on` (`preview_turn_orders`) and `control` (`draft_turn_orders`), recording no
+    // accepted intermediate bundle digest.
+    struct BadSilentToolTransport {
+        tool_name: &'static str,
+    }
+    impl Transport for BadSilentToolTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let v: Value =
+                serde_json::from_str(body).map_err(|e| TransportError::Network(e.to_string()))?;
+            let has_tool_result = v["messages"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|m| m["role"] == "tool"));
+            if !has_tool_result {
+                let args = json!({
+                    "market_actions": [{
+                        "action_kind": "post_offer",
+                        "side": "sell",
+                        "good": { "asset_kind": "raw", "good_index": 0 },
+                        "amount": 1_000,
+                        "price_per_unit_cred": 100,
+                        "condition_hash": null
+                    }],
+                    "bundle": {}
+                })
+                .to_string();
+                return Ok(RawHttpResponse {
+                    status: 200,
+                    body: tool_call_resp(self.tool_name, &args).to_string(),
+                });
+            }
+            assert!(
+                body.contains("MALFORMED_TOOL_CALL"),
+                "expected MALFORMED_TOOL_CALL in tool follow-up: {body}"
+            );
+            Ok(RawHttpResponse {
+                status: 200,
+                body: chat_resp(&json!({ "market_actions": [], "bundle": {} }).to_string())
+                    .to_string(),
+            })
+        }
+        fn apply_template(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+        fn tokenize_prompt(
+            &self,
+            _url: &str,
+            _content: &str,
+            _a: bool,
+            _p: bool,
+            _t: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            Ok((100_u64..140).collect())
+        }
+    }
+    for (bad_arm, bad_tool_name) in [
+        (EvalArm::On, "preview_turn_orders"),
+        (EvalArm::Control, "draft_turn_orders"),
+    ] {
+        let bad_tool_game = tmp.join(format!("bad_silent_tool_game_{}", bad_arm.as_str()));
+        let bad_tool_opts = default_play_opts(
+            bad_tool_game.clone(),
+            seats_path.clone(),
+            wrapper.clone(),
+            Some(serving.clone()),
+            bad_arm,
+            1,
+        );
+        let _ = run_play_with_communication_and_git_sha(
+            &bad_tool_opts,
+            CommunicationMode::Silent,
+            &BadSilentToolTransport {
+                tool_name: bad_tool_name,
+            },
+            None,
+            &test_git_sha(),
+        )?;
+        let bad_tool_dec: EvalDecisionRecord = serde_json::from_str(&fs::read_to_string(
+            bad_tool_game.join("decisions/day-01-act-Foundry.json"),
+        )?)?;
+        assert_eq!(bad_tool_dec.tool_calls_used, 1);
+        assert!(bad_tool_dec.intermediate_bundle_sha256s.is_empty());
+    }
+
+    // Refusal when a removed key is sent even as explicit `null` in the final act reply.
+    let parsed_null_cond = parse_eval_silent_act_reply(
+        &json!({
+            "market_actions": [{
+                "action_kind": "post_offer",
+                "condition_hash": null
+            }],
+            "bundle": {}
+        })
+        .to_string(),
+        0,
+        false,
+    );
+    assert_eq!(
+        parsed_null_cond.refusal_code.map(|c| c.as_str()),
+        Some("ACT_REPLY_INVALID")
+    );
 
     // Refusals in Silent Round::Act: non-empty messages -> ACT_REPLY_HAS_MESSAGES, empty messages -> ACT_REPLY_INVALID,
     // record_intent_pledge, condition_hash, and preimage -> ACT_REPLY_INVALID.
@@ -656,6 +1050,91 @@ fn play_mode_refuses_communication_silent_with_exit_1() -> Result<(), Box<dyn st
 
 const ML_D902D04_PARITY_GAME_DIR_ENV: &str = "ML_D902D04_PARITY_GAME_DIR";
 const ML_D902D04_PARITY_TMP_DIR_ENV: &str = "ML_D902D04_PARITY_TMP_DIR";
+const ML_D902D04_MODEL_GAME_DIR_ENV: &str = "ML_D902D04_MODEL_GAME_DIR";
+const ML_D902D04_MODEL_TMP_DIR_ENV: &str = "ML_D902D04_MODEL_TMP_DIR";
+
+fn run_scrubbed_parity_child(
+    test_name: &str,
+    envs: &[(&str, &Path)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.stdin(std::process::Stdio::null())
+        .args(["--exact", test_name, "--nocapture"]);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    for (k, _) in std::env::vars() {
+        let upper = k.to_ascii_uppercase();
+        if upper.starts_with("LLAMA_")
+            || upper.starts_with("CUDA_")
+            || upper.starts_with("GGML_")
+            || upper.starts_with("VLLM_")
+            || matches!(
+                upper.as_str(),
+                "OPENROUTER_API_KEY"
+                    | "OPENAI_API_KEY"
+                    | "ANTHROPIC_API_KEY"
+                    | "GEMINI_API_KEY"
+                    | "XAI_API_KEY"
+                    | "HF_TOKEN"
+                    | "HUGGING_FACE_HUB_TOKEN"
+                    | "GITHUB_TOKEN"
+            )
+        {
+            cmd.env_remove(&k);
+        }
+    }
+    let child_out = cmd.output()?;
+    assert!(
+        child_out.status.success(),
+        "{test_name} child failed ({:?}):\nstdout:\n{}\nstderr:\n{}",
+        child_out.status.code(),
+        String::from_utf8_lossy(&child_out.stdout),
+        String::from_utf8_lossy(&child_out.stderr),
+    );
+    Ok(())
+}
+
+fn assert_manifest_tsv_matches(
+    game_dir: &Path,
+    manifest_tsv: &str,
+    expected_len: Option<usize>,
+    allow_extra: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let actual_files = walk_files(game_dir);
+    let mut expected_rows = BTreeMap::new();
+    for line in manifest_tsv.lines().filter(|l| !l.trim().is_empty()) {
+        let parts: Vec<&str> = line.split('\t').collect();
+        assert_eq!(parts.len(), 3, "malformed manifest row: {line}");
+        let len: usize = parts[1].parse()?;
+        expected_rows.insert(parts[0].to_owned(), (len, parts[2].to_owned()));
+    }
+    if let Some(n) = expected_len {
+        assert_eq!(expected_rows.len(), n, "expected {n} golden files");
+    }
+    if !allow_extra {
+        let actual_keys: BTreeSet<&String> = actual_files.keys().collect();
+        let expected_keys: BTreeSet<&String> = expected_rows.keys().collect();
+        assert_eq!(
+            actual_keys, expected_keys,
+            "relative file tree diverged from d902d04"
+        );
+    }
+    for (rel, (exp_len, exp_sha)) in &expected_rows {
+        let bytes = actual_files
+            .get(rel)
+            .ok_or_else(|| format!("missing golden file {rel}"))?;
+        assert_eq!(
+            bytes.len(),
+            *exp_len,
+            "byte length diverged for {rel} vs d902d04"
+        );
+        let actual_sha = sha256_hex(bytes);
+        assert_eq!(&actual_sha, exp_sha, "sha256 diverged for {rel} vs d902d04");
+    }
+    Ok(())
+}
 
 #[test]
 fn d902d04_talk_parity_child_helper() {
@@ -706,65 +1185,137 @@ fn talk_full_season_byte_identical_to_d902d04() -> Result<(), Box<dyn std::error
     }
     fs::copy(fixture_root.join("seats.json"), tmp.join("seats.json"))?;
 
-    let exe = std::env::current_exe()?;
-    let mut cmd = std::process::Command::new(exe);
-    cmd.stdin(std::process::Stdio::null())
-        .args(["--exact", "d902d04_talk_parity_child_helper", "--nocapture"])
-        .env(ML_D902D04_PARITY_GAME_DIR_ENV, &game_dir)
-        .env(ML_D902D04_PARITY_TMP_DIR_ENV, &tmp);
-    for (k, _) in std::env::vars() {
-        let upper = k.to_ascii_uppercase();
-        if upper.starts_with("LLAMA_")
-            || upper.starts_with("CUDA_")
-            || upper.starts_with("GGML_")
-            || upper.starts_with("VLLM_")
-            || matches!(
-                upper.as_str(),
-                "OPENROUTER_API_KEY"
-                    | "OPENAI_API_KEY"
-                    | "ANTHROPIC_API_KEY"
-                    | "GEMINI_API_KEY"
-                    | "XAI_API_KEY"
-            )
-        {
-            cmd.env_remove(&k);
+    run_scrubbed_parity_child(
+        "d902d04_talk_parity_child_helper",
+        &[
+            (ML_D902D04_PARITY_GAME_DIR_ENV, &game_dir),
+            (ML_D902D04_PARITY_TMP_DIR_ENV, &tmp),
+        ],
+    )?;
+
+    assert_manifest_tsv_matches(&game_dir, &manifest_tsv, Some(730), false)?;
+    Ok(())
+}
+
+#[test]
+fn d902d04_model_seat_talk_parity_child_helper() {
+    let Ok(game_dir_raw) = std::env::var(ML_D902D04_MODEL_GAME_DIR_ENV) else {
+        return;
+    };
+    let tmp_dir_raw = must_ok(
+        std::env::var(ML_D902D04_MODEL_TMP_DIR_ENV),
+        "read d902d04 model parity tmp dir env",
+    );
+    let game_dir = PathBuf::from(game_dir_raw);
+    let tmp = PathBuf::from(tmp_dir_raw);
+    let fixture_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/d902d04_model_talk_turn1");
+    let wrapper = write_wrapper_for(&tmp, CommunicationMode::Talk);
+    let transport = must_ok(
+        MockDirTransport::load(&fixture_root.join("mock_dir")),
+        "load d902d04 model mock_dir",
+    );
+    let mut opts = default_play_opts(
+        game_dir,
+        fixture_root.join("seats.json"),
+        wrapper,
+        Some(fixture_root.join("serving_manifest.json")),
+        EvalArm::On,
+        1,
+    );
+    opts.table_id = 78;
+
+    let _manifest = must_ok(
+        run_play_with_transport_and_git_sha(
+            &opts,
+            &transport,
+            None,
+            &injected_git_sha(D902D04_GIT_SHA),
+        ),
+        "run hermetic d902d04 model-seat parity child",
+    );
+}
+
+#[test]
+fn talk_model_seat_turn1_byte_identical_to_d902d04() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/d902d04_model_talk_turn1");
+    let turn0_dir = fixture_root.join("turn0_game");
+    let exp_dir = fixture_root.join("expected");
+    let manifest_tsv = fs::read_to_string(fixture_root.join("d902d04_model_manifest.tsv"))?;
+
+    let tmp = fresh_tmp_dir("d902d04_model_parity");
+    let game_dir = tmp.join("game");
+    fs::create_dir_all(&game_dir)?;
+    for name in ["eval-78.save.json", "eval-78.seal", "setup.json"] {
+        fs::copy(turn0_dir.join(name), game_dir.join(name))?;
+    }
+
+    run_scrubbed_parity_child(
+        "d902d04_model_seat_talk_parity_child_helper",
+        &[
+            (ML_D902D04_MODEL_GAME_DIR_ENV, &game_dir),
+            (ML_D902D04_MODEL_TMP_DIR_ENV, &tmp),
+        ],
+    )?;
+
+    assert_manifest_tsv_matches(&game_dir, &manifest_tsv, Some(33), true)?;
+
+    // Check explicit prompt, schema, and relay transcript goldens byte-for-byte.
+    for rel in [
+        "to-seat/day-01-talk-Foundry.md",
+        "to-seat/day-01-act-Foundry.md",
+        "to-seat/day-01-act-Foundry.negotiation.json",
+        "to-seat/day-01-act-Foundry.preview-state.json",
+        "relay/setup.json",
+        "relay/seats/Foundry.jsonl",
+        "setup.json",
+        "manifest.json",
+    ] {
+        let actual_bytes = fs::read(game_dir.join(rel))?;
+        let exp_bytes = fs::read(exp_dir.join(rel))?;
+        assert_eq!(actual_bytes, exp_bytes, "bytes diverged for {rel}");
+    }
+
+    // Check wire request digests (exact Talk prompt/schema, Act tool+schema, Act follow-up bytes).
+    let expected_reqs: Vec<Value> = serde_json::from_str(&fs::read_to_string(
+        exp_dir.join("request_body_sha256s.json"),
+    )?)?;
+    let calls_raw = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?;
+    let mut actual_reqs = Vec::new();
+    for line in calls_raw.lines().filter(|l| !l.trim().is_empty()) {
+        let row: Value = serde_json::from_str(line)?;
+        if row["outcome"] == "RESERVED" {
+            continue;
         }
+        actual_reqs.push(json!({
+            "day": row["day"],
+            "round": row["round"],
+            "guild": row["guild"],
+            "attempt": row["attempt"],
+            "trigger": row["trigger"],
+            "outcome": row["outcome"],
+            "request_body_sha256": row["request_body_sha256"],
+        }));
     }
-    let child_out = cmd.output()?;
-    assert!(
-        child_out.status.success(),
-        "d902d04 parity child failed ({:?}):\nstdout:\n{}\nstderr:\n{}",
-        child_out.status.code(),
-        String::from_utf8_lossy(&child_out.stdout),
-        String::from_utf8_lossy(&child_out.stderr),
-    );
+    assert_eq!(actual_reqs, expected_reqs);
 
-    let actual_files = walk_files(&game_dir);
-    let mut expected_rows = BTreeMap::new();
-    for line in manifest_tsv.lines().filter(|l| !l.trim().is_empty()) {
-        let parts: Vec<&str> = line.split('\t').collect();
-        assert_eq!(parts.len(), 3, "malformed manifest row: {line}");
-        let len: usize = parts[1].parse()?;
-        expected_rows.insert(parts[0].to_owned(), (len, parts[2].to_owned()));
-    }
-
-    assert_eq!(expected_rows.len(), 730, "expected 730 golden files");
-    let actual_keys: BTreeSet<&String> = actual_files.keys().collect();
-    let expected_keys: BTreeSet<&String> = expected_rows.keys().collect();
-    assert_eq!(
-        actual_keys, expected_keys,
-        "relative file tree diverged from d902d04"
-    );
-
-    for (rel, (exp_len, exp_sha)) in &expected_rows {
-        let bytes = &actual_files[rel];
+    // Check Foundry's Talk and Act decision records byte-identically after aligning timing `wall_secs`.
+    for rel in [
+        "decisions/day-01-talk-Foundry.json",
+        "decisions/day-01-act-Foundry.json",
+    ] {
+        let exp_bytes = fs::read(exp_dir.join(rel))?;
+        let exp_rec: EvalDecisionRecord = serde_json::from_slice(&exp_bytes)?;
+        let mut actual_rec: EvalDecisionRecord =
+            serde_json::from_str(&fs::read_to_string(game_dir.join(rel))?)?;
+        assert!(actual_rec.wall_secs.is_some(), "{rel} missing wall_secs");
+        actual_rec.wall_secs = exp_rec.wall_secs;
+        let norm_bytes = format!("{}\n", serde_json::to_string_pretty(&actual_rec)?).into_bytes();
         assert_eq!(
-            bytes.len(),
-            *exp_len,
-            "byte length diverged for {rel} vs d902d04"
+            norm_bytes, exp_bytes,
+            "decision record {rel} diverged from d902d04 golden"
         );
-        let actual_sha = sha256_hex(bytes);
-        assert_eq!(&actual_sha, exp_sha, "sha256 diverged for {rel} vs d902d04");
     }
 
     Ok(())
@@ -1772,39 +2323,91 @@ fn tit_for_tat_ignores_peer_decisions_from_seat_and_relay() -> Result<(), Box<dy
         "Harbor".to_owned(),
         "Mint".to_owned(),
     ];
-    let host = EvalHost::from_standard_setup_with_model_seats(
+    let mut host = EvalHost::from_standard_setup_with_model_seats(
         TableId(56),
         4,
         4242,
         5555,
         &[true, true, true, true],
     )?;
-    let obs = host.observe_seat(Seat(0))?;
+    let obs_t1 = host.observe_seat(Seat(0))?;
+    let empty_subs: BTreeMap<u8, EvalActSubmission> = (0_u8..4)
+        .map(|s| (s, EvalActSubmission::default()))
+        .collect();
+    host.apply_act_submissions(&empty_subs)?;
+    let receipt_t1 = host.sweep_turn()?;
+    assert_eq!(receipt_t1.turn, 1);
+
+    let obs_t2 = host.observe_seat(Seat(0))?;
+    assert_eq!(obs_t2.turn, 2);
+    assert_eq!(obs_t2.public_receipts.len(), 1);
     let mandate = *host.mandate_for_seat(Seat(0))?;
+
+    // Planted Quarry promise must match talk_rules_v2 and be applicable in Turn 1 (Quarry holds starting cred).
+    assert!(
+        obs_t1.seats[1].cred >= 2 * UNIT_SCALE,
+        "expected Quarry to hold >= 2 cred on Turn 1, got {}",
+        obs_t1.seats[1].cred
+    );
+    let planted_quarry_promise = "i will buy 1 raw_0 at 2 cred.";
+    let extracted_check = extract_talk_commitments_from_messages(
+        0,
+        &guilds,
+        &[(1, 0, planted_quarry_promise.to_owned())],
+        &obs_t2,
+    )?;
+    assert_eq!(extracted_check.len(), 1);
+
+    let talk_md_t1 =
+        render_seat_view_markdown_for_communication(Round::Talk, CommunicationMode::Talk, &obs_t1)?;
+    let act_md_t1 =
+        render_seat_view_markdown_for_communication(Round::Act, CommunicationMode::Talk, &obs_t1)?;
+    let talk_md_t2 =
+        render_seat_view_markdown_for_communication(Round::Talk, CommunicationMode::Talk, &obs_t2)?;
+    let act_md_t2 =
+        render_seat_view_markdown_for_communication(Round::Act, CommunicationMode::Talk, &obs_t2)?;
+
+    let write_own_to_seat =
+        |to_dir: &Path, quarry_broken_promise: bool| -> Result<(), Box<dyn std::error::Error>> {
+            fs::create_dir_all(to_dir)?;
+            fs::write(to_dir.join("day-01-talk-Foundry.md"), &talk_md_t1)?;
+            fs::write(to_dir.join("day-01-act-Foundry.md"), &act_md_t1)?;
+            fs::write(to_dir.join("day-02-talk-Foundry.md"), &talk_md_t2)?;
+            fs::write(to_dir.join("day-02-act-Foundry.md"), &act_md_t2)?;
+            let whispers_t1 = if quarry_broken_promise {
+                vec![UntrustedWhisper {
+                    from_guild: "Quarry".to_owned(),
+                    intent_header: None,
+                    body: planted_quarry_promise.to_owned(),
+                }]
+            } else {
+                Vec::new()
+            };
+            fs::write(
+                to_dir.join("day-01-act-Foundry.negotiation.json"),
+                serde_json::to_string_pretty(&NegotiationInputs {
+                    batna: "n".to_owned(),
+                    whispers: whispers_t1,
+                })?,
+            )?;
+            fs::write(
+                to_dir.join("day-02-act-Foundry.negotiation.json"),
+                serde_json::to_string_pretty(&NegotiationInputs {
+                    batna: "n".to_owned(),
+                    whispers: Vec::new(),
+                })?,
+            )?;
+            Ok(())
+        };
 
     let tmp_clean = fresh_tmp_dir("tft_clean");
     let to_clean = tmp_clean.join("to-seat");
-    fs::create_dir_all(&to_clean)?;
-    fs::write(
-        to_clean.join("day-01-act-Foundry.negotiation.json"),
-        serde_json::to_string_pretty(&NegotiationInputs {
-            batna: "n".to_owned(),
-            whispers: vec![UntrustedWhisper {
-                from_guild: "Quarry".to_owned(),
-                intent_header: None,
-                body: "I will sell 1 raw 1 at 10.".to_owned(),
-            }],
-        })?,
-    )?;
+    write_own_to_seat(&to_clean, true)?;
 
     let tmp_poison = fresh_tmp_dir("tft_poison");
     let to_poison = tmp_poison.join("to-seat");
-    fs::create_dir_all(&to_poison)?;
-    fs::copy(
-        to_clean.join("day-01-act-Foundry.negotiation.json"),
-        to_poison.join("day-01-act-Foundry.negotiation.json"),
-    )?;
-    // Poison peer `to-seat/`, `decisions/`, `from-seat/`, `relay/` files!
+    write_own_to_seat(&to_poison, true)?;
+    // Poison peer `to-seat/`, `decisions/`, `from-seat/`, and `relay/` files with valid grammar!
     fs::write(
         to_poison.join("day-01-act-Quarry.negotiation.json"),
         serde_json::to_string_pretty(&NegotiationInputs {
@@ -1812,32 +2415,64 @@ fn tit_for_tat_ignores_peer_decisions_from_seat_and_relay() -> Result<(), Box<dy
             whispers: vec![UntrustedWhisper {
                 from_guild: "Harbor".to_owned(),
                 intent_header: None,
-                body: "I will sell 1 raw 2 at 10.".to_owned(),
+                body: "i will sell 1 raw_2 at 2 cred.".to_owned(),
+            }],
+        })?,
+    )?;
+    fs::write(
+        to_poison.join("day-01-act-Harbor.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "n".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Mint".to_owned(),
+                intent_header: None,
+                body: "i will sell 1 raw_3 at 2 cred.".to_owned(),
             }],
         })?,
     )?;
     fs::create_dir_all(tmp_poison.join("decisions"))?;
     fs::write(
         tmp_poison.join("decisions/day-01-talk-Quarry.json"),
-        r#"{"messages":[{"to_guild":"Harbor","body":"I will sell 1 raw 1 at 10."}]}"#,
+        r#"{"messages":[{"to_guild":"Harbor","body":"i will sell 1 raw_1 at 2 cred."}]}"#,
     )?;
     fs::create_dir_all(tmp_poison.join("from-seat"))?;
     fs::write(
         tmp_poison.join("from-seat/day-01-talk-Quarry.json"),
-        r#"{"messages":[{"to_guild":"Mint","body":"I will sell 1 raw 1 at 10."}]}"#,
+        r#"{"messages":[{"to_guild":"Mint","body":"i will sell 1 raw_1 at 2 cred."}]}"#,
+    )?;
+    fs::write(
+        tmp_poison.join("from-seat/day-01-talk-Mint.md"),
+        r#"{"messages":[{"to_guild":"Quarry","body":"i will sell 1 raw_3 at 2 cred."}]}"#,
     )?;
     fs::create_dir_all(tmp_poison.join("relay/seats"))?;
     fs::write(
         tmp_poison.join("relay/seats/Quarry.jsonl"),
-        "{\"role\":\"assistant\",\"content\":\"secret\"}\n",
+        "{\"role\":\"assistant\",\"content\":\"i will sell 1 raw_1 at 2 cred.\"}\n",
     )?;
 
-    let h_clean = OwnToSeatHistory::load(&to_clean, "Foundry", 1)?;
-    let h_poison = OwnToSeatHistory::load(&to_poison, "Foundry", 1)?;
+    let h_clean = OwnToSeatHistory::load(&to_clean, "Foundry", obs_t2.turn)?;
+    let h_poison = OwnToSeatHistory::load(&to_poison, "Foundry", obs_t2.turn)?;
 
-    let sub_clean = decide_tit_for_tat_act(5555, &h_clean, &obs, &mandate, &guilds)?;
-    let sub_poison = decide_tit_for_tat_act(5555, &h_poison, &obs, &mandate, &guilds)?;
+    let sub_clean = decide_tit_for_tat_act(5555, &h_clean, &obs_t2, &mandate, &guilds)?;
+    let sub_poison = decide_tit_for_tat_act(5555, &h_poison, &obs_t2, &mandate, &guilds)?;
     assert_eq!(sub_clean, sub_poison);
+
+    // Positive control: altering Foundry's OWN Turn-1 `negotiation.json` (removing Quarry's
+    // broken Turn-1 promise) flips Quarry from Defect -> Cooperate and changes Turn-2 orders!
+    let tmp_own_changed = fresh_tmp_dir("tft_own_changed");
+    let to_own_changed = tmp_own_changed.join("to-seat");
+    write_own_to_seat(&to_own_changed, false)?;
+    let h_own_changed = OwnToSeatHistory::load(&to_own_changed, "Foundry", obs_t2.turn)?;
+    let stances_clean = compute_tit_for_tat_stances(&h_clean, &obs_t2, &guilds)?;
+    let stances_own_changed = compute_tit_for_tat_stances(&h_own_changed, &obs_t2, &guilds)?;
+    assert_eq!(stances_clean.get(&1), Some(&PeerStance::Defect));
+    assert_eq!(stances_own_changed.get(&1), Some(&PeerStance::Cooperate));
+
+    let sub_own_changed = decide_tit_for_tat_act(5555, &h_own_changed, &obs_t2, &mandate, &guilds)?;
+    assert_ne!(
+        sub_clean, sub_own_changed,
+        "positive control failed: changing own-seat Turn-1 negotiation.json must change Turn-2 decision"
+    );
 
     Ok(())
 }

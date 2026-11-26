@@ -37,7 +37,7 @@ Each item has `action_kind`; only the listed keys apply.
 - `cancel_offer`: `offer_id`. Unlocks what it held.
 - `create_check`: `payee`, `asset`, `send_max`, `deliver_min`, `due_turn`, `expiration_turn`. Locks nothing.
 - `cancel_check`: `check_id`.
-- `create_escrow`: `destination`, `asset` (must be `cred`), `amount`, `finish_after_turn`, `cancel_after_turn`, `bond`. Locks `amount` now. Needs `bond`, `finish_after_turn`; `cancel_after_turn` is later than today and than `finish_after_turn`. `bond` holds `good`, `required_units`, `deadline_turn` (before `cancel_after_turn`), `mode`.
+- `create_escrow`: `destination`, `asset` (must be `cred`), `amount`, `finish_after_turn`, `cancel_after_turn`, `bond`. Locks `amount` now. Needs `bond` or `finish_after_turn`; `cancel_after_turn` is later than today and than `finish_after_turn`. `bond` holds `good`, `required_units`, `deadline_turn` (before `cancel_after_turn`), `mode`.
 - `cancel_expired_escrow`: `escrow_id`. From `cancel_after_turn` on, the `cred` returns to the sender.
 - `flag_wash_freeze`: `target_seat`; inspector charter holder only. Debits `wash_freeze_bond_cred` from free `cred`. That turn the target's offers, swaps, deliveries and dual escrows are blocked. Step 3 audits the previous turn's fills: confirmed by a same-good round trip with one peer of at least `wash_round_trip_min_units` each way, or a fill above the good's town-import price. Confirmed: you recover the bond plus up to `wash_freeze_bounty_cred` from the target's free `cred`. Otherwise the bond goes to the target.
 - `stand_for_office`: `proposed_tariffs_bps` (items of `seat`, `raw_bps`, `refined_bps`), `cartel_admissions`, `cartel_revocations` (items of `domain_id`, `seat`). Files your platform; see Politics.

@@ -508,6 +508,9 @@ pub struct EvalSetupFile {
     /// SHA-256 hex digest of the unified `ResponseFormatConfig`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema_sha256: Option<String>,
+    /// Canonical SHA-256 hex digest of the active silent-market tool schema (omitted in Talk mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_schema_sha256: Option<String>,
     /// SHA-256 hex digest of the canonical validated [`ServingManifestRecord`], if supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serving_manifest_sha256: Option<String>,

@@ -9,7 +9,9 @@ use std::process::Command;
 use league_core::scrub_secret_text;
 use league_relay::{
     ACTIVE_WORDING_ARM, CONTROL_ARM_WORDING, CONTROL_WORDING_ARM, MODEL_FACING_WORDING,
-    PREVIEW_ARM_WORDING_R2, PREVIEW_WORDING_ARM_R2, WordingEntry, sha256_hex,
+    PREVIEW_ARM_WORDING_R2, PREVIEW_WORDING_ARM_R2, WordingEntry,
+    build_silent_control_turn_orders_tool_definition,
+    build_silent_preview_turn_orders_tool_definition, canonical_tool_definition_sha256, sha256_hex,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -382,6 +384,12 @@ pub struct WordingArmDigests {
     pub wrapper_sha256: String,
     /// Lowercase hex SHA-256 digest of the unified `ResponseFormatConfig`.
     pub response_schema_sha256: String,
+    /// Canonical lowercase hex SHA-256 digest of the silent-market `draft_turn_orders` tool schema (omitted in Talk mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silent_control_tool_sha256: Option<String>,
+    /// Canonical lowercase hex SHA-256 digest of the silent-market `preview_turn_orders` tool schema (omitted in Talk mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silent_preview_tool_sha256: Option<String>,
 }
 
 impl WordingArmDigests {
@@ -406,6 +414,8 @@ impl WordingArmDigests {
             wrapper_version: wrapper_version.to_owned(),
             wrapper_sha256: wrapper_sha256.to_owned(),
             response_schema_sha256: response_schema_sha256.to_owned(),
+            silent_control_tool_sha256: None,
+            silent_preview_tool_sha256: None,
         }
     }
 
@@ -427,6 +437,12 @@ impl WordingArmDigests {
         if communication == CommunicationMode::Silent {
             out.eval_reply_arm = EVAL_SILENT_REPLY_WORDING_ARM.to_owned();
             out.eval_reply_wording_sha256 = hash_wording_entries(EVAL_SILENT_REPLY_WORDING);
+            out.silent_control_tool_sha256 = Some(canonical_tool_definition_sha256(
+                &build_silent_control_turn_orders_tool_definition(),
+            ));
+            out.silent_preview_tool_sha256 = Some(canonical_tool_definition_sha256(
+                &build_silent_preview_turn_orders_tool_definition(),
+            ));
         }
         out
     }

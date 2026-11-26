@@ -226,5 +226,18 @@ mod tests {
             extract_tool_subtree(&empty_map, "missing_key"),
             Err(EvalError::SchemaValidation(_))
         ));
+
+        let silent_schema = match build_eval_silent_response_format_value() {
+            Ok(v) => v,
+            Err(err) => panic!("STOP_RULE: build_eval_silent_response_format_value failed: {err}"),
+        };
+        let silent_tool = league_relay::build_silent_preview_turn_orders_tool_definition();
+        let silent_params = &silent_tool["function"]["parameters"]["properties"];
+        assert_eq!(silent_schema["properties"][&k_ma], silent_params[&k_ma]);
+        assert_eq!(
+            silent_schema["properties"][&k_bundle],
+            silent_params[&k_bundle]
+        );
+        assert!(silent_schema["properties"].get("messages").is_none());
     }
 }

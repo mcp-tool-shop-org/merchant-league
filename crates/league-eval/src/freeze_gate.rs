@@ -1446,6 +1446,7 @@ mod tests {
             memory_mode: "snapshot".to_owned(),
             seats_sha256: "c".repeat(64),
             response_schema_sha256: None,
+            tool_schema_sha256: None,
             serving_manifest_sha256: None,
         };
         let eval_manifest = EvalManifest {

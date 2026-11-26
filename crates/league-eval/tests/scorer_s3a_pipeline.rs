@@ -931,6 +931,7 @@ fn first_draft_call_index_ordering_no_reply_refusals_and_or_merge() -> TestResul
         memory_mode: "snapshot".to_owned(),
         seats_sha256: "b".repeat(64),
         response_schema_sha256: None,
+        tool_schema_sha256: None,
         serving_manifest_sha256: None,
     };
     fs::write(

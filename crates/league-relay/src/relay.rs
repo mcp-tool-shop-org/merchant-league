@@ -22,9 +22,12 @@ use crate::transport::{
 use crate::wording::{
     EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW, MAX_PREVIEW_TOOL_CALLS_PER_TURN,
     MAX_SCRATCHPAD_TOKENS, PreviewToolMode, build_control_turn_orders_tool_definition,
-    build_preview_turn_orders_tool_definition, control_wording_slot, control_wording_template,
-    escape_default_ignorable_code_points, execute_control_tool_call, execute_preview_tool_call,
-    extract_scratchpad_update, format_sanitized_scratchpad_section, json_escape_untrusted_str,
+    build_preview_turn_orders_tool_definition, build_silent_control_turn_orders_tool_definition,
+    build_silent_preview_turn_orders_tool_definition, canonical_tool_definition_sha256,
+    control_wording_slot, control_wording_template, escape_default_ignorable_code_points,
+    execute_control_tool_call, execute_preview_tool_call, execute_silent_control_tool_call,
+    execute_silent_preview_tool_call, extract_scratchpad_update,
+    format_sanitized_scratchpad_section, json_escape_untrusted_str,
     load_negotiation_inputs_if_present, preview_wording_slot, preview_wording_template,
     render_call_limit_reached_wire_json, render_control_call_limit_reached_wire_json,
     render_control_malformed_tool_call_wire_json, render_malformed_tool_call_wire_json,
@@ -2193,6 +2196,9 @@ pub struct GameSetupRecord {
     /// Optional canonical SHA-256 digest of `--response-schema` (`B-9`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema_sha256: Option<String>,
+    /// Optional canonical SHA-256 digest of the active silent-market tool schema (omitted in Talk mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_schema_sha256: Option<String>,
     /// Audit list of every non-pinned (operator-supplied) string configured for this game that
     /// reaches a seated model (`R4-B1` Must 3).
     #[serde(default)]
@@ -3764,6 +3770,19 @@ fn build_setup_record(
             },
         })
         .collect();
+    let tool_schema_sha256 = if config.silent_market {
+        match config.preview_tool {
+            PreviewToolMode::Off => None,
+            PreviewToolMode::Control => Some(canonical_tool_definition_sha256(
+                &build_silent_control_turn_orders_tool_definition(),
+            )),
+            PreviewToolMode::On => Some(canonical_tool_definition_sha256(
+                &build_silent_preview_turn_orders_tool_definition(),
+            )),
+        }
+    } else {
+        None
+    };
     GameSetupRecord {
         memory_mode: config.memory_mode,
         scratchpad: plan.table_status.clone(),
@@ -3776,6 +3795,7 @@ fn build_setup_record(
             .response_format
             .as_ref()
             .map(ResponseFormatConfig::canonical_sha256),
+        tool_schema_sha256,
         non_pinned_model_facing_strings,
         seats,
     }
@@ -3909,6 +3929,17 @@ fn ensure_game_setup(
                 setup_path.display(),
                 desired.response_schema_name,
                 desired.response_schema_sha256
+            )));
+        }
+        if existing.tool_schema_sha256 != desired.tool_schema_sha256 {
+            return Err(RelayError::IncompatibleSetup(redact_secrets(
+                &format!(
+                    "{} recorded tool_schema_sha256 {:?}, refusing mid-game change to {:?}",
+                    setup_path.display(),
+                    existing.tool_schema_sha256,
+                    desired.tool_schema_sha256
+                ),
+                redaction_key,
             )));
         }
         if existing.mixed_scratchpad_arm != desired.mixed_scratchpad_arm {
@@ -6235,9 +6266,13 @@ fn run_single_automated_seat(
     };
 
     let tools_storage = seat_tool_mode.map(|mode| {
-        vec![match mode {
-            SeatToolMode::Preview(_) => build_preview_turn_orders_tool_definition(),
-            SeatToolMode::Control { .. } => build_control_turn_orders_tool_definition(),
+        vec![match (mode, config.silent_market) {
+            (SeatToolMode::Preview(_), false) => build_preview_turn_orders_tool_definition(),
+            (SeatToolMode::Preview(_), true) => build_silent_preview_turn_orders_tool_definition(),
+            (SeatToolMode::Control { .. }, false) => build_control_turn_orders_tool_definition(),
+            (SeatToolMode::Control { .. }, true) => {
+                build_silent_control_turn_orders_tool_definition()
+            }
         }]
     });
     let eval_local = config.eval_mode && seat.backend_kind == BackendKind::Local;
@@ -7205,18 +7240,31 @@ fn run_single_automated_seat(
                                 preview_calls_used += 1;
                                 match (
                                     seat_tool_mode,
+                                    config.silent_market,
                                     parsed_call.is_well_formed
                                         && call.kind == "function"
                                         && call.function.name == expected_tool_name,
                                 ) {
-                                    (Some(SeatToolMode::Preview(preview_state)), true) => {
+                                    (Some(SeatToolMode::Preview(preview_state)), false, true) => {
                                         execute_preview_tool_call(
                                             preview_state,
                                             &call.function.arguments,
                                         )
                                     }
-                                    (Some(SeatToolMode::Control(preview_state)), true) => {
+                                    (Some(SeatToolMode::Preview(preview_state)), true, true) => {
+                                        execute_silent_preview_tool_call(
+                                            preview_state,
+                                            &call.function.arguments,
+                                        )
+                                    }
+                                    (Some(SeatToolMode::Control(preview_state)), false, true) => {
                                         execute_control_tool_call(
+                                            preview_state,
+                                            &call.function.arguments,
+                                        )
+                                    }
+                                    (Some(SeatToolMode::Control(preview_state)), true, true) => {
+                                        execute_silent_control_tool_call(
                                             preview_state,
                                             &call.function.arguments,
                                         )

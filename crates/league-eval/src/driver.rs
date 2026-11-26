@@ -17,7 +17,9 @@ use league_relay::{
     ApiKey, CallLogEntry, LocalReasoningBudgetKey, MemoryMode, PreviewToolMode, RawHttpResponse,
     ReasoningEffort, Round, SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord,
     SeatBackend, SeatFile, SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError,
-    TurnConfig, TurnSummary, UntrustedWhisper, parse_preview_tool_arguments, run_turn, sha256_hex,
+    TurnConfig, TurnSummary, UntrustedWhisper, build_silent_control_turn_orders_tool_definition,
+    build_silent_preview_turn_orders_tool_definition, canonical_tool_definition_sha256,
+    parse_preview_tool_arguments, parse_silent_preview_tool_arguments, run_turn, sha256_hex,
 };
 use serde::Serialize;
 
@@ -636,6 +638,7 @@ fn collect_http_reply_telemetry(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_round_attempt_diagnostics(
     run_root: &Path,
     calls_path: &Path,
@@ -644,6 +647,7 @@ fn read_round_attempt_diagnostics(
     round: Round,
     seat_index: u8,
     guild: &str,
+    communication: CommunicationMode,
 ) -> Result<RoundAttemptDiagnostics, EvalError> {
     if !calls_path.exists() {
         return Ok(RoundAttemptDiagnostics::default());
@@ -775,7 +779,15 @@ fn read_round_attempt_diagnostics(
                 if is_wire_error_code(wire, "MALFORMED_TOOL_CALL") {
                     continue;
                 }
-                if let Some(parsed_req) = parse_preview_tool_arguments(&call.arguments, seat_index)
+                let parsed_req = match communication {
+                    CommunicationMode::Talk => {
+                        parse_preview_tool_arguments(&call.arguments, seat_index)
+                    }
+                    CommunicationMode::Silent => {
+                        parse_silent_preview_tool_arguments(&call.arguments, seat_index)
+                    }
+                };
+                if let Some(parsed_req) = parsed_req
                     && let Ok(bundle_bytes) = serde_json::to_vec(&parsed_req.bundle)
                 {
                     out.intermediate_bundle_sha256s
@@ -1897,6 +1909,21 @@ fn validate_wrapper_and_extract(
     resolve_pinned_wrapper_for_communication(&raw_bytes, explicit_version, communication)
 }
 
+fn silent_tool_schema_sha256(communication: CommunicationMode, arm: EvalArm) -> Option<String> {
+    if communication != CommunicationMode::Silent {
+        return None;
+    }
+    match arm {
+        EvalArm::Off => None,
+        EvalArm::Control => Some(canonical_tool_definition_sha256(
+            &build_silent_control_turn_orders_tool_definition(),
+        )),
+        EvalArm::On => Some(canonical_tool_definition_sha256(
+            &build_silent_preview_turn_orders_tool_definition(),
+        )),
+    }
+}
+
 fn eval_reply_wording_arm_for(communication: CommunicationMode) -> &'static str {
     match communication {
         CommunicationMode::Talk => EVAL_REPLY_WORDING_ARM,
@@ -2004,6 +2031,7 @@ pub fn run_play_with_communication_and_git_sha(
 
     let response_format = build_eval_response_format_for(communication)?;
     let response_schema_sha256 = response_format.canonical_sha256();
+    let tool_schema_sha256 = silent_tool_schema_sha256(communication, opts.arm);
     let eval_reply_wording_arm = eval_reply_wording_arm_for(communication);
     let relay_wording_arm = preview_mode.wording_arm().to_owned();
 
@@ -2033,6 +2061,7 @@ pub fn run_play_with_communication_and_git_sha(
             || existing_setup.wrapper_sha256 != wrapper_sha256
             || existing_setup.memory_mode != mem_mode
             || existing_setup.seats_sha256 != seats_sha256
+            || existing_setup.tool_schema_sha256 != tool_schema_sha256
             || existing_setup.serving_manifest_sha256 != serving_manifest_sha256
         {
             return Err(EvalError::IncompatibleEvalSetup(
@@ -2085,6 +2114,7 @@ pub fn run_play_with_communication_and_git_sha(
         memory_mode: mem_mode,
         seats_sha256,
         response_schema_sha256: Some(response_schema_sha256.clone()),
+        tool_schema_sha256,
         serving_manifest_sha256,
     };
     write_json_pretty_atomic(&setup_path, &setup_record)?;
@@ -2213,6 +2243,7 @@ pub fn run_play_with_communication_and_git_sha(
                             Round::Talk,
                             idx as u8,
                             &seat.guild,
+                            communication,
                         )?;
                         resolve_talk_model_round(
                             host.game_id(),
@@ -2378,6 +2409,7 @@ pub fn run_play_with_communication_and_git_sha(
                         Round::Act,
                         idx as u8,
                         &seat.guild,
+                        communication,
                     )?;
                     resolve_act_model_round(
                         communication,
@@ -2959,6 +2991,9 @@ fn branch_one_target(
         || source_setup.wrapper_sha256 != wrapper_sha256
         || source_setup.memory_mode != expected_memory_mode
         || source_setup.seats_sha256 != expected_seats_sha256
+        || (communication == CommunicationMode::Silent
+            && source_setup.tool_schema_sha256
+                != silent_tool_schema_sha256(communication, source_setup.arm))
     {
         return Err(EvalError::IncompatibleEvalSetup(format!(
             "branch options do not match source setup {}: check --communication, --wrapper, --memory-mode, and --seats",
@@ -3197,6 +3232,7 @@ fn branch_one_target(
                     Round::Act,
                     focal_idx as u8,
                     &focal_guild,
+                    communication,
                 )?;
                 resolve_act_model_round(
                     communication,
@@ -3640,6 +3676,7 @@ mod tests {
                 Round::Talk,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag A",
         );
@@ -3732,6 +3769,7 @@ mod tests {
                 Round::Talk,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag B",
         );
@@ -3828,6 +3866,7 @@ mod tests {
                 Round::Act,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag C",
         );
@@ -3925,6 +3964,7 @@ mod tests {
                 Round::Talk,
                 0,
                 "Foundry",
+                CommunicationMode::Talk,
             ),
             "diag late",
         );

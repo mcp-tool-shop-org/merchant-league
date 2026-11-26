@@ -1,0 +1,217 @@
+{
+  "game_id": "1e3694b0ffcb8515fa199cfba4b2fee0",
+  "table_id": 78,
+  "seed": 4242,
+  "arm": "on",
+  "eval_reply_wording_arm": "v2_eval_reply_2026_11_21_r1",
+  "relay_wording_arm": "v2_preview_2026_11_20_r2",
+  "wrapper_version": "v2_seat_brief_2026_11_21_r3",
+  "wrapper_sha256": "66d5665950b2ef9bad177dbcfbe132912fa99f09c328a40866502dbf16d6a06d",
+  "pass_b_limit": "ClubBot seats get two passes (Pass A and Pass B); model seats get one pass (Pass A only, pass_b_actions empty), identically across all arms.",
+  "played_turns": 1,
+  "crate_git_sha": "d902d04a399530a3743e6223c7a653dd48f8e8c1",
+  "wording_digests": {
+    "neutral_arm": "v2_neutral_2026_11_15_r6",
+    "neutral_wording_sha256": "f0361ffb610485fa97e4a09ab22a0660d3dc4a3e3b6b1aef113652c3d81b2da3",
+    "control_arm": "v2_control_2026_11_22_r2",
+    "control_wording_sha256": "9a35967308d0581449615eff5522f0425681d59487feab353cc59d6cea03a8fb",
+    "preview_arm": "v2_preview_2026_11_20_r2",
+    "preview_wording_sha256": "cbf54ca4115c8de64314134feaa596d552f23e13cd2472506c425fbf3a875f16",
+    "eval_reply_arm": "v2_eval_reply_2026_11_21_r1",
+    "eval_reply_wording_sha256": "8c8d4250eed5fdda4d42a6de07769f9c18ee3510874ce5fbd0c550768033e0ae",
+    "active_relay_wording_arm": "v2_preview_2026_11_20_r2",
+    "wrapper_version": "v2_seat_brief_2026_11_21_r3",
+    "wrapper_sha256": "66d5665950b2ef9bad177dbcfbe132912fa99f09c328a40866502dbf16d6a06d",
+    "response_schema_sha256": "052a89fd5bd4624c9a7c7a599772bf22b8cb4fad27eda0e006ecf2579ee8b544"
+  },
+  "serving": {
+    "engine": {
+      "value": "llama_server",
+      "provenance": "server_reported"
+    },
+    "server_version": {
+      "value": "b11433",
+      "provenance": "server_reported"
+    },
+    "server_build_commit": {
+      "value": "0000000000000000000000000000000000000000",
+      "provenance": "server_reported"
+    },
+    "determinism_status": "llama_server_cache_disabled",
+    "model": {
+      "filename": "Qwen3-32B-Q4_K_M.gguf",
+      "quant": "Q4_K_M",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "chat_template_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "provenance": "server_reported"
+    },
+    "machine": {
+      "gpu_name": "Synthetic Test GPU",
+      "gpu_uuid_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "sm_count": 128,
+      "gpu_driver": "550.54.15",
+      "cuda_runtime_version": "12.4",
+      "vram_mib": 24576,
+      "os_build": "Ubuntu 24.04",
+      "provenance": "operator_supplied"
+    },
+    "server_settings": {
+      "parallel_slots": 1,
+      "batch_size": 512,
+      "ubatch_size": 512,
+      "kv_unified": false,
+      "flash_attn": false,
+      "cache_type_k": "f16",
+      "cache_type_v": "f16",
+      "speculative_decoding": "none",
+      "ctx_size": 32768,
+      "ctx_shift": false,
+      "threads": 8,
+      "jinja": true,
+      "reasoning_mode": "auto",
+      "default_reasoning_budget": -1,
+      "reasoning_budget_message": "",
+      "provenance": "server_reported"
+    },
+    "cache_settings": {
+      "per_request_cache_prompt": false,
+      "no_cache_prompt_flag": true,
+      "cache_ram_mib": 0,
+      "cache_idle_slots": false,
+      "provenance": "server_reported"
+    },
+    "sampling": {
+      "temperature": 0.0,
+      "top_k": 20,
+      "top_p": 1.0,
+      "min_p": 0.0,
+      "repeat_penalty": 1.0,
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0,
+      "seed": 4242,
+      "stop_sequences": [],
+      "max_tokens": 512,
+      "sampler_order": [
+        "top_k",
+        "top_p",
+        "min_p",
+        "temperature"
+      ],
+      "provenance": "operator_supplied"
+    }
+  },
+  "serving_env_snapshot": {},
+  "seats": [
+    {
+      "seat": 0,
+      "guild": "Foundry",
+      "backend": "local",
+      "model": "Qwen/Qwen3-32B",
+      "keeps_notes": false,
+      "has_regent": false
+    },
+    {
+      "seat": 1,
+      "guild": "Quarry",
+      "backend": "file",
+      "model": "ClubBot",
+      "keeps_notes": false,
+      "has_regent": false
+    },
+    {
+      "seat": 2,
+      "guild": "Harbor",
+      "backend": "file",
+      "model": "ClubBot",
+      "keeps_notes": false,
+      "has_regent": false
+    },
+    {
+      "seat": 3,
+      "guild": "Mint",
+      "backend": "file",
+      "model": "ClubBot",
+      "keeps_notes": false,
+      "has_regent": false
+    }
+  ],
+  "seat_regents": {
+    "Foundry": false,
+    "Harbor": false,
+    "Mint": false,
+    "Quarry": false
+  },
+  "turn_regent_audit": [
+    {
+      "turn": 1,
+      "converted_to_ai": [],
+      "regent_acted_seats": []
+    }
+  ],
+  "voided": false,
+  "voided_games_by_arm": {
+    "on": 0
+  },
+  "refusal_counts_by_seat": {
+    "Foundry": {
+      "act_reply_invalid": 0,
+      "talk_reply_invalid": 0,
+      "reply_schema_invalid": 0,
+      "talk_reply_has_orders": 0,
+      "act_reply_has_messages": 0,
+      "message_recipient_invalid": 0,
+      "refused_bundles": 0
+    },
+    "Harbor": {
+      "act_reply_invalid": 0,
+      "talk_reply_invalid": 0,
+      "reply_schema_invalid": 0,
+      "talk_reply_has_orders": 0,
+      "act_reply_has_messages": 0,
+      "message_recipient_invalid": 0,
+      "refused_bundles": 0
+    },
+    "Mint": {
+      "act_reply_invalid": 0,
+      "talk_reply_invalid": 0,
+      "reply_schema_invalid": 0,
+      "talk_reply_has_orders": 0,
+      "act_reply_has_messages": 0,
+      "message_recipient_invalid": 0,
+      "refused_bundles": 0
+    },
+    "Quarry": {
+      "act_reply_invalid": 0,
+      "talk_reply_invalid": 0,
+      "reply_schema_invalid": 0,
+      "talk_reply_has_orders": 0,
+      "act_reply_has_messages": 0,
+      "message_recipient_invalid": 0,
+      "refused_bundles": 0
+    }
+  },
+  "refusal_counts_by_arm": {
+    "on": {
+      "act_reply_invalid": 0,
+      "talk_reply_invalid": 0,
+      "reply_schema_invalid": 0,
+      "talk_reply_has_orders": 0,
+      "act_reply_has_messages": 0,
+      "message_recipient_invalid": 0,
+      "refused_bundles": 0
+    }
+  },
+  "wrong_part_refusals": {
+    "talk_reply_has_orders": 0,
+    "act_reply_has_messages": 0,
+    "delivered_wrong_part_refusals": 0,
+    "no_reply_wrong_part_refusals": 0,
+    "total_wrong_part_refusals": 0,
+    "delivered_model_replies": 2,
+    "total_model_rounds": 2,
+    "wrong_part_rate_delivered": 0.0,
+    "wrong_part_rate_all_rounds": 0.0,
+    "exceeds_five_percent_preflight_stop_line_delivered": false,
+    "exceeds_five_percent_preflight_stop_line_all_rounds": false
+  }
+}

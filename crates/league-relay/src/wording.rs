@@ -2274,6 +2274,86 @@ pub fn build_control_turn_orders_tool_definition() -> serde_json::Value {
     build_turn_orders_tool_definition_from(CONTROL_ARM_WORDING)
 }
 
+fn strip_silent_communication_from_tool_definition(
+    mut val: serde_json::Value,
+) -> serde_json::Value {
+    let fn_key = preview_wording_slot("schema_kw_function");
+    let params_key = preview_wording_slot("schema_kw_parameters");
+    let props_key = preview_wording_slot("schema_kw_properties");
+    let items_key = preview_wording_slot("schema_kw_items");
+    let k_ma = preview_wording_slot("key_market_actions");
+    let k_bundle = preview_wording_slot("key_bundle");
+    let k_action_kind = preview_wording_slot("key_action_kind");
+    let v_pledge = preview_wording_slot("val_action_record_intent_pledge");
+    let k_escrow_finishes = preview_wording_slot("key_escrow_finishes");
+    let k_preimage = preview_wording_slot("key_preimage");
+    let deleted_ma_props = [
+        preview_wording_slot("key_condition_hash"),
+        preview_wording_slot("key_pledge_id"),
+        preview_wording_slot("key_recipient_seat"),
+        preview_wording_slot("key_target"),
+        preview_wording_slot("key_honor_weight"),
+        preview_wording_slot("key_memo_digest"),
+    ];
+
+    if let Some(params_props) = val
+        .get_mut(&fn_key)
+        .and_then(|v| v.get_mut(&params_key))
+        .and_then(|v| v.get_mut(&props_key))
+        .and_then(|v| v.as_object_mut())
+    {
+        if let Some(ma_props) = params_props
+            .get_mut(&k_ma)
+            .and_then(|v| v.get_mut(&items_key))
+            .and_then(|v| v.get_mut(&props_key))
+            .and_then(|v| v.as_object_mut())
+        {
+            if let Some(kind_enum) = ma_props
+                .get_mut(&k_action_kind)
+                .and_then(|v| v.get_mut("enum"))
+                .and_then(|v| v.as_array_mut())
+            {
+                kind_enum.retain(|item| item.as_str() != Some(v_pledge.as_str()));
+            }
+            for del_k in &deleted_ma_props {
+                ma_props.remove(del_k.as_str());
+            }
+        }
+        if let Some(ef_props) = params_props
+            .get_mut(&k_bundle)
+            .and_then(|v| v.get_mut(&props_key))
+            .and_then(|v| v.get_mut(&k_escrow_finishes))
+            .and_then(|v| v.get_mut(&items_key))
+            .and_then(|v| v.get_mut(&props_key))
+            .and_then(|v| v.as_object_mut())
+        {
+            ef_props.remove(&k_preimage);
+        }
+    }
+    val
+}
+
+/// Build the silent-market OpenAI-format function tool definition for `preview_turn_orders` by
+/// applying the exact communication-channel deletions used by the silent reply schema.
+#[must_use]
+pub fn build_silent_preview_turn_orders_tool_definition() -> serde_json::Value {
+    strip_silent_communication_from_tool_definition(build_preview_turn_orders_tool_definition())
+}
+
+/// Build the silent-market OpenAI-format function tool definition for `draft_turn_orders` by
+/// applying the exact communication-channel deletions used by the silent reply schema.
+#[must_use]
+pub fn build_silent_control_turn_orders_tool_definition() -> serde_json::Value {
+    strip_silent_communication_from_tool_definition(build_control_turn_orders_tool_definition())
+}
+
+/// Compute the canonical lowercase hex SHA-256 digest of a tool definition JSON value.
+#[must_use]
+pub fn canonical_tool_definition_sha256(tool_def: &serde_json::Value) -> String {
+    let bytes = serde_json::to_vec(tool_def).unwrap_or_default();
+    crate::relay::sha256_hex(&bytes)
+}
+
 fn reject_unknown_keys(
     obj: &serde_json::Map<String, serde_json::Value>,
     allowed: &[&str],
@@ -2877,6 +2957,72 @@ fn parse_bundle_obj(
 #[must_use]
 pub fn parse_preview_tool_arguments(raw_json: &str, asking_seat: u8) -> Option<AiPreviewRequest> {
     parse_preview_tool_arguments_inner(raw_json, asking_seat).ok()
+}
+
+/// Strictly parse `preview_turn_orders` / `draft_turn_orders` JSON arguments under silent mode,
+/// refusing `record_intent_pledge` and every removed communication key (including when sent as
+/// `null`) identically to the silent-market structured reply parser.
+#[must_use]
+pub fn parse_silent_preview_tool_arguments(
+    raw_json: &str,
+    asking_seat: u8,
+) -> Option<AiPreviewRequest> {
+    let raw_val: serde_json::Value = serde_json::from_str(raw_json.trim()).ok()?;
+    let root = raw_val.as_object()?;
+    let k_ma = preview_wording_template("key_market_actions");
+    let k_bundle = preview_wording_template("key_bundle");
+    let k_escrow_finishes = preview_wording_template("key_escrow_finishes");
+    let k_preimage = preview_wording_template("key_preimage");
+    let forbidden_ma_keys = [
+        preview_wording_template("key_condition_hash"),
+        preview_wording_template("key_pledge_id"),
+        preview_wording_template("key_recipient_seat"),
+        preview_wording_template("key_target"),
+        preview_wording_template("key_honor_weight"),
+        preview_wording_template("key_memo_digest"),
+    ];
+    if let Some(ma_arr) = root.get(k_ma).and_then(serde_json::Value::as_array) {
+        for item in ma_arr {
+            if let Some(obj) = item.as_object()
+                && forbidden_ma_keys.iter().any(|fk| obj.contains_key(*fk))
+            {
+                return None;
+            }
+        }
+    }
+    if let Some(ef_arr) = root
+        .get(k_bundle)
+        .and_then(|v| v.get(k_escrow_finishes))
+        .and_then(serde_json::Value::as_array)
+    {
+        for item in ef_arr {
+            if item
+                .as_object()
+                .is_some_and(|obj| obj.contains_key(k_preimage))
+            {
+                return None;
+            }
+        }
+    }
+    let req = parse_preview_tool_arguments(raw_json, asking_seat)?;
+    for act in &req.market_actions {
+        match act {
+            MarketAction::RecordIntentPledge { .. } => return None,
+            MarketAction::CreateEscrow { escrow, .. } if escrow.condition_hash.is_some() => {
+                return None;
+            }
+            _ => {}
+        }
+    }
+    if req
+        .bundle
+        .escrow_finishes
+        .iter()
+        .any(|f| f.preimage.is_some())
+    {
+        return None;
+    }
+    Some(req)
 }
 
 fn parse_preview_tool_arguments_inner(
@@ -3596,10 +3742,11 @@ fn execute_tool_call_with_preview(
     preview_state: &PublicPreviewState,
     raw_arguments: &str,
     entries: &[WordingEntry],
+    parse_fn: fn(&str, u8) -> Option<AiPreviewRequest>,
     malformed_wire_json: fn() -> String,
     return_projection: bool,
 ) -> String {
-    let Some(req) = parse_preview_tool_arguments(raw_arguments, preview_state.seat) else {
+    let Some(req) = parse_fn(raw_arguments, preview_state.seat) else {
         return malformed_wire_json();
     };
     #[cfg(any(test, feature = "test-hooks"))]
@@ -3631,6 +3778,24 @@ pub fn execute_preview_tool_call(
         preview_state,
         raw_arguments,
         PREVIEW_ARM_WORDING,
+        parse_preview_tool_arguments,
+        render_malformed_tool_call_wire_json,
+        true,
+    )
+}
+
+/// Evaluate `preview_turn_orders` under silent mode, refusing removed action kinds and keys
+/// (including `null`) with `MALFORMED_TOOL_CALL` before invoking [`preview_seat_bundle`].
+#[must_use]
+pub fn execute_silent_preview_tool_call(
+    preview_state: &PublicPreviewState,
+    raw_arguments: &str,
+) -> String {
+    execute_tool_call_with_preview(
+        preview_state,
+        raw_arguments,
+        PREVIEW_ARM_WORDING,
+        parse_silent_preview_tool_arguments,
         render_malformed_tool_call_wire_json,
         true,
     )
@@ -3648,6 +3813,24 @@ pub fn execute_control_tool_call(
         preview_state,
         raw_arguments,
         CONTROL_ARM_WORDING,
+        parse_preview_tool_arguments,
+        render_control_malformed_tool_call_wire_json,
+        false,
+    )
+}
+
+/// Evaluate `draft_turn_orders` under silent mode, refusing removed action kinds and keys
+/// (including `null`) with `MALFORMED_TOOL_CALL` before invoking [`preview_seat_bundle`].
+#[must_use]
+pub fn execute_silent_control_tool_call(
+    preview_state: &PublicPreviewState,
+    raw_arguments: &str,
+) -> String {
+    execute_tool_call_with_preview(
+        preview_state,
+        raw_arguments,
+        CONTROL_ARM_WORDING,
+        parse_silent_preview_tool_arguments,
         render_control_malformed_tool_call_wire_json,
         false,
     )

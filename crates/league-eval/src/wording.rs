@@ -22,9 +22,14 @@ pub const PINNED_WRAPPERS: &[(&str, &str)] = &[(
 )];
 
 /// Pinned Evaluation Mode silent-market wrapper allow-list `(version, sha256)`.
+///
+/// Derived from `v2_seat_brief_2026_11_21_r3.md` via deletions of disabled communication channels,
+/// one added sentence under `## Each turn` (`"There is no talk round, and no messages are sent
+/// between seats."`), and one minimal escrow-rule conjunction fix retaining `r3`'s `"or"` when
+/// removing `` or `condition_hash` `` (`"Needs `bond` or `finish_after_turn`;"`).
 pub const PINNED_SILENT_WRAPPERS: &[(&str, &str)] = &[(
     "v2_seat_brief_silent_2026_11_26_r1",
-    "2876aea20a9e942200ae9307d0d328061c604191c587138013436486c13a0e81",
+    "d83afe6c02691beb2c1dfac0ce98956f57989bbcb6ea5d84934302f62ca9c7e3",
 )];
 
 /// Superseded historical wrapper hashes that must never be accepted.

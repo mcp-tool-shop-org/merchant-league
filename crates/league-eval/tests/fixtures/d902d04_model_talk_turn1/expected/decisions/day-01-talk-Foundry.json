@@ -1,0 +1,69 @@
+{
+  "game_id": "1e3694b0ffcb8515fa199cfba4b2fee0",
+  "table_id": 78,
+  "day": 1,
+  "round": "talk",
+  "seat": 0,
+  "guild": "Foundry",
+  "arm": "on",
+  "seat_kind": "Model",
+  "keeps_notes": false,
+  "notes_present": false,
+  "raw_reply": "{\"messages\":[{\"to_guild\":\"Quarry\",\"body\":\"i will buy 1 raw_1 at 2 cred.\"}],\"market_actions\":[],\"bundle\":{}}",
+  "attempts": 1,
+  "prompt_tokens": 40,
+  "completion_tokens": 18,
+  "wall_secs": 0.0003168,
+  "tool_calls_used": 0,
+  "parse_failure": false,
+  "refused_market_actions": 0,
+  "refused_bundle_legs": 0,
+  "cleared_non_empty_actions": false,
+  "prompt_token_ids_sha256s": [
+    "98b417c16eda85a783fc8ddc73ed0f153b44385b53f665fd2ed348102b6f01a2"
+  ],
+  "prompt_token_ids_source": "server_tokenize",
+  "prompt_token_ids_template_check": "double_apply_template_byte_equal",
+  "reply_token_ids": [
+    [
+      11
+    ]
+  ],
+  "reply_top_logprobs": [
+    [
+      {
+        "token": "{",
+        "token_id": 11,
+        "logprob": -0.01,
+        "top_logprobs": [
+          {
+            "token": "t0",
+            "token_id": 200,
+            "logprob": -0.05
+          },
+          {
+            "token": "t1",
+            "token_id": 201,
+            "logprob": -0.1
+          },
+          {
+            "token": "t2",
+            "token_id": 202,
+            "logprob": -0.15
+          },
+          {
+            "token": "t3",
+            "token_id": 203,
+            "logprob": -0.2
+          },
+          {
+            "token": "t4",
+            "token_id": 204,
+            "logprob": -0.25
+          }
+        ]
+      }
+    ]
+  ],
+  "no_reply": false
+}

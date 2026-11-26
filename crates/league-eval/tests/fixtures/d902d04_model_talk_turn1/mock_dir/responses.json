@@ -1,0 +1,138 @@
+{
+  "apply_template_prompt": "TEMPLATED_D902D04_PROMPT",
+  "tokenize_ids": [
+    100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+    110, 111, 112, 113, 114, 115, 116, 117, 118, 119,
+    120, 121, 122, 123, 124, 125, 126, 127, 128, 129,
+    130, 131, 132, 133, 134, 135, 136, 137, 138, 139
+  ],
+  "rules": [
+    {
+      "when_contains": "\"role\":\"tool\"",
+      "status": 200,
+      "response": {
+        "id": "mock-d902d04-act-final",
+        "model": "Qwen/Qwen3-32B",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}"
+            },
+            "logprobs": {
+              "content": [
+                {
+                  "token": "{",
+                  "id": 11,
+                  "logprob": -0.01,
+                  "top_logprobs": [
+                    { "token": "t0", "id": 200, "token_id": 200, "logprob": -0.05 },
+                    { "token": "t1", "id": 201, "token_id": 201, "logprob": -0.10 },
+                    { "token": "t2", "id": 202, "token_id": 202, "logprob": -0.15 },
+                    { "token": "t3", "id": 203, "token_id": 203, "logprob": -0.20 },
+                    { "token": "t4", "id": 204, "token_id": 204, "logprob": -0.25 }
+                  ]
+                }
+              ]
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 40,
+          "completion_tokens": 15,
+          "total_tokens": 55
+        }
+      }
+    },
+    {
+      "when_contains": "\"tools\":[",
+      "status": 200,
+      "response": {
+        "id": "mock-d902d04-act-tool",
+        "model": "Qwen/Qwen3-32B",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {
+                    "name": "preview_turn_orders",
+                    "arguments": "{\"market_actions\":[],\"bundle\":{}}"
+                  }
+                }
+              ]
+            },
+            "logprobs": {
+              "content": [
+                {
+                  "token": "{",
+                  "id": 11,
+                  "logprob": -0.01,
+                  "top_logprobs": [
+                    { "token": "t0", "id": 200, "token_id": 200, "logprob": -0.05 },
+                    { "token": "t1", "id": 201, "token_id": 201, "logprob": -0.10 },
+                    { "token": "t2", "id": 202, "token_id": 202, "logprob": -0.15 },
+                    { "token": "t3", "id": 203, "token_id": 203, "logprob": -0.20 },
+                    { "token": "t4", "id": 204, "token_id": 204, "logprob": -0.25 }
+                  ]
+                }
+              ]
+            },
+            "finish_reason": "tool_calls"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 40,
+          "completion_tokens": 12,
+          "total_tokens": 52
+        }
+      }
+    },
+    {
+      "when_contains": "\"messages\":[",
+      "status": 200,
+      "response": {
+        "id": "mock-d902d04-talk",
+        "model": "Qwen/Qwen3-32B",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"messages\":[{\"to_guild\":\"Quarry\",\"body\":\"i will buy 1 raw_1 at 2 cred.\"}],\"market_actions\":[],\"bundle\":{}}"
+            },
+            "logprobs": {
+              "content": [
+                {
+                  "token": "{",
+                  "id": 11,
+                  "logprob": -0.01,
+                  "top_logprobs": [
+                    { "token": "t0", "id": 200, "token_id": 200, "logprob": -0.05 },
+                    { "token": "t1", "id": 201, "token_id": 201, "logprob": -0.10 },
+                    { "token": "t2", "id": 202, "token_id": 202, "logprob": -0.15 },
+                    { "token": "t3", "id": 203, "token_id": 203, "logprob": -0.20 },
+                    { "token": "t4", "id": 204, "token_id": 204, "logprob": -0.25 }
+                  ]
+                }
+              ]
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 40,
+          "completion_tokens": 18,
+          "total_tokens": 58
+        }
+      }
+    }
+  ]
+}

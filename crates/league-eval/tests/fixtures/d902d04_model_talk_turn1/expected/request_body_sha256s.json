@@ -1,0 +1,29 @@
+[
+  {
+    "day": "01",
+    "round": "talk",
+    "guild": "Foundry",
+    "attempt": 1,
+    "trigger": "turn",
+    "outcome": "OK",
+    "request_body_sha256": "450fea094115118f16c43db1c31a1de842fd0fa4194ad8bd3206afdde1c9e17b"
+  },
+  {
+    "day": "01",
+    "round": "act",
+    "guild": "Foundry",
+    "attempt": 1,
+    "trigger": "turn",
+    "outcome": "TOOL_CALL",
+    "request_body_sha256": "cdab704957b01dbebc35ee6203c81b38e3208368b304dcc078c11c4dd0a6e2ff"
+  },
+  {
+    "day": "01",
+    "round": "act",
+    "guild": "Foundry",
+    "attempt": 1,
+    "trigger": "tool_followup",
+    "outcome": "OK",
+    "request_body_sha256": "1d8860c65237093ef54acc936014c7e0f515f73ca0f8a91ac40f7b56d06a6744"
+  }
+]
