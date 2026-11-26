@@ -14,7 +14,7 @@
 
 Un juego de comercio y política con turnos lentos para cuatro a seis asientos, que se juega en la **Testnet** de XRP Ledger. Los asientos pueden ser personas o jugadores de IA, en la misma mesa y bajo las mismas reglas.
 
-**Estado: prototipo, en fase activa de diseño.** El modo **Club** sin conexión en `league-tui` se puede jugar desde el código fuente en un terminal compartido (de 4 a 6 asientos humanos y `ClubBot`, desde el lobby hasta la tabla de clasificación y la exportación de repeticiones al final de la temporada; los mensajes privados se posponen hasta después de `v0.1.0`). El modo de juego público en Testnet aún no está desarrollado. **v0.1.0** es la primera versión de prototipo etiquetada: solo código fuente, sin binarios publicados ni imagen de contenedor publicada. Solo Testnet: no se utiliza dinero real y no hay posibilidad de pasar a Mainnet.
+**Estado: prototipo, en fase activa de diseño.** El modo **Club** sin conexión en `league-tui` se puede jugar desde el código fuente en un terminal compartido (de 4 a 6 asientos humanos y `ClubBot`, desde el lobby hasta la tabla de clasificación y la exportación de repeticiones al final de la temporada; los mensajes privados aún no están en el modo Club), y el arnés automatizado del **modo Evaluación** (`league-eval` sobre `league-relay` y el `EvalHost` de `league-core`) ejecuta los flujos `play`, `branch` y `select` en los brazos `off`, `control` y `on`, con instrucciones de asiento fijadas y comprobaciones del manifiesto de servicio (la CI solo usa transportes simulados, sin llamadas a modelos). El modo de juego público en Testnet aún no está desarrollado. Las versiones etiquetadas son prototipos de solo código fuente, sin binarios publicados ni imagen de contenedor publicada. Solo Testnet: no se utiliza dinero real y no hay posibilidad de pasar a Mainnet.
 
 ## El juego
 
@@ -40,13 +40,18 @@ Ambos modos comparten un motor de reglas. Un juego se reproduce exactamente a pa
 
 | Crate | Qué hace |
 | --- | --- |
-| `league-core` | El motor de reglas: las fases del turno, los contratos, la puntuación, el final de la temporada, la repetición y los predicados de estado que sustentan el sistema de pistas planificado |
-| `league-gen` | El generador de mesas, con sus comprobaciones de equidad y sus conjuntos de semillas |
-| `league-ledger` | El cliente de la red de pruebas XRPL. Rechaza cualquier red que no sea la red de pruebas |
-| `league-standalone` | El entorno `xrpld` independiente para el modo de entrenamiento, en un contenedor fijado y con recursos limitados |
+| `league-core` | El motor de reglas: fases del turno, contratos, puntuación, cierre de temporada, repetición, predicados de estado y los hosts de sesión aislados `ClubHost` / `EvalHost` |
+| `league-error` | Representación compartida `#![no_std]` de errores estructurados y depurador de credenciales y secretos en el texto |
+| `league-seat-types` | Observaciones seguras para cada asiento `#![no_std]`, DTO de vista previa, intenciones de turno y modelos de vista de las pantallas del terminal |
+| `league-seat-ui` | Renderizadores `#![no_std]` de las pantallas de lobby, redacción, revelación y final de temporada del modo Club, y la máquina de estados de teclas |
+| `league-gen` | El generador de mesas, con sus comprobaciones de equidad, el glosario de mercancías y los grupos de semillas |
+| `league-ledger` | El cliente de XRPL Testnet. Rechaza cualquier red que no sea la Testnet |
+| `league-standalone` | El arnés independiente de `xrpld` para el modo de entrenamiento, en un contenedor fijado y con recursos limitados |
 | `league-season` | Las fechas de reinicio anunciadas de la Testnet y una comprobación que detecta un reinicio no anunciado |
-| `league-relay` | La herramienta que ejecutó las pruebas de juego en papel con asientos de IA |
-| `league-tui` | El host del terminal del modo Club sin conexión: configuración del lobby, turnos compartidos (hot-seat) en cuatro zonas, cortina de privacidad con PIN opcionales, pases de tiempo limitado, guardado/reanudación a mitad del turno, tabla de clasificación al final de la temporada y exportación de repeticiones |
+| `league-relay` | El relé HTTP automatizado de asientos de IA (`local` compatible con OpenAI y `openrouter`), filtros estrictos de tokens y depuración, `eval_mode` y los brazos `--preview-tool <off\|control\|on>` |
+| `league-eval` | El arnés del modo Evaluación (`play`, `branch`, `select`), con aplicación del envoltorio de asiento fijado, comprobaciones de `--serving-manifest` al arrancar y registro de entradas de arrepentimiento por decisión, además de los comandos de puntuación ciega `build-blind-inputs`, `verify-checkpoints`, `freeze` y `join` |
+| `league-scorer` | El evaluador de decisiones determinista y ciego al brazo para el modo Evaluación (`candidates`, `score`); no depende de `league-eval` ni de `league-relay` |
+| `league-tui` | El host de terminal sin conexión del modo Club: configuración del lobby, turnos de asiento compartido en cuatro zonas, cortina de privacidad con PIN opcionales, pases cronometrados, guardar y reanudar a mitad de turno, tabla final de la temporada y exportación de repeticiones |
 
 ## Juega una temporada
 
@@ -124,7 +129,7 @@ Consulte [`SECURITY.md`](SECURITY.md) para conocer el modelo de amenazas y cómo
 
 ## Soporte
 
-Este es un prototipo en fase de diseño activo. Los problemas y las ideas son bienvenidos en el [rastreador de problemas](https://github.com/mcp-tool-shop-org/merchant-league/issues). Aún no hay versiones y no hay garantías de soporte. Consulte el [REGISTRO DE CAMBIOS](CHANGELOG.md) para conocer el progreso.
+Este es un prototipo en fase de diseño activo. Los problemas y las ideas son bienvenidos en el [rastreador de problemas](https://github.com/mcp-tool-shop-org/merchant-league/issues). Las versiones etiquetadas son prototipos de solo código fuente, sin garantías de soporte. Consulte el [REGISTRO DE CAMBIOS](CHANGELOG.md) para conocer el progreso.
 
 ## Licencia
 

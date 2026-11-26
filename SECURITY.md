@@ -13,7 +13,7 @@ That still leaves things worth protecting:
 
 ## Supported versions
 
-The latest release (currently v0.1.0, a source-only prototype) is the supported one. Security fixes land on `main` and ship in the next release.
+The latest release (a source-only prototype) is the supported one. Security fixes land on `main` and ship in the next release.
 
 ## Reporting
 

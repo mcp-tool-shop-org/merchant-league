@@ -14,7 +14,7 @@
 
 A slow-turn trading and politics game for four to six seats, played on the XRP Ledger **Testnet**. Seats can be people or AI players, at the same table and under the same rules.
 
-**Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are deferred past `v0.1.0`), and the automated **Evaluation Mode** harness (`league-eval` over `league-relay` and `league-core`'s `EvalHost`) drives `play`, `branch`, and `select` workflows across `off`, `control`, and `on` arms with pinned seat briefs and serving-manifest checks (CI runs mock transports only, with no model calls). Public-Testnet Game mode is not built yet. **v0.1.0** is the first tagged prototype release: source only, with no published binaries and no published container image. Testnet only: no real money, and no path to Mainnet.
+**Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are not in Club Mode yet), and the automated **Evaluation Mode** harness (`league-eval` over `league-relay` and `league-core`'s `EvalHost`) drives `play`, `branch`, and `select` workflows across `off`, `control`, and `on` arms with pinned seat briefs and serving-manifest checks (CI runs mock transports only, with no model calls). Public-Testnet Game mode is not built yet. Tagged releases are source-only prototypes, with no published binaries and no published container image. Testnet only: no real money, and no path to Mainnet.
 
 ## The game
 
@@ -49,7 +49,8 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | `league-standalone` | The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container |
 | `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset |
 | `league-relay` | The automated AI-seat HTTP relay (`local` OpenAI-compatible and `openrouter`), strict token/scrubber filters, `eval_mode`, and `--preview-tool <off\|control\|on>` arms |
-| `league-eval` | The Evaluation Mode harness (`play`, `branch`, `select`), pinned seat wrapper enforcement, `--serving-manifest` startup checks, and per-decision regret-input logging |
+| `league-eval` | The Evaluation Mode harness (`play`, `branch`, `select`), pinned seat wrapper enforcement, `--serving-manifest` startup checks, and per-decision regret-input logging, plus the blind-scoring commands `build-blind-inputs`, `verify-checkpoints`, `freeze`, and `join` |
+| `league-scorer` | The arm-blind, deterministic decision scorer for Evaluation Mode (`candidates`, `score`); it does not depend on `league-eval` or `league-relay` |
 | `league-tui` | The offline Club Mode terminal host: Lobby setup, four-zone hot-seat turns, Privacy Curtain with optional PINs, timed passes, mid-turn save/resume, end-of-season scoreboard, and replay export |
 
 ## Play a season
@@ -128,7 +129,7 @@ See [`SECURITY.md`](SECURITY.md) for the threat model and how to report a vulner
 
 ## Support
 
-This is a prototype under active design. Issues and ideas are welcome on the [issue tracker](https://github.com/mcp-tool-shop-org/merchant-league/issues). There are no releases yet and no support guarantees. See the [CHANGELOG](CHANGELOG.md) for progress.
+This is a prototype under active design. Issues and ideas are welcome on the [issue tracker](https://github.com/mcp-tool-shop-org/merchant-league/issues). Tagged releases are source-only prototypes with no support guarantees. See the [CHANGELOG](CHANGELOG.md) for progress.
 
 ## License
 

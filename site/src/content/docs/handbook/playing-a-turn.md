@@ -5,8 +5,8 @@ sidebar:
   order: 7
 ---
 
-:::caution[Prototype — v0.1.0]
-Prototype — v0.1.0, source only. Offline **Club Mode** in `league-tui` is playable from source across a full 24–32 turn season (public-Testnet Game mode is not built yet, and no container image is published). `4: Diplomatic Desk` seat-to-seat whispers remain deferred past `v0.1.0`.
+:::caution[Prototype]
+Prototype, source only. Offline **Club Mode** in `league-tui` is playable from source across a full 24–32 turn season (public-Testnet Game mode is not built yet, and no container image is published). `4: Diplomatic Desk` seat-to-seat whispers are not in Club Mode yet.
 :::
 
 ## Launching and setting up a table (Lobby)
@@ -60,7 +60,7 @@ The compact five-column table inside **Public Table & Ledger Mirror** uses fixed
    - **Tab 1 — Market & Contracts (`1`):** all 10 Phase-1 `MarketAction` variants (`PostOffer`, `CancelOffer` — blocked once `[CANCEL LOCKED]` engages, `CreateCheck`, `CancelCheck`, `CreateEscrow`, `CancelExpiredEscrow`, `RecordIntentPledge`, `StandForOffice`, `FlagWashFreeze`, `TownImport`).
    - **Tab 2 — Workshop, Deals & Politics (`2`):** all `SealedOrderBundle` sections (`converter_runs`, `project_deliveries`, `atomic_swaps`, `contract_deliveries`, `dual_escrows`, `debt_repayment_cred`, `escrow_finishes`, `check_cashes`), with `council_vote` gated to turns divisible by `4` and `charter_bids` gated to turns divisible by `6`.
    - **Tab 3 — What-If Sandbox (`3` or `p`):** simulates your staged orders through `preview_what_if` with selectable tie-break and counterparty assumptions, displaying post-sweep balances, hypothetical close marks, and scrubbed refusal messages.
-   - **Tab 4 — Diplomatic Desk (Disabled):** shown disabled only; whispers are deferred past `v0.1.0`.
+   - **Tab 4 — Diplomatic Desk (Disabled):** shown disabled only; whispers are not in Club Mode yet.
 4. **Private Vault & Diagnostics:** visible strictly while that human seat is unlocked — own dealtTurn-1 `PrivateMandate`, own active `OracleAuditor` hint (omitting magnitude until `realize_turn`), all five `SeatStatePredicates` gauges (`UpkeepAndDebt`, `SpoilageAndConversion`, `GoodScarcity`, `CoalitionReach`, `SeasonEndAndMarks`), and personal scratch notes (`n`).
 
 Press `r` or `F2` to open the **Sweep Chronicle** modal (the 30 seat-safe fields of `PublicSweepReceipt`, never `newly_drawn_shocks` or `post_state_digest`). Use `[` and `]` to browse turns and `Esc` or `r` to close.

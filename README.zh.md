@@ -14,7 +14,7 @@
 
 这是一款慢节奏的交易和政治游戏，适合四到六名玩家，在 XRP Ledger **测试网**上进行。玩家可以是真人，也可以是 AI 玩家，在同一张桌子上，遵循相同的规则。
 
-**状态：原型，正在积极设计中。** `league-tui` 中的离线 **俱乐部模式** 可以在一台共享终端上从源代码进行游戏（真人与 `ClubBot` 座位共 4–6 个，从大厅开始，到赛季结束的排行榜和游戏回放导出；私聊功能推迟到 `v0.1.0` 之后）。公共测试网游戏模式尚未构建。**v0.1.0** 是首个带标签的原型版本：仅提供源代码，没有发布的二进制文件，也没有发布的容器镜像。仅限测试网：不涉及真实货币，也没有通往主网的途径。
+**状态：原型，正在积极设计中。** `league-tui` 中的离线 **俱乐部模式** 可以在一台共享终端上从源代码进行游戏（真人与 `ClubBot` 座位共 4–6 个，从大厅开始，到赛季结束的排行榜和游戏回放导出；私聊功能尚未加入俱乐部模式），自动化的**评估模式**测试框架（基于 `league-relay` 和 `league-core` 的 `EvalHost` 的 `league-eval`）在 `off`、`control` 和 `on` 三个臂上运行 `play`、`branch` 和 `select` 工作流，并使用固定的座位说明和服务清单检查（CI 只使用模拟传输，不调用模型）。公共测试网游戏模式尚未构建。带标签的版本均为仅提供源代码的原型，没有发布的二进制文件，也没有发布的容器镜像。仅限测试网：不涉及真实货币，也没有通往主网的途径。
 
 ## 游戏
 
@@ -40,13 +40,18 @@
 
 | 模块 | 功能 |
 | --- | --- |
-| `league-core` | 规则引擎：回合阶段、合约、计分、赛季结束、游戏回放以及计划中的提示系统背后的状态谓词 |
-| `league-gen` | 桌子生成器，包括其公平性检查和种子池 |
-| `league-ledger` | XRPL 测试网客户端。它拒绝任何非测试网的网络 |
-| `league-standalone` | 用于训练模式的独立 `xrpld` 框架，在一个固定的、资源受限的容器中 |
-| `league-season` | 测试网已公布的重置日期，以及一个用于检测未公布重置的检查。 |
-| `league-relay` | 用于运行 AI 玩家参与的纸质测试的工具 |
-| `league-tui` | 离线俱乐部模式终端主机：大厅设置、四区轮流游戏、隐私帘（可选 PIN 码）、限时回合、回合中途保存/恢复、赛季结束排行榜和游戏回放导出 |
+| `league-core` | 规则引擎：回合阶段、合约、计分、赛季结算、回放、状态谓词，以及相互隔离的会话宿主 `ClubHost` / `EvalHost` |
+| `league-error` | 共享的 `#![no_std]` 结构化错误表示，以及清除文本中凭据和机密的过滤器 |
+| `league-seat-types` | `#![no_std]` 的按座位安全的观测数据、预览 DTO、回合意图和终端界面视图模型 |
+| `league-seat-ui` | `#![no_std]` 的俱乐部模式大厅、编写、揭示和赛季结束界面渲染器，以及按键状态机 |
+| `league-gen` | 牌桌生成器，含公平性检查、商品词汇表和种子池 |
+| `league-ledger` | XRPL 测试网客户端。拒绝任何不是测试网的网络 |
+| `league-standalone` | 用于训练模式的独立 `xrpld` 测试框架，运行在固定版本、限制资源的容器中 |
+| `league-season` | 测试网已公布的重置日期，以及发现未公布重置的检查 |
+| `league-relay` | 自动化 AI 座位 HTTP 中继（兼容 OpenAI 的 `local` 和 `openrouter`）、严格的令牌和清除过滤器、`eval_mode` 以及 `--preview-tool <off\|control\|on>` 各臂 |
+| `league-eval` | 评估模式测试框架（`play`、`branch`、`select`），强制使用固定的座位包装、启动时进行 `--serving-manifest` 检查并按决策记录遗憾输入，另有盲评分命令 `build-blind-inputs`、`verify-checkpoints`、`freeze` 和 `join` |
+| `league-scorer` | 评估模式中对臂别不可见的确定性决策评分器（`candidates`、`score`）；不依赖 `league-eval` 或 `league-relay` |
+| `league-tui` | 离线俱乐部模式终端宿主：大厅设置、四区轮流同屏回合、可选 PIN 的隐私遮挡、限时让过、回合中途保存与恢复、赛季结束排行榜和回放导出 |
 
 ## 进行一个赛季的游戏
 
@@ -124,7 +129,7 @@ docker run --rm -it --network=none -v "${PWD}/saves:/saves" merchant-league:loca
 
 ## 支持
 
-这是一个正在积极设计中的原型。 欢迎在 [问题跟踪器](https://github.com/mcp-tool-shop-org/merchant-league/issues) 中提出问题和想法。 尚未发布任何版本，并且没有支持保证。 请参阅 [CHANGELOG](CHANGELOG.md) 以了解进度。
+这是一个正在积极设计中的原型。 欢迎在 [问题跟踪器](https://github.com/mcp-tool-shop-org/merchant-league/issues) 中提出问题和想法。 带标签的版本均为仅提供源代码的原型，不提供支持保证。 请参阅 [CHANGELOG](CHANGELOG.md) 以了解进度。
 
 ## 许可证
 

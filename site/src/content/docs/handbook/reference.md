@@ -10,7 +10,7 @@ sidebar:
 | Document | What it holds |
 | --- | --- |
 | [`docs/design-v2.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/design-v2.md) | The current design: the economy, the turn engine, contracts and reputation, scoring, politics, shocks and the season, the two modes, and the seed pools |
-| [`docs/club-mode-design.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/club-mode-design.md) | Offline Club Mode (`v0.1.0`) specification: host/seat `no_std` boundary, hot-seat Privacy Curtain, timed passes, What-If Sandbox, save/resume security, and `SHIP_GATE` closure |
+| [`docs/club-mode-design.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/club-mode-design.md) | Offline Club Mode specification: host/seat `no_std` boundary, hot-seat Privacy Curtain, timed passes, What-If Sandbox, save/resume security, and `SHIP_GATE` closure |
 | [`docs/design.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/design.md) | The first design, kept for its history. `design-v2.md` supersedes it |
 | [`docs/standalone-xrpld.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/standalone-xrpld.md) | The stand-alone `xrpld` harness: the pinned image, its limits and its isolation checks |
 | [`docs/paper-test.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/paper-test.md) | How the paper playtests were run |
@@ -21,7 +21,7 @@ The Testnet is wiped from time to time (next on 2026-11-25), which deletes every
 
 ## `league-tui`
 
-The offline hot-seat host binary runs full Club Mode seasons in a terminal without network calls or Testnet credentials (prototype, v0.1.0, source only).
+The offline hot-seat host binary runs full Club Mode seasons in a terminal without network calls or Testnet credentials (prototype, source only).
 
 ```text
 league-tui [options]
