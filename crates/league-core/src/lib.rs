@@ -26,7 +26,7 @@ pub use club::{
 };
 pub use eval::{
     EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION, EvalActApplyOutcome, EvalActSubmission,
-    EvalHost, EvalSaveSnapshot, EvalSeatApplyReport, PolicyChaChaRng,
+    EvalHost, EvalSaveSnapshot, EvalSeatApplyReport,
 };
 
 pub use commit::{
@@ -35,8 +35,8 @@ pub use commit::{
     DRAND_QUICKNET_PERIOD_SECS, DRAND_QUICKNET_SIGNATURE_BYTES, DrandBeaconAuthStatus,
     DrandSchedule, DualEscrowProposal, EVAL_VRF_PROOF_BYTES, EVAL_VRF_PUBKEY_BYTES,
     EscrowFinishUnlock, GradedMandateCard, IntentPledge, IntentTarget, MandateKind, MandateReveal,
-    OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, RevealSalt, RngDomain,
-    SealedEvalSeed, SealedMandateDeal, SealedOrderBundle, beacon_roll_bps,
+    OrderReveal, PolicyChaChaRng, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, RevealSalt,
+    RngDomain, SealedEvalSeed, SealedMandateDeal, SealedOrderBundle, beacon_roll_bps,
     bonus_equity_for_completion_bps, bonus_points_milli_for_completion_bps, break_tie_with_beacon,
     break_tie_with_turn_beacon, close_roll_bps_from_beacon, compute_mandate_commitment,
     compute_order_commitment, compute_preimage_condition, deal_graded_mandates,

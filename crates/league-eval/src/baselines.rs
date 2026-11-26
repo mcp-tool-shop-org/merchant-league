@@ -11,15 +11,18 @@ use std::fs;
 use std::path::Path;
 
 use league_core::{
-    AiPreviewRequest, AssetId, BPS_SCALE, CharterBidOrder, CharterRole, CheckStatus, ClubBot,
-    ConverterRunOrder, CouncilPlatform, CouncilVoteBallot, CredOffer, CreditCheck, CreditTier,
-    EscrowFinishUnlock, EscrowStatus, EvalActSubmission, FillKind, IntentTarget, MarketAction,
-    OfferProposal, OfferSide, PendingWashFreeze, PolicyChaChaRng, PrivateMandate,
-    ProjectDeliveryOrder, PublicTableSpec, SealedOrderBundle, SeatObservation, SeatState,
-    TokenEscrowVault, UNIT_SCALE, Units, WhatIfPreview, mul_units_parity, preview_seat_bundle,
+    AssetId, ClubBot, EvalActSubmission, MarketAction, OfferProposal, OfferSide, PolicyChaChaRng,
+    PublicSweepReceipt, SealedOrderBundle, SeatObservation, preview_seat_bundle,
 };
 use league_relay::{NegotiationInputs, UntrustedWhisper, preview_wording_slot};
 use league_scorer::ExtractedTalkCommitment;
+use league_seat_types::{
+    AiPreviewRequest, BPS_SCALE, CartelDomain, CharterBidOrder, CharterRole, CheckStatus,
+    ConverterRunOrder, CouncilPlatform, CouncilVoteBallot, CredOffer, CreditCheck, CreditTier,
+    EscrowFinishUnlock, EscrowStatus, FillKind, IntentTarget, PendingWashFreeze, PrivateMandate,
+    ProjectDeliveryOrder, PublicTableSpec, SeatState, TokenEscrowVault, UNIT_SCALE, Units,
+    WhatIfPreview,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -32,6 +35,21 @@ use crate::wording::{EVAL_MESSAGES_MAX_ITEMS, eval_wording_slot};
 
 /// Domain separator for [`PolicyChaChaRng`] seed derivation across baseline policies.
 pub const BASELINE_RNG_DOMAIN: &[u8] = b"league-eval/baseline/v1|";
+
+fn mul_units_parity(amount: Units, parity_per_unit: Units) -> Units {
+    if amount == 0 || parity_per_unit == 0 {
+        return 0;
+    }
+    let prod =
+        i128::from(amount).saturating_mul(i128::from(parity_per_unit)) / i128::from(UNIT_SCALE);
+    Units::try_from(prod).unwrap_or_else(|_| {
+        if prod.is_negative() {
+            Units::MIN
+        } else {
+            Units::MAX
+        }
+    })
+}
 
 // --- Named fixed candidate-grid constants for `random-legal` (`docs/eval-harness.md` `D8`) ---
 
@@ -144,7 +162,7 @@ struct HistoricalPreActView {
     offers: BTreeMap<u64, CredOffer>,
     checks: BTreeMap<u64, CreditCheck>,
     escrows: BTreeMap<u64, TokenEscrowVault>,
-    domains: Vec<league_core::CartelDomain>,
+    domains: Vec<CartelDomain>,
     #[serde(default)]
     pending_wash_freezes: Vec<PendingWashFreeze>,
     #[allow(dead_code)]
@@ -1580,7 +1598,7 @@ fn commitment_satisfied_by_fills_or_resting_offer(
     commitment: &ExtractedTalkCommitment,
     turn: u8,
     self_seat: u8,
-    receipt: &league_core::PublicSweepReceipt,
+    receipt: &PublicSweepReceipt,
     next_offers: &BTreeMap<u64, CredOffer>,
 ) -> bool {
     let MarketAction::PostOffer { ref order, .. } = commitment.offered_action else {
@@ -1636,7 +1654,7 @@ pub fn compute_tit_for_tat_stances(
         }
     }
 
-    let receipts_by_turn: BTreeMap<u8, &league_core::PublicSweepReceipt> = current_obs
+    let receipts_by_turn: BTreeMap<u8, &PublicSweepReceipt> = current_obs
         .public_receipts
         .iter()
         .map(|r| (r.turn, r))
@@ -2113,9 +2131,10 @@ pub fn decide_scripted_baseline_act(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use league_core::{
+    use league_core::{EvalHost, Seat, TableId};
+    use league_seat_types::{
         ActiveCharter, AtomicSwapProposal, CheckProposal, CommitmentHash, ContractDeliveryOrder,
-        DualEscrowProposal, EscrowProposal, EvalHost, PreimageSecret, Seat, TableId,
+        DualEscrowProposal, EscrowProposal, IntentPledge, PreimageSecret,
     };
 
     #[test]
@@ -2170,7 +2189,7 @@ mod tests {
                 },
                 MarketAction::RecordIntentPledge {
                     seat: 0,
-                    pledge: league_core::IntentPledge {
+                    pledge: IntentPledge {
                         pledge_id: 7,
                         promisor: 0,
                         counterparty: 1,
@@ -2184,7 +2203,7 @@ mod tests {
                 },
                 MarketAction::RecordIntentPledge {
                     seat: 0,
-                    pledge: league_core::IntentPledge {
+                    pledge: IntentPledge {
                         pledge_id: 8,
                         promisor: 0,
                         counterparty: 1,
@@ -2199,7 +2218,7 @@ mod tests {
                 },
                 MarketAction::RecordIntentPledge {
                     seat: 0,
-                    pledge: league_core::IntentPledge {
+                    pledge: IntentPledge {
                         pledge_id: 9,
                         promisor: 0,
                         counterparty: 1,

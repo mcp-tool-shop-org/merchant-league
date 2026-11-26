@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use league_core::{
     AssetId, EvalActSubmission, EvalHost, HARD_TURN_CAP, MarketAction, OfferProposal, OfferSide,
-    PublicSweepReceipt, Seat, TableId, TurnPhase, UNIT_SCALE, replay_eval_season,
+    PublicSweepReceipt, Seat, TableId, TurnPhase, replay_eval_season,
 };
 use league_eval::{
     ArmMapStateFile, BranchArmOutcome, BranchOptions, BuildBlindInputsOptions, CRATE_GIT_SHA,
@@ -30,6 +30,7 @@ use league_relay::{
 };
 use league_scorer::{BlindScoringRequest, ScorerConfig, execute_blind_request};
 use league_seat_types::FinalScoreboard;
+use league_seat_types::UNIT_SCALE;
 use serde_json::{Value, json};
 
 const FALLBACK_GIT_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

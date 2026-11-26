@@ -774,7 +774,7 @@
               "line": 966
             }
           ],
-          "hash": "a1d6b576d6a81f1a9537fa4eec7245ab8bea54a5db3a424133e18212e0b8e453",
+          "hash": "69bfbd4700ccd36650bfa9964ba8d6d67e7aca681dff02f451b9df4fa19ceffd",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/types.rs"
@@ -783,7 +783,8 @@
             "crates/league-core/src/types.rs",
             "crates/league-seat-types/src/lib.rs"
           ],
-          "path": "crates/league-core/src/commit.rs"
+          "path": "crates/league-core/src/commit.rs",
+          "testsInside": true
         },
         {
           "exports": [
@@ -1891,15 +1892,14 @@
           "testsInside": true
         },
         {
-          "hash": "6ab1b639dda3b46464f2ea2d1ccbb2917920b4a09f381b5075654349f51f2869",
+          "hash": "0235b999722aa11308ec3ffdee86e03e7077b82d87da96122967bf04e610930d",
           "importsFiles": [
             "crates/league-core/src/eval/host.rs"
           ],
-          "path": "crates/league-core/src/eval/mod.rs",
-          "testsInside": true
+          "path": "crates/league-core/src/eval/mod.rs"
         },
         {
-          "hash": "09b63ad2540a89121f9e33fb3700ce9f656fa9903eb0baf23f7f7729b44a8881",
+          "hash": "202621a7e9b367be7b10dea16373d2444866953f330dc16e3eed118ce33486bf",
           "importsFiles": [
             "crates/league-core/src/bot.rs",
             "crates/league-core/src/club/mod.rs",
@@ -2684,7 +2684,7 @@
           "testsInside": true
         },
         {
-          "hash": "385917cc7eac696869a5fac36fac99405ba4a3692c0e9a4e3ffaa527511e1469",
+          "hash": "9cfe7937d59a2116ed8995fe2bb8608df5ba556170fe1ca5c79caab7cb7fd131",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2859,30 +2859,30 @@
             {
               "in": "parse_for_seat",
               "kind": "err",
-              "line": 96
+              "line": 114
             },
             {
               "in": "decide_scripted_baseline_talk",
               "kind": "err",
-              "line": 2048
+              "line": 2066
             },
             {
               "in": "decide_scripted_baseline_act",
               "kind": "err",
-              "line": 2094
+              "line": 2112
             }
           ],
-          "hash": "bc701ee2426c6fe51a6aebfdfebcb6511ddc2f6c79def341bd9a0bc6d8d0795f",
+          "hash": "947ca6f37a8a74663fcd3d9477138343d91008c55277a77f4023a7c112a26b25",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
             "crates/league-scorer/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs",
             "crates/league-eval/src/error.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/reply.rs",
             "crates/league-eval/src/talk_extract.rs",
-            "crates/league-eval/src/wording.rs",
-            "crates/league-seat-types/src/lib.rs"
+            "crates/league-eval/src/wording.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
@@ -6155,7 +6155,7 @@
           "testsInside": true
         },
         {
-          "hash": "4b3d1345933f17f8cba49c334574b9afaf1f9af2896053a6284e7b8049b14825",
+          "hash": "07aed6b2511b37460dab162a203f81ac37695b8ad86c64d80b6aa65d53891844",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -17698,7 +17698,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "efd4d03ac026129011ba00c023fb77f87cb8918747994e09d7b44f0a312e730c",
+          "hash": "9c36544f8373474c2e5824b0bd9c113d734a4250edae6b66e4c73df5de4a9c8d",
           "path": "CHANGELOG.md"
         },
         {
@@ -18228,6 +18228,13 @@
         {
           "job": "check",
           "matched": true,
+          "path": "crates/league-core/src/commit.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
           "path": "crates/league-core/src/engine.rs",
           "runKind": "executes",
           "via": "cargo test"
@@ -18243,13 +18250,6 @@
           "job": "check",
           "matched": true,
           "path": "crates/league-core/src/eval/host.rs",
-          "runKind": "executes",
-          "via": "cargo test"
-        },
-        {
-          "job": "check",
-          "matched": true,
-          "path": "crates/league-core/src/eval/mod.rs",
           "runKind": "executes",
           "via": "cargo test"
         },
@@ -19613,7 +19613,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "415c4d13e929c908a3ccac9dc7921f90231a2fdc",
+    "commit": "0dc654137b9436cdd3053b62e2f2cee040b3e7bc",
     "tracked": 667
   },
   "landings": [
