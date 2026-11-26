@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-There is no release to install yet. Everything here builds the workspace from source.
+Releases are source-only tags, with nothing to install. Everything here builds the workspace from source.
 
 ## What you need
 

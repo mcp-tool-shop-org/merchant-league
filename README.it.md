@@ -40,13 +40,18 @@ Entrambe le modalità condividono lo stesso motore di gioco. Una partita viene r
 
 | Pacchetto | A cosa serve |
 | --- | --- |
-| `league-core` | Il motore di gioco: le fasi del turno, i contratti, il punteggio, la fine della stagione, il replay e i predicati di stato alla base del sistema di suggerimenti previsto |
-| `league-gen` | Il generatore di tavoli, con i suoi controlli di equità e i suoi pool di semi |
-| `league-ledger` | Il client XRPL Testnet. Rifiuta qualsiasi rete diversa dalla Testnet |
-| `league-standalone` | L'ambiente `xrpld` autonomo per la modalità di addestramento, in un container con risorse limitate e configurazione fissa |
-| `league-season` | Le date di ripristino annunciate della Testnet e un controllo che individua un ripristino non annunciato |
-| `league-relay` | Lo strumento che ha eseguito i test su carta con giocatori AI |
-| `league-tui` | L'host del terminale per la modalità Club offline: configurazione della lobby, turni hot-seat a quattro zone, sipario della privacy con PIN opzionali, passaggi a tempo, salvataggio/ripresa a metà turno, classifica di fine stagione ed esportazione del replay |
+| `league-core` | Il motore delle regole: fasi del turno, contratti, punteggio, chiusura della stagione, replay, predicati di stato e gli host di sessione isolati `ClubHost` / `EvalHost` |
+| `league-error` | Rappresentazione condivisa `#![no_std]` degli errori strutturati e ripulitura di credenziali e segreti nel testo |
+| `league-seat-types` | Osservazioni sicure per ogni posto `#![no_std]`, DTO di anteprima, intenzioni di turno e modelli di vista delle schermate del terminale |
+| `league-seat-ui` | Renderer `#![no_std]` delle schermate di lobby, composizione, rivelazione e fine stagione della modalità Club, e la macchina a stati dei tasti |
+| `league-gen` | Il generatore di tavoli, con i controlli di equità, il glossario delle merci e i pool di semi |
+| `league-ledger` | Il client XRPL Testnet. Rifiuta qualsiasi rete che non sia la Testnet |
+| `league-standalone` | Il banco `xrpld` autonomo per la modalità di addestramento, in un container fissato e con risorse limitate |
+| `league-season` | Le date di reset annunciate della Testnet e un controllo che individua un reset non annunciato |
+| `league-relay` | Il relay HTTP automatizzato dei posti IA (`local` compatibile con OpenAI e `openrouter`), filtri rigorosi di token e ripulitura, `eval_mode` e i bracci `--preview-tool <off\|control\|on>` |
+| `league-eval` | Il banco della modalità Valutazione (`play`, `branch`, `select`), con applicazione del wrapper di posto fissato, controlli `--serving-manifest` all’avvio e registrazione degli input di rimpianto per decisione, più i comandi di punteggio alla cieca `build-blind-inputs`, `verify-checkpoints`, `freeze` e `join` |
+| `league-scorer` | Il valutatore di decisioni deterministico e cieco ai bracci per la modalità Valutazione (`candidates`, `score`); non dipende da `league-eval` né da `league-relay` |
+| `league-tui` | L’host da terminale offline della modalità Club: configurazione della lobby, turni a posto condiviso su quattro zone, tendina della privacy con PIN facoltativi, passaggi a tempo, salvataggio e ripresa a metà turno, classifica di fine stagione ed esportazione dei replay |
 
 ## Gioca una stagione
 
@@ -124,7 +129,7 @@ Consulta [`SECURITY.md`](SECURITY.md) per il modello di minaccia e per sapere co
 
 ## Supporto
 
-Questo è un prototipo in fase di progettazione attiva. Segnalazioni di problemi e idee sono benvenute sul [tracker dei problemi](https://github.com/mcp-tool-shop-org/merchant-league/issues). Non ci sono ancora versioni e non ci sono garanzie di supporto. Consulta il [REGISTRO DELLE MODIFICHE](CHANGELOG.md) per i progressi.
+Questo è un prototipo in fase di progettazione attiva. Segnalazioni di problemi e idee sono benvenute sul [tracker dei problemi](https://github.com/mcp-tool-shop-org/merchant-league/issues). Le versioni con tag sono prototipi di solo codice sorgente, senza garanzie di supporto. Consulta il [REGISTRO DELLE MODIFICHE](CHANGELOG.md) per i progressi.
 
 ## Licenza
 
