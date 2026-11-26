@@ -654,6 +654,43 @@ fn play_mode_refuses_communication_silent_with_exit_1() -> Result<(), Box<dyn st
 // 3. Full-season Talk byte-identity vs d902d04 golden fixture
 // ============================================================================
 
+const ML_D902D04_PARITY_GAME_DIR_ENV: &str = "ML_D902D04_PARITY_GAME_DIR";
+const ML_D902D04_PARITY_TMP_DIR_ENV: &str = "ML_D902D04_PARITY_TMP_DIR";
+
+#[test]
+fn d902d04_talk_parity_child_helper() {
+    let Ok(game_dir_raw) = std::env::var(ML_D902D04_PARITY_GAME_DIR_ENV) else {
+        return;
+    };
+    let tmp_dir_raw = must_ok(
+        std::env::var(ML_D902D04_PARITY_TMP_DIR_ENV),
+        "read d902d04 parity tmp dir env",
+    );
+    let game_dir = PathBuf::from(game_dir_raw);
+    let tmp = PathBuf::from(tmp_dir_raw);
+    let wrapper = write_wrapper_for(&tmp, CommunicationMode::Talk);
+    let seats_path = tmp.join("seats.json");
+    let mut opts = default_play_opts(
+        game_dir,
+        seats_path,
+        wrapper,
+        None,
+        EvalArm::Off,
+        HARD_TURN_CAP,
+    );
+    opts.table_id = 77;
+
+    let _manifest = must_ok(
+        run_play_with_transport_and_git_sha(
+            &opts,
+            &NoopTransport,
+            None,
+            &injected_git_sha(D902D04_GIT_SHA),
+        ),
+        "run hermetic d902d04 parity child",
+    );
+}
+
 #[test]
 fn talk_full_season_byte_identical_to_d902d04() -> Result<(), Box<dyn std::error::Error>> {
     let fixture_root =
@@ -667,27 +704,40 @@ fn talk_full_season_byte_identical_to_d902d04() -> Result<(), Box<dyn std::error
     for name in ["eval-77.save.json", "eval-77.seal", "setup.json"] {
         fs::copy(turn0_dir.join(name), game_dir.join(name))?;
     }
+    fs::copy(fixture_root.join("seats.json"), tmp.join("seats.json"))?;
 
-    let wrapper = write_wrapper_for(&tmp, CommunicationMode::Talk);
-    let seats_path = tmp.join("seats.json");
-    fs::copy(fixture_root.join("seats.json"), &seats_path)?;
-
-    let mut opts = default_play_opts(
-        game_dir.clone(),
-        seats_path,
-        wrapper,
-        None,
-        EvalArm::Off,
-        HARD_TURN_CAP,
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.stdin(std::process::Stdio::null())
+        .args(["--exact", "d902d04_talk_parity_child_helper", "--nocapture"])
+        .env(ML_D902D04_PARITY_GAME_DIR_ENV, &game_dir)
+        .env(ML_D902D04_PARITY_TMP_DIR_ENV, &tmp);
+    for (k, _) in std::env::vars() {
+        let upper = k.to_ascii_uppercase();
+        if upper.starts_with("LLAMA_")
+            || upper.starts_with("CUDA_")
+            || upper.starts_with("GGML_")
+            || upper.starts_with("VLLM_")
+            || matches!(
+                upper.as_str(),
+                "OPENROUTER_API_KEY"
+                    | "OPENAI_API_KEY"
+                    | "ANTHROPIC_API_KEY"
+                    | "GEMINI_API_KEY"
+                    | "XAI_API_KEY"
+            )
+        {
+            cmd.env_remove(&k);
+        }
+    }
+    let child_out = cmd.output()?;
+    assert!(
+        child_out.status.success(),
+        "d902d04 parity child failed ({:?}):\nstdout:\n{}\nstderr:\n{}",
+        child_out.status.code(),
+        String::from_utf8_lossy(&child_out.stdout),
+        String::from_utf8_lossy(&child_out.stderr),
     );
-    opts.table_id = 77;
-
-    let _manifest = run_play_with_transport_and_git_sha(
-        &opts,
-        &NoopTransport,
-        None,
-        &injected_git_sha(D902D04_GIT_SHA),
-    )?;
 
     let actual_files = walk_files(&game_dir);
     let mut expected_rows = BTreeMap::new();

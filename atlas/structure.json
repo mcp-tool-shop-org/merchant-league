@@ -6087,7 +6087,7 @@
           "testsInside": true
         },
         {
-          "hash": "81019b6994c173d882b852de944a3fe230a2479ac25a456151d438bdc03c72fe",
+          "hash": "e17d4478ba2c8e21ad315fef259b2ca3207f43ed2c26a5ec4b1794aa334794d1",
           "path": "crates/league-eval/tests/fixtures/d902d04_talk_turn0/d902d04_manifest.tsv"
         },
         {
@@ -6155,7 +6155,7 @@
           "testsInside": true
         },
         {
-          "hash": "07aed6b2511b37460dab162a203f81ac37695b8ad86c64d80b6aa65d53891844",
+          "hash": "c615ca0d3c12da2ee08cd9df04669a9e9358d1e4ee969752fafd2d74fe5cb22e",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -19613,7 +19613,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "0dc654137b9436cdd3053b62e2f2cee040b3e7bc",
+    "commit": "37c6029a82870d8ab0c545c5ef81ba93cbbd5524",
     "tracked": 667
   },
   "landings": [
