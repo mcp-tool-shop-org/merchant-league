@@ -15,7 +15,9 @@ pub mod freeze_gate;
 pub mod mechanisms;
 pub mod records;
 pub mod reply;
+pub mod report;
 pub mod schema;
+pub mod seed_block;
 pub mod select;
 pub mod serving;
 pub mod talk_extract;
@@ -75,9 +77,21 @@ pub use reply::{
     ReplyRefusalCode, parse_eval_act_reply, parse_eval_act_reply_for_communication,
     parse_eval_silent_act_reply, parse_eval_talk_reply,
 };
+pub use report::{
+    DEFAULT_REPORT_BOOTSTRAP_SAMPLES, DEFAULT_REPORT_BOOTSTRAP_SEED, DEFAULT_REPORT_CI_LEVEL,
+    EXACT_SIGN_FLIP_MAX_SEEDS, EvalBranchReport, EvalReportResult, REPORT_BOOTSTRAP_RNG_DOMAIN,
+    REPORT_SCHEMA_VERSION, REPORT_SIGN_FLIP_RNG_DOMAIN, ReportArmSummary, ReportOptions,
+    ReportOutputFormat, ReportPairwiseContrast, SeedClusterDiff,
+    compute_pairwise_contrast_from_seed_diffs, render_report_text, run_report,
+};
 pub use schema::{
     build_eval_response_format_config, build_eval_response_format_value,
     build_eval_silent_response_format_config, build_eval_silent_response_format_value,
+};
+pub use seed_block::{
+    DEFAULT_SEED_BLOCK_RNG_SEED, SEED_BLOCK_RNG_DOMAIN, SEED_BLOCK_SCHEMA_VERSION,
+    SeedBlockEntrant, SeedBlockEntry, SeedBlockGameSpec, SeedBlockManifest, SeedBlockOptions,
+    build_seed_latin_square, run_seed_block, verify_latin_square_4x4,
 };
 pub use select::{
     SelectOptions, SelectedPreActState, SelectionList, TurnStratum, expand_home_path,

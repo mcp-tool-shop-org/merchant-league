@@ -49,7 +49,7 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | `league-standalone` | The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container |
 | `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset |
 | `league-relay` | The automated AI-seat HTTP relay (`local` OpenAI-compatible and `openrouter`), strict token/scrubber filters, `eval_mode`, and `--preview-tool <off\|control\|on>` arms |
-| `league-eval` | The Evaluation Mode harness (`play`, `branch`, `select` across `talk` and `--communication silent` conditions, plus `"ClubBot"`, `"random-legal"`, `"always-defect"`, and `"tit-for-tat"` baselines), pinned seat wrapper enforcement, `--serving-manifest` startup checks, and per-decision regret-input logging, plus the blind-scoring commands `build-blind-inputs`, `verify-checkpoints`, `freeze`, and `join` |
+| `league-eval` | The Evaluation Mode harness (`play`, `branch`, `select` across `talk` and `--communication silent` conditions, plus `"ClubBot"`, `"random-legal"`, `"always-defect"`, and `"tit-for-tat"` baselines), 4-seat Latin-square `seed-block` manifest generator, pinned seat wrapper enforcement, `--serving-manifest` startup checks, and per-decision regret-input logging, plus `build-blind-inputs`, `verify-checkpoints`, `freeze`, `join`, and seed-clustered `report` |
 | `league-scorer` | The arm-blind, deterministic decision scorer for Evaluation Mode (`candidates`, `score`); it does not depend on `league-eval` or `league-relay` |
 | `league-tui` | The offline Club Mode terminal host: Lobby setup, four-zone hot-seat turns, Privacy Curtain with optional PINs, timed passes, mid-turn save/resume, end-of-season scoreboard, and replay export |
 

@@ -1096,11 +1096,22 @@ fn run_scrubbed_parity_child(
     Ok(())
 }
 
+const MODEL_TURN1_RUN_VARYING_FILES: [&str; 7] = [
+    "decisions/day-01-act-Foundry.json",
+    "decisions/day-01-talk-Foundry.json",
+    "relay/calls.jsonl",
+    "relay/seats/Foundry.day-01-act.http-reply-round-0-attempt-1.json",
+    "relay/seats/Foundry.day-01-act.http-reply-round-1-attempt-1.json",
+    "relay/seats/Foundry.day-01-act.tool-round-0.json",
+    "relay/seats/Foundry.day-01-talk.http-reply-round-0-attempt-1.json",
+];
+
 fn assert_manifest_tsv_matches(
     game_dir: &Path,
     manifest_tsv: &str,
     expected_len: Option<usize>,
     allow_extra: bool,
+    allowed_extra_files: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let actual_files = walk_files(game_dir);
     let mut expected_rows = BTreeMap::new();
@@ -1114,12 +1125,24 @@ fn assert_manifest_tsv_matches(
         assert_eq!(expected_rows.len(), n, "expected {n} golden files");
     }
     if !allow_extra {
-        let actual_keys: BTreeSet<&String> = actual_files.keys().collect();
-        let expected_keys: BTreeSet<&String> = expected_rows.keys().collect();
-        assert_eq!(
-            actual_keys, expected_keys,
-            "relative file tree diverged from d902d04"
-        );
+        let mut expected_keys: BTreeSet<&str> = expected_rows.keys().map(String::as_str).collect();
+        for &extra in allowed_extra_files {
+            if !expected_keys.insert(extra) {
+                return Err(
+                    format!("allowed_extra_files repeats or overlaps golden key {extra}").into(),
+                );
+            }
+            if !actual_files.contains_key(extra) {
+                return Err(format!("expected run-varying file {extra} is missing").into());
+            }
+        }
+        let actual_keys: BTreeSet<&str> = actual_files.keys().map(String::as_str).collect();
+        if actual_keys != expected_keys {
+            return Err(format!(
+                "relative file tree diverged from d902d04: actual={actual_keys:?}, expected={expected_keys:?}"
+            )
+            .into());
+        }
     }
     for (rel, (exp_len, exp_sha)) in &expected_rows {
         let bytes = actual_files
@@ -1193,7 +1216,7 @@ fn talk_full_season_byte_identical_to_d902d04() -> Result<(), Box<dyn std::error
         ],
     )?;
 
-    assert_manifest_tsv_matches(&game_dir, &manifest_tsv, Some(730), false)?;
+    assert_manifest_tsv_matches(&game_dir, &manifest_tsv, Some(730), false, &[])?;
     Ok(())
 }
 
@@ -1259,7 +1282,13 @@ fn talk_model_seat_turn1_byte_identical_to_d902d04() -> Result<(), Box<dyn std::
         ],
     )?;
 
-    assert_manifest_tsv_matches(&game_dir, &manifest_tsv, Some(33), true)?;
+    assert_manifest_tsv_matches(
+        &game_dir,
+        &manifest_tsv,
+        Some(33),
+        false,
+        &MODEL_TURN1_RUN_VARYING_FILES,
+    )?;
 
     // Check explicit prompt, schema, and relay transcript goldens byte-for-byte.
     for rel in [
@@ -1317,6 +1346,24 @@ fn talk_model_seat_turn1_byte_identical_to_d902d04() -> Result<(), Box<dyn std::
             "decision record {rel} diverged from d902d04 golden"
         );
     }
+
+    // Prove an unlisted 8th extra file fails strict `allow_extra = false` checking.
+    let stray_eighth = game_dir.join("relay/unlisted-eighth-file.tmp");
+    fs::write(&stray_eighth, b"stray")?;
+    let Err(err) = assert_manifest_tsv_matches(
+        &game_dir,
+        &manifest_tsv,
+        Some(33),
+        false,
+        &MODEL_TURN1_RUN_VARYING_FILES,
+    ) else {
+        panic!("unlisted 8th extra file must fail strict golden tree comparison");
+    };
+    assert!(
+        err.to_string().contains("unlisted-eighth-file.tmp"),
+        "unexpected error for stray 8th file: {err}"
+    );
+    fs::remove_file(&stray_eighth)?;
 
     Ok(())
 }
@@ -2404,6 +2451,29 @@ fn tit_for_tat_ignores_peer_decisions_from_seat_and_relay() -> Result<(), Box<dy
     let to_clean = tmp_clean.join("to-seat");
     write_own_to_seat(&to_clean, true)?;
 
+    // Planted peer poison whispers must also match talk_rules_v2 and be applicable in Turn 1.
+    assert!(
+        obs_t1.seats[2].cred >= 2 * UNIT_SCALE && obs_t1.seats[3].cred >= 2 * UNIT_SCALE,
+        "expected Harbor and Mint to hold >= 2 cred on Turn 1"
+    );
+    let poison_harbor_whisper = UntrustedWhisper {
+        from_guild: "Harbor".to_owned(),
+        intent_header: None,
+        body: "i will buy 1 raw_0 at 2 cred.".to_owned(),
+    };
+    let poison_mint_whisper = UntrustedWhisper {
+        from_guild: "Mint".to_owned(),
+        intent_header: None,
+        body: "i will buy 1 raw_0 at 2 cred.".to_owned(),
+    };
+    let poison_extracted = extract_talk_commitments_from_messages(
+        0,
+        &guilds,
+        &[(2, 0, poison_harbor_whisper.body.clone())],
+        &obs_t2,
+    )?;
+    assert_eq!(poison_extracted.len(), 1);
+
     let tmp_poison = fresh_tmp_dir("tft_poison");
     let to_poison = tmp_poison.join("to-seat");
     write_own_to_seat(&to_poison, true)?;
@@ -2412,42 +2482,43 @@ fn tit_for_tat_ignores_peer_decisions_from_seat_and_relay() -> Result<(), Box<dy
         to_poison.join("day-01-act-Quarry.negotiation.json"),
         serde_json::to_string_pretty(&NegotiationInputs {
             batna: "n".to_owned(),
-            whispers: vec![UntrustedWhisper {
-                from_guild: "Harbor".to_owned(),
-                intent_header: None,
-                body: "i will sell 1 raw_2 at 2 cred.".to_owned(),
-            }],
+            whispers: vec![poison_harbor_whisper.clone()],
         })?,
     )?;
     fs::write(
         to_poison.join("day-01-act-Harbor.negotiation.json"),
         serde_json::to_string_pretty(&NegotiationInputs {
             batna: "n".to_owned(),
-            whispers: vec![UntrustedWhisper {
-                from_guild: "Mint".to_owned(),
-                intent_header: None,
-                body: "i will sell 1 raw_3 at 2 cred.".to_owned(),
-            }],
+            whispers: vec![poison_mint_whisper.clone()],
         })?,
     )?;
     fs::create_dir_all(tmp_poison.join("decisions"))?;
     fs::write(
         tmp_poison.join("decisions/day-01-talk-Quarry.json"),
-        r#"{"messages":[{"to_guild":"Harbor","body":"i will sell 1 raw_1 at 2 cred."}]}"#,
+        serde_json::to_string(&serde_json::json!({
+            "messages": [{ "to_guild": "Harbor", "body": poison_harbor_whisper.body }]
+        }))?,
     )?;
     fs::create_dir_all(tmp_poison.join("from-seat"))?;
     fs::write(
         tmp_poison.join("from-seat/day-01-talk-Quarry.json"),
-        r#"{"messages":[{"to_guild":"Mint","body":"i will sell 1 raw_1 at 2 cred."}]}"#,
+        serde_json::to_string(&serde_json::json!({
+            "messages": [{ "to_guild": "Mint", "body": poison_harbor_whisper.body }]
+        }))?,
     )?;
     fs::write(
         tmp_poison.join("from-seat/day-01-talk-Mint.md"),
-        r#"{"messages":[{"to_guild":"Quarry","body":"i will sell 1 raw_3 at 2 cred."}]}"#,
+        serde_json::to_string(&serde_json::json!({
+            "messages": [{ "to_guild": "Quarry", "body": poison_mint_whisper.body }]
+        }))?,
     )?;
     fs::create_dir_all(tmp_poison.join("relay/seats"))?;
     fs::write(
         tmp_poison.join("relay/seats/Quarry.jsonl"),
-        "{\"role\":\"assistant\",\"content\":\"i will sell 1 raw_1 at 2 cred.\"}\n",
+        serde_json::to_string(&serde_json::json!({
+            "role": "assistant",
+            "content": poison_harbor_whisper.body,
+        }))? + "\n",
     )?;
 
     let h_clean = OwnToSeatHistory::load(&to_clean, "Foundry", obs_t2.turn)?;
@@ -2457,7 +2528,7 @@ fn tit_for_tat_ignores_peer_decisions_from_seat_and_relay() -> Result<(), Box<dy
     let sub_poison = decide_tit_for_tat_act(5555, &h_poison, &obs_t2, &mandate, &guilds)?;
     assert_eq!(sub_clean, sub_poison);
 
-    // Positive control: altering Foundry's OWN Turn-1 `negotiation.json` (removing Quarry's
+    // Positive control 1 (removal): altering Foundry's OWN Turn-1 `negotiation.json` (removing Quarry's
     // broken Turn-1 promise) flips Quarry from Defect -> Cooperate and changes Turn-2 orders!
     let tmp_own_changed = fresh_tmp_dir("tft_own_changed");
     let to_own_changed = tmp_own_changed.join("to-seat");
@@ -2466,12 +2537,43 @@ fn tit_for_tat_ignores_peer_decisions_from_seat_and_relay() -> Result<(), Box<dy
     let stances_clean = compute_tit_for_tat_stances(&h_clean, &obs_t2, &guilds)?;
     let stances_own_changed = compute_tit_for_tat_stances(&h_own_changed, &obs_t2, &guilds)?;
     assert_eq!(stances_clean.get(&1), Some(&PeerStance::Defect));
+    assert_eq!(stances_clean.get(&2), Some(&PeerStance::Cooperate));
     assert_eq!(stances_own_changed.get(&1), Some(&PeerStance::Cooperate));
 
     let sub_own_changed = decide_tit_for_tat_act(5555, &h_own_changed, &obs_t2, &mandate, &guilds)?;
     assert_ne!(
         sub_clean, sub_own_changed,
         "positive control failed: changing own-seat Turn-1 negotiation.json must change Turn-2 decision"
+    );
+
+    // Positive control 2 ("poison bites"): routing the exact planted peer poison payload into
+    // Foundry's OWN Turn-1 `negotiation.json` flips Harbor (seat 2) from Cooperate -> Defect and
+    // changes Turn-2 orders!
+    let tmp_poison_bites = fresh_tmp_dir("tft_poison_bites");
+    let to_poison_bites = tmp_poison_bites.join("to-seat");
+    write_own_to_seat(&to_poison_bites, true)?;
+    fs::write(
+        to_poison_bites.join("day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "n".to_owned(),
+            whispers: vec![
+                UntrustedWhisper {
+                    from_guild: "Quarry".to_owned(),
+                    intent_header: None,
+                    body: planted_quarry_promise.to_owned(),
+                },
+                poison_harbor_whisper,
+            ],
+        })?,
+    )?;
+    let h_poison_bites = OwnToSeatHistory::load(&to_poison_bites, "Foundry", obs_t2.turn)?;
+    let stances_poison_bites = compute_tit_for_tat_stances(&h_poison_bites, &obs_t2, &guilds)?;
+    assert_eq!(stances_poison_bites.get(&2), Some(&PeerStance::Defect));
+    let sub_poison_bites =
+        decide_tit_for_tat_act(5555, &h_poison_bites, &obs_t2, &mandate, &guilds)?;
+    assert_ne!(
+        sub_clean, sub_poison_bites,
+        "poison-bites proof failed: planted peer payload routed to Foundry's own negotiation.json must change Turn-2 decision"
     );
 
     Ok(())
