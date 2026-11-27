@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-27 from commit 7ec3a14 by Atlas 1.26.0.
+Mapped at 2026-11-27 from commit 4b1d3d9 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,13 +8,14 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 16 parts, mostly Rust (419 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-27 (3310884)
+## What changed since 2026-11-27 (7ec3a14)
 
-Nothing structural changed since 2026-11-27; 9 files changed content.
+- CI's push trigger now also names `codecov.yml`.
+- 1 file added and 2 changed content, across 2 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 15 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 83 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
+1. **CI.** On a pull request; on a push to main touching 16 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 83 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-eval** (a command people run). Runs crates/league-eval/src/main.rs.
 4. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
@@ -29,6 +30,7 @@ Nothing structural changed since 2026-11-27; 9 files changed content.
 
 1. The workflow runs 6 files in scripts, 19 files in league-core, crates/league-error/ in league-error, 17 files in league-eval, 10 files in league-gen, and 32 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
 2. It writes to site/audit-report.json, which is not tracked.
+3. It uploads coverage to Codecov.
 
 ## Who reads the results
 

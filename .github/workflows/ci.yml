@@ -23,6 +23,7 @@ on:
       - "SECURITY.md"
       - "docs/**"
       - "site/**"
+      - "codecov.yml"
       - ".github/workflows/**"
   pull_request:
   workflow_dispatch:
@@ -38,6 +39,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # id-token is for the Codecov upload (OIDC, no stored token), in this job only.
+    permissions:
+      contents: read
+      id-token: write
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
@@ -138,12 +143,24 @@ jobs:
       - name: Test (doc tests)
         run: cargo test --workspace --locked --doc
 
-      # Coverage floor 92, raised for Card 5 Part B2b (CI measured 92.16% lines). Never
-      # lowered to make a build green.
+      # Coverage floor 92 (max(90, measured); CI measured 92.18% lines on #118).
+      # Never lowered to make a build green; patch coverage >= 90% via Codecov.
       - name: Coverage
         run: |
           command -v cargo-llvm-cov >/dev/null || cargo install cargo-llvm-cov --locked --version "0.9.1"
-          cargo llvm-cov --workspace --locked --fail-under-lines 92
+          cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+          cargo llvm-cov report --fail-under-lines 92
+
+      # Fork pull requests get no OIDC token; the upload is skipped for them.
+      - name: Upload coverage to Codecov
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          version: v11.3.1
+          use_oidc: true
+          fail_ci_if_error: false
+          disable_search: true
+          files: lcov.info
 
       - name: Testnet only
         run: bash scripts/check-testnet-only.sh

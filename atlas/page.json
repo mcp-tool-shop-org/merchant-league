@@ -102,24 +102,31 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 9,
+      "added": 1,
+      "changed": 2,
       "moved": 0,
-      "parts": 5,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI's push trigger now also names `codecov.yml`.",
+        "subjects": [
+          ".github/workflows/ci.yml"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-27; 9 files changed content.",
+        "sentence": "1 file added and 2 changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "3310884bb60e11619a96ef372c8aea333aef8b39",
-      "generatedAt": "2026-11-27T14:16:39.027Z"
+      "commit": "7ec3a142b12ae7c7509890addf1276f4dd27dd55",
+      "generatedAt": "2026-11-27T15:49:22.190Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -203,7 +210,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "7ec3a142b12ae7c7509890addf1276f4dd27dd55",
+  "commit": "4b1d3d940e7aa613e84d2c5b8d441e6d7fcdf9fc",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (419 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -349,11 +356,13 @@
       ],
       "runsCount": 54,
       "runsMore": 83,
-      "sends": [],
+      "sends": [
+        "uploads coverage to Codecov"
+      ],
       "stages": [],
       "triggers": [
         "on a pull request",
-        "on a push to main touching 15 paths",
+        "on a push to main touching 16 paths",
         "or by hand"
       ],
       "untracked": "site/audit-report.json, which is not tracked"
@@ -751,7 +760,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-27T15:49:22.190Z",
+  "generatedAt": "2026-11-27T16:53:16.604Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "53 writes and 67 reads use paths built at run time and are not named here.",
