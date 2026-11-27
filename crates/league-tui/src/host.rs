@@ -650,14 +650,10 @@ const fn map_color(color: ViewColor) -> Color {
     }
 }
 
-fn map_style_with_no_color(style: ViewStyle, no_color: bool) -> Style {
-    let mut out = if no_color {
-        Style::default().fg(Color::Reset).bg(Color::Reset)
-    } else {
-        Style::default()
-            .fg(map_color(style.fg))
-            .bg(map_color(style.bg))
-    };
+fn map_style(style: ViewStyle) -> Style {
+    let mut out = Style::default()
+        .fg(map_color(style.fg))
+        .bg(map_color(style.bg));
     if style.bold {
         out = out.add_modifier(Modifier::BOLD);
     }
@@ -674,11 +670,6 @@ fn map_style_with_no_color(style: ViewStyle, no_color: bool) -> Style {
         out = out.add_modifier(Modifier::REVERSED);
     }
     out
-}
-
-#[cfg(test)]
-fn map_style(style: ViewStyle) -> Style {
-    map_style_with_no_color(style, false)
 }
 
 const fn map_align(align: ViewAlign) -> Alignment {
@@ -705,7 +696,7 @@ const fn map_axis(axis: ViewAxis) -> Direction {
     }
 }
 
-fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar, no_color: bool) -> u16 {
+fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar) -> u16 {
     if area.width == 0 || area.height == 0 || tab_bar.tabs.is_empty() {
         return 0;
     }
@@ -732,17 +723,11 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar, no_co
                 current.push(Span::raw(" | "));
                 line_width += 3;
             }
-            let mut st = map_style_with_no_color(item.label.style, no_color);
+            let mut st = map_style(item.label.style);
             if idx == tab_bar.active_index {
                 st = st.add_modifier(Modifier::BOLD | Modifier::REVERSED);
-                if !no_color {
-                    st = st.fg(Color::Cyan);
-                }
             } else if !item.enabled {
                 st = st.add_modifier(Modifier::DIM);
-                if !no_color {
-                    st = st.fg(Color::DarkGray);
-                }
             }
             let safe_chip = strip_terminal_controls(&chip);
             line_width += safe_chip.chars().count();
@@ -771,7 +756,6 @@ fn render_view_table(
     area: Rect,
     table: &ViewTable,
     skip_rows: usize,
-    no_color: bool,
 ) -> u16 {
     if area.width == 0
         || area.height < 2
@@ -816,8 +800,7 @@ fn render_view_table(
             Cell::from(
                 Line::from(Span::styled(
                     text,
-                    map_style_with_no_color(col.header.style, no_color)
-                        .add_modifier(Modifier::BOLD),
+                    map_style(col.header.style).add_modifier(Modifier::BOLD),
                 ))
                 .alignment(map_align(col.alignment)),
             )
@@ -849,7 +832,7 @@ fn render_view_table(
                         cell.spans
                             .iter()
                             .map(|sp| {
-                                let mut st = map_style_with_no_color(sp.style, no_color);
+                                let mut st = map_style(sp.style);
                                 if selected {
                                     st = st.add_modifier(Modifier::REVERSED);
                                 }
@@ -859,9 +842,10 @@ fn render_view_table(
                     } else {
                         let combined: String =
                             cell.spans.iter().map(|sp| sp.text.as_str()).collect();
-                        let mut st = cell.spans.first().map_or_else(Style::default, |sp| {
-                            map_style_with_no_color(sp.style, no_color)
-                        });
+                        let mut st = cell
+                            .spans
+                            .first()
+                            .map_or_else(Style::default, |sp| map_style(sp.style));
                         if selected {
                             st = st.add_modifier(Modifier::REVERSED);
                         }
@@ -872,9 +856,7 @@ fn render_view_table(
                 .collect();
             let mut r = Row::new(cells);
             if selected {
-                r = r.style(
-                    map_style_with_no_color(row.style, no_color).add_modifier(Modifier::BOLD),
-                );
+                r = r.style(map_style(row.style).add_modifier(Modifier::BOLD));
             }
             r
         })
@@ -884,7 +866,7 @@ fn render_view_table(
     allocated
 }
 
-fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel, no_color: bool) {
+fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -896,7 +878,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel, no_co
         if let Some(title) = &panel.title {
             block = block.title(Span::styled(
                 strip_terminal_controls(&title.text),
-                map_style_with_no_color(title.style, no_color),
+                map_style(title.style),
             ));
         }
         let inner_rect = block.inner(area);
@@ -911,7 +893,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel, no_co
     }
 
     if let Some(tab_bar) = &panel.tabs {
-        let used = render_tab_bar(frame, inner, tab_bar, no_color);
+        let used = render_tab_bar(frame, inner, tab_bar);
         inner.y = inner.y.saturating_add(used);
         inner.height = inner.height.saturating_sub(used);
     }
@@ -923,7 +905,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel, no_co
     let row_offset = if let Some(table) = &panel.table {
         let t_len = table.rows.len();
         if offset < t_len {
-            let used = render_view_table(frame, inner, table, offset, no_color);
+            let used = render_view_table(frame, inner, table, offset);
             inner.y = inner.y.saturating_add(used);
             inner.height = inner.height.saturating_sub(used);
             0
@@ -949,7 +931,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel, no_co
                 .spans
                 .iter()
                 .map(|span| {
-                    let mut st = map_style_with_no_color(span.style, no_color);
+                    let mut st = map_style(span.style);
                     if is_selected {
                         st = st.add_modifier(Modifier::REVERSED);
                     }
@@ -963,7 +945,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel, no_co
     frame.render_widget(paragraph, inner);
 }
 
-fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView, no_color: bool) {
+fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -974,33 +956,18 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView, 
         alert
             .spans
             .iter()
-            .map(|sp| {
-                Span::styled(
-                    strip_terminal_controls(&sp.text),
-                    map_style_with_no_color(sp.style, no_color),
-                )
-            })
+            .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
             .collect()
     });
     let left_spans: Vec<Span<'_>> = status
         .left
         .iter()
-        .map(|sp| {
-            Span::styled(
-                strip_terminal_controls(&sp.text),
-                map_style_with_no_color(sp.style, no_color),
-            )
-        })
+        .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
         .collect();
     let right_spans: Vec<Span<'_>> = status
         .right
         .iter()
-        .map(|sp| {
-            Span::styled(
-                strip_terminal_controls(&sp.text),
-                map_style_with_no_color(sp.style, no_color),
-            )
-        })
+        .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
         .collect();
 
     let lines = if area.height >= 2 {
@@ -1015,20 +982,14 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView, 
         if let Some(alert) = alert_spans {
             combined.extend(alert);
             if !left_spans.is_empty() {
-                combined.push(Span::styled(
-                    " | ",
-                    map_style_with_no_color(status.style, no_color),
-                ));
+                combined.push(Span::styled(" | ", map_style(status.style)));
                 combined.extend(left_spans);
             }
         } else {
             combined.extend(left_spans);
             if !right_spans.is_empty() {
                 if !combined.is_empty() {
-                    combined.push(Span::styled(
-                        " | ",
-                        map_style_with_no_color(status.style, no_color),
-                    ));
+                    combined.push(Span::styled(" | ", map_style(status.style)));
                 }
                 combined.extend(right_spans);
             }
@@ -1037,30 +998,19 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView, 
     };
 
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(map_style_with_no_color(status.style, no_color)),
+        Paragraph::new(Text::from(lines)).style(map_style(status.style)),
         area,
     );
 }
 
 /// Draws a plain [`SeatScreenView`] view model emitted by `league-seat-ui` using `ratatui`.
-#[cfg(test)]
 pub(crate) fn draw_screen_view(frame: &mut Frame<'_>, view: &SeatScreenView) {
-    draw_screen_view_with_options(frame, view, false);
-}
-
-/// Draws a plain [`SeatScreenView`] with explicit `no_color` suppression across every span and
-/// border (`NO_COLOR` / `--no-color`).
-pub(crate) fn draw_screen_view_with_options(
-    frame: &mut Frame<'_>,
-    view: &SeatScreenView,
-    no_color: bool,
-) {
     let full_area = frame.area();
     frame.render_widget(Clear, full_area);
 
     if view.layout.mode == ViewLayoutMode::TooSmall || view.layout.bands.is_empty() {
         if let Some(zone) = view.zones.first() {
-            render_view_panel(frame, full_area, &zone.panel, no_color);
+            render_view_panel(frame, full_area, &zone.panel);
         }
         return;
     }
@@ -1092,9 +1042,9 @@ pub(crate) fn draw_screen_view_with_options(
 
         for (zone_rect, spec) in zone_rects.iter().copied().zip(band.zones.iter()) {
             if spec.zone == ViewZoneId::StatusLine {
-                render_status_line(frame, zone_rect, view, no_color);
+                render_status_line(frame, zone_rect, view);
             } else if let Some(panel) = view.zone(spec.zone) {
-                render_view_panel(frame, zone_rect, panel, no_color);
+                render_view_panel(frame, zone_rect, panel);
             }
         }
     }
@@ -1113,7 +1063,7 @@ pub(crate) fn draw_screen_view_with_options(
             height: h,
         };
         frame.render_widget(Clear, modal_rect);
-        render_view_panel(frame, modal_rect, &modal.panel, no_color);
+        render_view_panel(frame, modal_rect, &modal.panel);
     }
 }
 
@@ -1200,79 +1150,6 @@ fn write_atomic_file_bytes(target: &Path, bytes: &[u8]) -> Result<(), String> {
     write_res
 }
 
-fn compute_project_equity_by_turn(
-    log: &SeasonReplayLog,
-    public_receipts: &[PublicSweepReceipt],
-    scoreboard: &league_core::FinalScoreboard,
-    seat_count: usize,
-) -> Vec<Vec<i64>> {
-    let num_turns = log.turns.len().min(public_receipts.len());
-    let mut cum = vec![0_i64; seat_count];
-    let mut out = vec![Vec::with_capacity(num_turns); seat_count];
-    let mut active_shocks: Vec<league_core::ActiveShock> = Vec::new();
-
-    for (rec, rcpt) in log.turns.iter().zip(public_receipts.iter()) {
-        active_shocks.retain(|s| s.expires_after_turn >= rec.turn);
-        active_shocks.extend(rcpt.newly_activated_shocks.iter().copied());
-        if rcpt.projects_completed > 0 {
-            for (s, cum_slot) in cum.iter_mut().enumerate().take(seat_count) {
-                let s_u8 = u8::try_from(s).unwrap_or(u8::MAX);
-                if let Some(reveal) = rec.reveals.get(&s_u8) {
-                    for order in &reveal.bundle.project_deliveries {
-                        if let Some(recipe) =
-                            log.spec.projects.iter().find(|r| r.id == order.project_id)
-                        {
-                            let batches = i64::from(order.batches);
-                            if batches > 0 {
-                                let surge_bps = active_shocks
-                                    .iter()
-                                    .filter(|sh| {
-                                        sh.kind == league_core::ShockKind::DemandSurge
-                                            && sh.expires_after_turn >= rec.turn
-                                            && recipe
-                                                .inputs
-                                                .iter()
-                                                .any(|&(g, _)| g == sh.target_seat)
-                                    })
-                                    .map(|sh| sh.magnitude_bps)
-                                    .max()
-                                    .unwrap_or(0);
-                                let base = recipe.equity_points.saturating_mul(batches);
-                                let bonus = (base
-                                    .saturating_mul(i64::from(surge_bps))
-                                    .saturating_add(5_000))
-                                    / 10_000;
-                                *cum_slot = cum_slot.saturating_add(base.saturating_add(bonus));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        for (s, series) in out.iter_mut().enumerate().take(seat_count) {
-            let final_cap = scoreboard
-                .standings
-                .iter()
-                .find(|e| usize::from(e.seat) == s)
-                .map_or(cum[s], |e| e.project_equity);
-            series.push(cum[s].min(final_cap));
-        }
-    }
-    for (s, series) in out.iter_mut().enumerate().take(seat_count) {
-        if let Some(entry) = scoreboard
-            .standings
-            .iter()
-            .find(|e| usize::from(e.seat) == s)
-            && let Some(last) = series.last_mut()
-            && *last != entry.project_equity
-        {
-            *last = entry.project_equity;
-        }
-    }
-    out
-}
-
-#[allow(clippy::too_many_arguments)]
 fn build_end_of_season_data_with_provenance(
     table_id: TableId,
     scoreboard: league_core::FinalScoreboard,
@@ -1280,12 +1157,8 @@ fn build_end_of_season_data_with_provenance(
     close_predicates: Vec<league_core::SeatStatePredicates>,
     season_metrics: Vec<league_core::SeatSeasonMetrics>,
     public_receipts: Vec<PublicSweepReceipt>,
-    replay_log: &SeasonReplayLog,
     predicate_turns: Vec<league_core::TurnPredicateRecord>,
-    seat_count: usize,
 ) -> EndOfSeasonData {
-    let project_equity_by_turn =
-        compute_project_equity_by_turn(replay_log, &public_receipts, &scoreboard, seat_count);
     EndOfSeasonData {
         table_id,
         closed_turn: Turn(scoreboard.closed_turn),
@@ -1296,7 +1169,6 @@ fn build_end_of_season_data_with_provenance(
         export_state: ReplayExportState::Ready,
         public_receipts,
         predicate_turns,
-        project_equity_by_turn,
     }
 }
 
@@ -1471,9 +1343,7 @@ impl TuiHostSession {
                 section.at_close,
                 season_metrics,
                 session.host.public_receipts().to_vec(),
-                &replay_log,
                 section.turns,
-                n,
             );
             session.end_of_season = Some(EndOfSeasonSessionState {
                 data: eos_data,
@@ -2185,13 +2055,6 @@ impl TuiHostSession {
         &self,
         viewport: ViewportSize,
     ) -> Result<SeatScreenView, EngineError> {
-        let alert_style = |view_style: ViewStyle| -> ViewStyle {
-            if self.no_color || self.screen_reader {
-                ViewStyle::plain().bold()
-            } else {
-                view_style
-            }
-        };
         if let Some(curtain) = &self.curtain {
             return Ok(league_seat_ui::apply_accessibility(
                 league_seat_ui::curtain_view(
@@ -2210,20 +2073,16 @@ impl TuiHostSession {
         let Some(target_seat) = self.active_human_seat() else {
             if !self.quit_requested && !self.is_wedged() {
                 if self.host.phase() == TurnPhase::AwaitingMandateReveal {
-                    let mut view = league_seat_ui::apply_accessibility(
-                        league_seat_ui::render_awaiting_reveal_screen(
-                            self.host.table_id(),
-                            Turn(self.host.turn()),
-                            AwaitingRevealProgress {
-                                revealed_count: ClubSessionCheckpoint::revealed_mandate_count(
-                                    &self.host,
-                                ),
-                                seat_count: self.host.seat_count(),
-                            },
-                            viewport,
-                        ),
-                        self.no_color,
-                        self.screen_reader,
+                    let mut view = league_seat_ui::render_awaiting_reveal_screen(
+                        self.host.table_id(),
+                        Turn(self.host.turn()),
+                        AwaitingRevealProgress {
+                            revealed_count: ClubSessionCheckpoint::revealed_mandate_count(
+                                &self.host,
+                            ),
+                            seat_count: self.host.seat_count(),
+                        },
+                        viewport,
                     );
                     if let Some(err) = &self.post_season_error
                         && let Some(status) = &mut view.status_line
@@ -2234,10 +2093,14 @@ impl TuiHostSession {
                         ));
                         status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                             banner,
-                            alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
+                            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                         )]));
                     }
-                    return Ok(view);
+                    return Ok(league_seat_ui::apply_accessibility(
+                        view,
+                        self.no_color,
+                        self.screen_reader,
+                    ));
                 }
                 if self.host.phase() == TurnPhase::Completed
                     && let Some(eos) = &self.end_of_season
@@ -2287,24 +2150,24 @@ impl TuiHostSession {
                         ));
                         status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                             banner,
-                            alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
+                            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                         )]));
                     }
-                    return Ok(view);
+                    return Ok(league_seat_ui::apply_accessibility(
+                        view,
+                        self.no_color || self.screen_reader,
+                        false,
+                    ));
                 }
             }
-            let mut view = league_seat_ui::apply_accessibility(
-                league_seat_ui::neutral_session_view(
-                    self.host.table_id(),
-                    Turn(self.host.turn()),
-                    self.host.phase(),
-                    self.pass,
-                    self.quit_requested,
-                    self.is_wedged(),
-                    viewport,
-                ),
-                self.no_color,
-                self.screen_reader,
+            let mut view = league_seat_ui::neutral_session_view(
+                self.host.table_id(),
+                Turn(self.host.turn()),
+                self.host.phase(),
+                self.pass,
+                self.quit_requested,
+                self.is_wedged(),
+                viewport,
             );
             if let Some((save_path, save_err)) = &self.autosave_halted_info
                 && let Some(panel) = view.zones.first_mut().map(|z| &mut z.panel)
@@ -2338,10 +2201,14 @@ impl TuiHostSession {
                     scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
                 status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                     banner,
-                    alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
+                    ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                 )]));
             }
-            return Ok(view);
+            return Ok(league_seat_ui::apply_accessibility(
+                view,
+                self.no_color,
+                self.screen_reader,
+            ));
         };
         let obs = self.observe_seat_checked(target_seat)?;
         let idx = usize::from(target_seat.0);
@@ -2358,17 +2225,21 @@ impl TuiHostSession {
             let banner = scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
             status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                 banner,
-                alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
+                ViewStyle::plain().with_fg(ViewColor::Red).bold(),
             )]));
         }
-        Ok(view)
+        Ok(league_seat_ui::apply_accessibility(
+            view,
+            self.no_color || self.screen_reader,
+            false,
+        ))
     }
 
     /// Renders the active view (Curtain, neutral standby, or active seat's turn screen) onto `frame`.
     pub fn render_current_frame(&self, frame: &mut Frame<'_>) -> Result<(), EngineError> {
         let viewport = ViewportSize::new(frame.area().width, frame.area().height);
         let view = self.build_current_view(viewport)?;
-        draw_screen_view_with_options(frame, &view, self.no_color || self.screen_reader);
+        draw_screen_view(frame, &view);
         Ok(())
     }
 
@@ -2839,9 +2710,7 @@ impl TuiHostSession {
                         section.at_close,
                         season_metrics,
                         self.host.public_receipts().to_vec(),
-                        &replay_log,
                         section.turns,
-                        usize::from(self.host.seat_count()),
                     );
                     let mut eos_ui_state = EndOfSeasonUiState::new();
                     eos_ui_state.set_no_color(self.no_color);
@@ -3403,28 +3272,23 @@ impl LobbyHostSession {
             && let Some(status) = &mut view.status_line
         {
             let banner = scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
-            let banner_style = if self.overrides.no_color || self.overrides.screen_reader {
-                ViewStyle::plain().bold()
-            } else {
-                ViewStyle::plain().with_fg(ViewColor::Red).bold()
-            };
             status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                 banner,
-                banner_style,
+                ViewStyle::plain().with_fg(ViewColor::Red).bold(),
             )]));
         }
-        view
+        league_seat_ui::apply_accessibility(
+            view,
+            self.overrides.no_color || self.overrides.screen_reader,
+            false,
+        )
     }
 
     /// Renders the Lobby screen onto `frame`.
     pub fn render_frame(&self, frame: &mut Frame<'_>) {
         let vp = ViewportSize::new(frame.area().width, frame.area().height);
         let view = self.build_view(vp);
-        draw_screen_view_with_options(
-            frame,
-            &view,
-            self.overrides.no_color || self.overrides.screen_reader,
-        );
+        draw_screen_view(frame, &view);
     }
 
     /// Processes one key event inside the Lobby and returns the resulting [`LobbyAction`].
@@ -9077,17 +8941,96 @@ mod tests {
         );
         assert_buffer_no_color(&terminal, "Turn");
         let turn_buf = screen_text(&terminal);
-        assert!(turn_buf.contains("= [OPEN BOOK]"));
+        assert!(turn_buf.contains("[OPEN BOOK]"));
         assert!(turn_buf.contains("▼ REFUSED [CANCEL_LOCKED]"));
         assert!(turn_buf.contains("Preview T1 S0:"));
     }
 
     #[test]
     fn screen_reader_end_to_end_multi_seat_handoffs_keep_linear_no_box_chars_and_zero_leaks() {
+        use league_core::{
+            CheckProposal, CreditTier, GradedMandateCard, SealedEvalSeed,
+            deal_graded_mandates_with_entropy,
+        };
+
         let ring = dev_ring_table(1);
-        let deal_seed = distinct_mandate_deal_seed(&ring, &[0, 1]);
-        let (mut session, _headless, _dmap) =
-            build_explicit_sessions(&ring, TableId(81_992), &[0, 1], deal_seed, [0x77; 32], 53);
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41_u8 + i; 32])).collect();
+        let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x77; 32]), "eval seed");
+        let (mut spec, cmap, _deal, eval_seed) = must_ok(
+            ring_table_to_table_spec_with_explicit_entropy(
+                &ring,
+                TableId(81_992),
+                &[0, 1, 2, 3],
+                [0x11; 32],
+                &salts,
+                eval_seed,
+            ),
+            "bridge",
+        );
+        spec.mandate_deck = vec![
+            GradedMandateCard {
+                card_id: 1,
+                kind: MandateKind::MinActivePartners { min_partners: 1 },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 4_000,
+            },
+            GradedMandateCard {
+                card_id: 2,
+                kind: MandateKind::MinProjectEquity { target: 25_000 },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 5_000,
+            },
+            GradedMandateCard {
+                card_id: 3,
+                kind: MandateKind::MinRefinedVariety {
+                    distinct_goods: 2,
+                    min_each: 1_500,
+                },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 4_500,
+            },
+            GradedMandateCard {
+                card_id: 4,
+                kind: MandateKind::MaintainCleanCredit {
+                    min_tier: CreditTier::Aaa,
+                },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 3_500,
+            },
+        ];
+        let mut chosen = None;
+        for b in 1_u8..=255 {
+            let (commits, deal) = must_ok(
+                deal_graded_mandates_with_entropy(
+                    TableId(81_992),
+                    4,
+                    [b; 32],
+                    &salts,
+                    &spec.mandate_deck,
+                ),
+                "deal",
+            );
+            if matches!(
+                deal.seat_reveals[0].mandate.kind,
+                MandateKind::MinActivePartners { min_partners: 1 }
+            ) {
+                spec.dealt_mandate_commits = commits;
+                chosen = Some(deal);
+                break;
+            }
+        }
+        let deal = must_some(chosen, "distinct deal giving S0 MinActivePartners");
+        let mut session = must_ok(
+            TuiHostSession::from_explicit_setup(
+                spec,
+                ring.seed,
+                Some(cmap.to_display_map()),
+                deal,
+                eval_seed,
+                53,
+            ),
+            "explicit setup",
+        );
         session.configure_accessibility(true, true);
 
         let vp = ViewportSize::new(100, 30);
@@ -9095,33 +9038,50 @@ mod tests {
 
         let obs0 = must_ok(session.build_seat_observation(Seat(0)), "obs0");
         let obs1 = must_ok(session.build_seat_observation(Seat(1)), "obs1");
-        let s0_mandate = mandate_short_marker(must_some(obs0.own_mandate(), "m0").kind);
-        let s1_mandate = mandate_short_marker(must_some(obs1.own_mandate(), "m1").kind);
+        let obs2 = must_ok(session.build_seat_observation(Seat(2)), "obs2");
+        let obs3 = must_ok(session.build_seat_observation(Seat(3)), "obs3");
+        let mandates = [
+            mandate_short_marker(must_some(obs0.own_mandate(), "m0").kind),
+            mandate_short_marker(must_some(obs1.own_mandate(), "m1").kind),
+            mandate_short_marker(must_some(obs2.own_mandate(), "m2").kind),
+            mandate_short_marker(must_some(obs3.own_mandate(), "m3").kind),
+        ];
+        let notes = [
+            "S0_PRIVATE_NOTE_ALPHA",
+            "S1_PRIVATE_NOTE_BRAVO",
+            "S2_PRIVATE_NOTE_CHARLIE",
+            "S3_PRIVATE_NOTE_DELTA",
+        ];
 
-        // Curtain -> Unlock S0 -> Complete Turn 1 -> Turn 2 with digest -> Finalize EndOfSeason.
+        // Turn 1: S0 writes private note + draws Check to S1; S1 writes note + stages CheckCash.
+        let mut check_id_for_s1: Option<u64> = None;
+        let mut resume_digest_armed = false;
+        let mut verified_turn2_s0 = false;
+        let mut verified_turn2_s1 = false;
+        let mut turn2_s1_pbrs = String::new();
         while session.phase() == TurnPhase::TalkAndMarket {
-            if session.turn() >= 2 && session.active_human_seat() == Some(Seat(0)) {
-                session.activate_resume_digest_if_swept();
-                must_ok(
-                    terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr turn 2")),
-                    "draw sr turn 2",
-                );
-                let txt = screen_text(&terminal);
-                assert_buffer_no_color(&terminal, "ScreenReader Turn 2");
-                assert_no_box_chars(&txt, "ScreenReader Turn 2");
-                assert!(txt.contains("Previously This Season"));
-                assert!(!txt.contains(&s1_mandate));
-            }
             if session.is_curtain_open() {
+                if session.turn() == 2 && !resume_digest_armed {
+                    session.activate_resume_digest_if_swept();
+                    resume_digest_armed = true;
+                }
+                let c_full = must_ok(session.build_current_view(vp), "curtain full").plain_text();
+                assert!(!c_full.contains("Previously This Season"));
+                assert!(!c_full.contains("PBRS cum"));
+                assert!(!c_full.contains("Provenance:"));
+                for m in &mandates {
+                    assert!(!c_full.contains(m));
+                }
+                for n in &notes {
+                    assert!(!c_full.contains(n));
+                }
                 must_ok(
                     terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr curtain")),
                     "draw sr curtain",
                 );
-                let c_txt = screen_text(&terminal);
                 assert_buffer_no_color(&terminal, "ScreenReader Curtain");
-                assert_no_box_chars(&c_txt, "ScreenReader Curtain");
-                assert!(!c_txt.contains(&s0_mandate));
-                assert!(!c_txt.contains(&s1_mandate));
+                assert_no_box_chars(&screen_text(&terminal), "ScreenReader Curtain");
+
                 session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
                 must_ok(session.handle_key_event(key(' '), vp), "space");
                 must_ok(
@@ -9129,45 +9089,161 @@ mod tests {
                     "enter",
                 );
                 session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
-            } else {
+            } else if let Some(active) = session.active_human_seat() {
+                let s_idx = usize::from(active.0);
+                if session.turn() == 1 && session.pass() == PassKind::SubPassA {
+                    // Check EDIT NOTES tag in screen-reader mode while entering seat private note.
+                    must_ok(session.handle_key_event(key('n'), vp), "enter notes edit");
+                    let edit_txt =
+                        must_ok(session.build_current_view(vp), "edit view").plain_text();
+                    assert!(edit_txt.contains("EDIT NOTES (Enter/Esc done)"));
+                    for ch in notes[s_idx].chars() {
+                        must_ok(session.handle_key_event(key(ch), vp), "type note");
+                    }
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                        "finish note",
+                    );
+
+                    if active == Seat(0) {
+                        must_ok(
+                            session.apply_seat_intent(
+                                Seat(0),
+                                SeatIntent::submit_market_action(MarketAction::CreateCheck {
+                                    seat: 0,
+                                    check: CheckProposal {
+                                        payee: 1,
+                                        asset: AssetId::Cred,
+                                        send_max: 500,
+                                        deliver_min: 100,
+                                        due_turn: 1,
+                                        expiration_turn: 5,
+                                    },
+                                }),
+                            ),
+                            "S0 creates Check to S1",
+                        );
+                        let obs_after = must_ok(session.build_seat_observation(Seat(0)), "obs c");
+                        check_id_for_s1 = obs_after.checks.keys().copied().next();
+                    }
+                } else if session.turn() == 1
+                    && session.pass() == PassKind::SubPassB
+                    && active == Seat(1)
+                    && let Some(cid) = check_id_for_s1.take()
+                {
+                    must_ok(
+                        session.apply_seat_intent(
+                            Seat(1),
+                            SeatIntent::update_bundle(BundleDraftAction::StageCheckCash(cid)),
+                        ),
+                        "S1 stages CheckCash",
+                    );
+                }
+
+                if session.turn() == 2
+                    && session.pass() == PassKind::SubPassA
+                    && active == Seat(1)
+                    && !verified_turn2_s1
+                {
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Down), vp),
+                        "sr down scroll",
+                    );
+                    let full_s1 =
+                        must_ok(session.build_current_view(vp), "t2 s1 full").plain_text();
+                    assert!(full_s1.contains("Previously This Season (Turns T1..=T1, 1 swept)"));
+                    assert!(full_s1.contains("Seat S1: PBRS cum "));
+                    assert!(!full_s1.contains("Seat S0: PBRS cum "));
+                    assert!(full_s1.contains(notes[1]));
+                    assert!(full_s1.contains(&mandates[1]));
+                    assert!(!full_s1.contains("Provenance:"));
+                    for other in [0_usize, 2, 3] {
+                        assert!(!full_s1.contains(notes[other]));
+                        assert!(!full_s1.contains(&mandates[other]));
+                    }
+                    if let Some(p_line) = full_s1.lines().find(|l| l.contains("Seat S1: PBRS cum "))
+                    {
+                        turn2_s1_pbrs = p_line.to_owned();
+                    }
+                    must_ok(
+                        terminal
+                            .draw(|f| must_ok(session.render_current_frame(f), "draw sr turn 2")),
+                        "draw sr turn 2",
+                    );
+                    assert_buffer_no_color(&terminal, "ScreenReader Turn 2");
+                    assert_no_box_chars(&screen_text(&terminal), "ScreenReader Turn 2");
+                    verified_turn2_s1 = true;
+                } else if session.turn() == 2
+                    && session.pass() == PassKind::SubPassA
+                    && active == Seat(0)
+                    && !verified_turn2_s0
+                {
+                    let full_s0 =
+                        must_ok(session.build_current_view(vp), "t2 s0 full").plain_text();
+                    assert!(full_s0.contains("Previously This Season (Turns T1..=T1, 1 swept)"));
+                    assert!(full_s0.contains("Seat S0: PBRS cum "));
+                    assert!(!full_s0.contains("Seat S1: PBRS cum "));
+                    let s0_pbrs_line = full_s0
+                        .lines()
+                        .find(|l| l.contains("Seat S0: PBRS cum "))
+                        .unwrap_or("");
+                    assert_ne!(s0_pbrs_line, turn2_s1_pbrs);
+                    assert!(full_s0.contains(notes[0]));
+                    assert!(full_s0.contains(&mandates[0]));
+                    assert!(!full_s0.contains("Provenance:"));
+                    for other in 1..4 {
+                        assert!(!full_s0.contains(notes[other]));
+                        assert!(!full_s0.contains(&mandates[other]));
+                    }
+                    verified_turn2_s0 = true;
+                }
                 must_ok(session.handle_key_event(ctrl_key('l'), vp), "handoff");
             }
         }
+        assert!(verified_turn2_s0 && verified_turn2_s1);
 
-        // AwaitingMandateReveal standby frames in screen-reader mode.
+        // AwaitingMandateReveal standby frames: no mandate, note, digest, or provenance anywhere.
         assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
-        for reveal_idx in 0..4_usize {
+        for _ in 0..4_usize {
+            let r_full = must_ok(session.build_current_view(vp), "reveal full").plain_text();
+            assert!(r_full.contains("=== MERCHANT LEAGUE — SESSION STANDBY ==="));
+            assert!(r_full.contains("AwaitingMandateReveal"));
+            assert!(!r_full.contains("Previously This Season"));
+            assert!(!r_full.contains("Provenance:"));
+            for m in &mandates {
+                assert!(!r_full.contains(m));
+            }
+            for n in &notes {
+                assert!(!r_full.contains(n));
+            }
             must_ok(
                 terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr reveal")),
                 "draw sr reveal",
             );
-            let r_txt = screen_text(&terminal);
             assert_buffer_no_color(&terminal, "ScreenReader Reveal");
-            assert_no_box_chars(&r_txt, "ScreenReader Reveal");
-            assert!(r_txt.contains("=== MERCHANT LEAGUE — SESSION STANDBY ==="));
-            assert!(r_txt.contains("AwaitingMandateReveal"));
-            assert!(!r_txt.contains(&s0_mandate));
-            assert!(!r_txt.contains(&s1_mandate));
-            if reveal_idx < 4 {
-                must_ok(
-                    session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
-                    "submit reveal",
-                );
-            }
+            assert_no_box_chars(&screen_text(&terminal), "ScreenReader Reveal");
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                "submit reveal",
+            );
         }
 
         assert_eq!(session.phase(), TurnPhase::Completed);
         must_ok(session.handle_key_event(key('2'), vp), "eos tab 2");
+        let eos_full = must_ok(session.build_current_view(vp), "eos full").plain_text();
+        for m in &mandates {
+            assert!(eos_full.contains(m));
+        }
+        assert!(eos_full.contains("▲ AWARDED +"));
+        assert!(
+            eos_full.contains("Provenance: active partners 1/1 [S1@T1; target met T1]"),
+            "CheckCashed partner provenance missing/mismatched in EndOfSeason:\n{eos_full}"
+        );
         must_ok(
             terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr eos mandates")),
             "draw sr eos mandates",
         );
-        let eos_txt = screen_text(&terminal);
         assert_buffer_no_color(&terminal, "ScreenReader EOS Mandates");
-        assert_no_box_chars(&eos_txt, "ScreenReader EOS Mandates");
-        assert!(eos_txt.contains("=== END OF SEASON: 2: Mandates ==="));
-        assert!(eos_txt.contains(&s0_mandate));
-        assert!(eos_txt.contains(&s1_mandate));
-        assert!(eos_txt.contains("Provenance:"));
+        assert_no_box_chars(&screen_text(&terminal), "ScreenReader EOS Mandates");
     }
 }

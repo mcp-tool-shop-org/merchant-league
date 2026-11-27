@@ -7,14 +7,13 @@ use alloc::vec::Vec;
 use league_seat_types::{
     ActiveCharter, AssetId, CLOSING_ROLL_START_TURN, COMMODITY_DISPLAY_CATALOG,
     CommodityDisplayMap, CredOffer, CreditCheck, CreditTier, CurtainPinMode, CurtainPinPrompt,
-    DualEscrowVault, FillKind, FillRecord, FundamentalParities, HYPOTHETICAL_CLOSE_MARK_CAVEAT,
-    IntentPledge, IntentTarget, MandateKind, MarketAction, OfferSide, PublicSweepReceipt,
-    ScreenLayout, Seat, SeatIdentity, SeatObservation, SeatScreenView, SeatState, ShockKind,
-    TokenEscrowVault, Turn, TurnClockDisplay, TurnPhase, ViewAlign, ViewColor, ViewLabel,
-    ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan,
-    ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn,
-    ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize, format_numeraire_display,
-    scrub_secret_text,
+    DualEscrowVault, FillKind, FillRecord, HYPOTHETICAL_CLOSE_MARK_CAVEAT, IntentPledge,
+    IntentTarget, MandateKind, MarketAction, PublicSweepReceipt, ScreenLayout, Seat, SeatIdentity,
+    SeatObservation, SeatScreenView, SeatState, TokenEscrowVault, Turn, TurnClockDisplay,
+    TurnPhase, ViewAlign, ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow,
+    ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem,
+    ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel,
+    ViewportSize, format_numeraire_display, scrub_secret_text,
 };
 
 use crate::composer::{
@@ -24,16 +23,6 @@ use crate::state::{
     ALL_MARKET_KINDS, BundleSection, CenterTab, FocusZone, MarketActionKind, PassKind, SeatUiState,
     visible_bundle_sections,
 };
-
-const fn delta_glyph(delta: i64) -> char {
-    if delta > 0 {
-        '▲'
-    } else if delta < 0 {
-        '▼'
-    } else {
-        '='
-    }
-}
 
 fn format_signed_delta(delta: i64) -> String {
     if delta > 0 {
@@ -45,26 +34,33 @@ fn format_signed_delta(delta: i64) -> String {
     }
 }
 
-const fn credit_tier_glyph(tier: CreditTier) -> char {
-    match tier {
-        CreditTier::Aaa => '▲',
-        CreditTier::Bbb => '=',
-        CreditTier::B | CreditTier::D => '▼',
+fn signed_delta_style(delta: i64, positive_is_good: bool) -> ViewStyle {
+    if delta == 0 {
+        return ViewStyle::plain();
     }
+    let good = if positive_is_good {
+        delta > 0
+    } else {
+        delta < 0
+    };
+    ViewStyle::plain().with_fg(if good {
+        ViewColor::Green
+    } else {
+        ViewColor::Red
+    })
 }
 
-const fn shock_glyph(kind: ShockKind) -> char {
-    match kind {
-        ShockKind::DemandSurge | ShockKind::TariffHoliday => '▲',
-        ShockKind::SupplyFreeze | ShockKind::SpoilageSpike => '▼',
-    }
-}
-
-fn parity_for_asset(parities: &FundamentalParities, good: AssetId) -> Option<i64> {
-    match good {
-        AssetId::Cred => Some(parities.cred_per_unit),
-        AssetId::Raw(i) => parities.raw_per_unit.get(usize::from(i)).copied(),
-        AssetId::Refined(i) => parities.refined_per_unit.get(usize::from(i)).copied(),
+/// Matches every settlement kind that `league-core` records in `EngineState::delivery_ledger`
+/// (`BatchFill`, `ContractDelivery`, `CheckCashed`, and `AtomicSwap`).
+fn fill_records_partner_delivery(f: &FillRecord) -> bool {
+    match f.kind {
+        FillKind::BatchFill | FillKind::ContractDelivery | FillKind::CheckCashed => f.net_units > 0,
+        FillKind::AtomicSwap => f.net_units > 0 || f.cred_amount > 0,
+        FillKind::TownImport
+        | FillKind::EscrowFinished
+        | FillKind::EscrowRefunded
+        | FillKind::EscrowForfeited
+        | FillKind::EscrowBreachRefunded => false,
     }
 }
 
@@ -236,20 +232,27 @@ pub(crate) fn build_curtain_view(
         ViewRow::from_plain(String::new()),
     ];
 
-    let (prompt, footer_left, footer_right) = match pin_prompt.mode {
+    let (prompt_row, footer_left, footer_right) = match pin_prompt.mode {
         CurtainPinMode::Inactive => {
             if pin_prompt.locked_out_reset {
-                rows.push(ViewRow::from_plain(
+                rows.push(ViewRow::from_spans(vec![ViewSpan::styled(
                     "▼ PIN entry failed 3 times — Curtain re-locked.".to_owned(),
-                ));
+                    ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                )]));
             }
-            let msg = if space_armed {
-                "▲ HAND-OFF ARMED ([Space] received) — press [Enter] to reveal seat screen"
+            let (msg, msg_style) = if space_armed {
+                (
+                    "▲ HAND-OFF ARMED ([Space] received) — press [Enter] to reveal seat screen",
+                    ViewStyle::plain().with_fg(ViewColor::Yellow).bold(),
+                )
             } else {
-                "= PRIVACY CURTAIN — press [Space] then [Enter] when ready to reveal seat screen"
+                (
+                    "= PRIVACY CURTAIN — press [Space] then [Enter] when ready to reveal seat screen",
+                    ViewStyle::plain().with_fg(ViewColor::Cyan),
+                )
             };
             (
-                msg.to_owned(),
+                ViewRow::from_spans(vec![ViewSpan::styled(msg.to_owned(), msg_style)]),
                 "Space:Arm Hand-Off | Enter:Confirm Reveal | q:Quit".to_owned(),
                 if space_armed {
                     "▲ Armed".to_owned()
@@ -263,30 +266,37 @@ pub(crate) fn build_curtain_view(
             let masked: String = (0..4)
                 .map(|idx| if idx < filled { '*' } else { '_' })
                 .collect();
-            let heading = match pin_prompt.mode {
-                CurtainPinMode::SetInitialPin => {
-                    format!("SET 4-DIGIT SEAT PIN: [{masked}] (digits never echoed)")
-                }
+            let (heading, heading_style) = match pin_prompt.mode {
+                CurtainPinMode::SetInitialPin => (
+                    format!("SET 4-DIGIT SEAT PIN: [{masked}] (digits never echoed)"),
+                    ViewStyle::plain(),
+                ),
                 CurtainPinMode::VerifyPin => {
                     if pin_prompt.failed_attempts > 0 {
-                        format!(
-                            "▼ ENTER 4-DIGIT SEAT PIN: [{masked}] (wrong PIN; attempt {}/3)",
-                            pin_prompt.failed_attempts + 1
+                        (
+                            format!(
+                                "▼ ENTER 4-DIGIT SEAT PIN: [{masked}] (wrong PIN; attempt {}/3)",
+                                pin_prompt.failed_attempts + 1
+                            ),
+                            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                         )
                     } else {
-                        format!("ENTER 4-DIGIT SEAT PIN: [{masked}]")
+                        (
+                            format!("ENTER 4-DIGIT SEAT PIN: [{masked}]"),
+                            ViewStyle::plain(),
+                        )
                     }
                 }
-                CurtainPinMode::Inactive => String::new(),
+                CurtainPinMode::Inactive => (String::new(), ViewStyle::plain()),
             };
             (
-                heading,
+                ViewRow::from_spans(vec![ViewSpan::styled(heading, heading_style)]),
                 "0-9:PIN Digit | Backspace:Erase | Enter:Submit PIN | Esc:Cancel".to_owned(),
                 "PIN Gate".to_owned(),
             )
         }
     };
-    rows.push(ViewRow::from_plain(prompt));
+    rows.push(prompt_row);
     let panel = ViewPanel {
         title: Some(ViewLabel::styled(
             "Hot-Seat Privacy Curtain".to_owned(),
@@ -346,15 +356,15 @@ pub(crate) fn build_neutral_session_view(
     }
 
     let state_note = if quit_requested {
-        "= Session quit requested — returning to terminal."
+        "Session quit requested — returning to terminal."
     } else if halted_on_error {
-        "▼ Pass advance failed — session halted; press q to quit."
+        "Pass advance failed — session halted; press q to quit."
     } else if matches!(phase, TurnPhase::Commit | TurnPhase::Reveal) {
-        "= Mid-turn commit/reveal in progress — session standby."
+        "Mid-turn commit/reveal in progress — session standby."
     } else if phase != TurnPhase::TalkAndMarket {
-        "= Season closed — waiting for host post-season step."
+        "Season closed — waiting for host post-season step."
     } else {
-        "= No human seat active — session standby."
+        "No human seat active — session standby."
     };
     let rows = vec![
         ViewRow::from_plain(format!(
@@ -401,6 +411,20 @@ pub(crate) fn build_neutral_session_view(
             style: ViewStyle::plain(),
         }),
         modal: None,
+    }
+}
+
+fn turn_mode_tag(state: &SeatUiState) -> &'static str {
+    if state.composer_edit_active {
+        "EDIT DRAFT (Enter apply | Esc cancel)"
+    } else if state.notes_edit_active {
+        "EDIT NOTES (Enter/Esc done)"
+    } else {
+        match state.selection.focus_zone {
+            FocusZone::PublicLedger => "Focus: Ledger",
+            FocusZone::CenterTabs => "Focus: Center",
+            FocusZone::PrivateDrawer => "Focus: Private",
+        }
     }
 }
 
@@ -456,17 +480,7 @@ pub(crate) fn build_turn_screen(
         None
     };
 
-    let mode_tag = if state.composer_edit_active {
-        "EDIT DRAFT (Enter apply | Esc cancel)"
-    } else if state.notes_edit_active {
-        "EDIT NOTES (Enter/Esc done)"
-    } else {
-        match state.selection.focus_zone {
-            FocusZone::PublicLedger => "Focus: Ledger",
-            FocusZone::CenterTabs => "Focus: Center",
-            FocusZone::PrivateDrawer => "Focus: Private",
-        }
-    };
+    let mode_tag = turn_mode_tag(state);
     let digest_key = if state.resume_digest_open {
         "d:HideDigest"
     } else {
@@ -500,18 +514,14 @@ fn build_too_small_view_with_options(
     no_color: bool,
     screen_reader: bool,
 ) -> SeatScreenView {
+    let warn_style = ViewStyle::plain().with_fg(ViewColor::Yellow).bold();
     let panel = ViewPanel {
         title: if screen_reader {
             None
         } else {
             Some(ViewLabel::styled(
                 "▼ Terminal too small".to_owned(),
-                ViewStyle {
-                    fg: ViewColor::Yellow,
-                    bg: ViewColor::Reset,
-                    bold: true,
-                    ..ViewStyle::plain()
-                },
+                warn_style,
             ))
         },
         alignment: if screen_reader {
@@ -523,7 +533,10 @@ fn build_too_small_view_with_options(
         tabs: None,
         table: None,
         rows: vec![
-            ViewRow::from_plain("▼ Terminal too small".to_owned()),
+            ViewRow::from_spans(vec![ViewSpan::styled(
+                "▼ Terminal too small".to_owned(),
+                warn_style,
+            )]),
             ViewRow::from_plain(format!(
                 "Minimum viewport: 80x24 | Current: {}x{}",
                 viewport.width, viewport.height
@@ -573,52 +586,40 @@ fn build_header_panel(
         })
         .unwrap_or("Human");
     let lock_badge = if obs.cancel_locked {
-        "▼ [CANCEL LOCKED]"
+        "[CANCEL LOCKED]"
     } else {
-        "= [OPEN BOOK]"
+        "[OPEN BOOK]"
     };
     let close_badge = if obs.turn >= CLOSING_ROLL_START_TURN {
-        "▼ Closing Window Active: 35.00% roll each Sweep (cap T32)"
+        "Closing Window Active: 35.00% roll each Sweep (cap T32)"
     } else {
-        "= Season Open (Closing rolls begin Turn 24)"
+        "Season Open (Closing rolls begin Turn 24)"
     };
     let chair_label = obs
         .cartel_chair
         .map_or_else(|| "None".to_owned(), |c| format!("S{c}"));
     let shocks_line = if obs.active_shocks.is_empty() {
-        "Active Shocks: = none".to_owned()
+        "Active Shocks: none".to_owned()
     } else {
         let items: Vec<String> = obs
             .active_shocks
             .iter()
             .map(|s| {
                 format!(
-                    "{} S{} {:?} {}bps (exp T{})",
-                    shock_glyph(s.kind),
-                    s.target_seat,
-                    s.kind,
-                    s.magnitude_bps,
-                    s.expires_after_turn
+                    "S{} {:?} {}bps (exp T{})",
+                    s.target_seat, s.kind, s.magnitude_bps, s.expires_after_turn
                 )
             })
             .collect();
         format!("Active Shocks: {}", items.join("; "))
     };
     let forecasts_line = if obs.public_forecasts.is_empty() {
-        "Forecasts: = none".to_owned()
+        "Forecasts: none".to_owned()
     } else {
         let items: Vec<String> = obs
             .public_forecasts
             .iter()
-            .map(|f| {
-                format!(
-                    "{} S{} {:?} at T{}",
-                    shock_glyph(f.kind),
-                    f.target_seat,
-                    f.kind,
-                    f.realize_turn
-                )
-            })
+            .map(|f| format!("S{} {:?} at T{}", f.target_seat, f.kind, f.realize_turn))
             .collect();
         format!("Forecasts: {}", items.join("; "))
     };
@@ -925,9 +926,7 @@ pub(crate) fn public_ledger_total_rows(obs: &SeatObservation, viewport: Viewport
 
 fn append_compact_standing_rows(obs: &SeatObservation, rows: &mut Vec<ViewRow>) {
     rows.push(ViewRow::from_plain("--- Standing & Legend ---".to_owned()));
-    rows.push(ViewRow::from_plain(
-        "Legend: k=1e3 M=1e6 +=rem | ▲/▼/=".to_owned(),
-    ));
+    rows.push(ViewRow::from_plain("Legend: k=1e3 M=1e6 +=rem".to_owned()));
     for s in &obs.seats {
         let role = match s.identity {
             SeatIdentity::Human => "HUM",
@@ -939,15 +938,8 @@ fn append_compact_standing_rows(obs: &SeatObservation, rows: &mut Vec<ViewRow>) 
             "-".to_owned()
         };
         rows.push(ViewRow::from_plain(format!(
-            "S{} {} {}{:?} Eq:{} D/B/F:{}/{}/{}",
-            s.seat,
-            role,
-            credit_tier_glyph(s.credit_tier),
-            s.credit_tier,
-            s.project_equity,
-            s.hard_credit_defaults,
-            s.broken_promises,
-            frz
+            "S{} {} Eq:{} D/B/F:{}/{}/{}",
+            s.seat, role, s.project_equity, s.hard_credit_defaults, s.broken_promises, frz
         )));
         rows.push(ViewRow::from_plain(format!(
             "  C:{} D:{} T:{}/{}",
@@ -1088,11 +1080,11 @@ fn append_ledger_inventory_rows(
         } else {
             parts.join(", ")
         };
-        let tier_badge = format!("{}{:?}", credit_tier_glyph(s.credit_tier), s.credit_tier);
         rows.push(ViewRow::from_plain(format!(
-            "S{} ({}) [{regent}, {tier_badge}]: {}",
+            "S{} ({}) [{}]: {}",
             s.seat,
             guild_name_for_seat(s.seat),
+            regent,
             joined
         )));
     }
@@ -1114,7 +1106,6 @@ fn append_ledger_book_rows(
         for offer in obs.offers.values() {
             rows.push(ViewRow::from_plain(format_offer_line(
                 offer,
-                &obs.parities,
                 obs.cancel_locked,
                 plain_codes,
                 commodities,
@@ -1182,38 +1173,27 @@ fn append_ledger_book_rows(
 
 fn format_offer_line(
     offer: &CredOffer,
-    parities: &FundamentalParities,
     cancel_locked: bool,
     plain_codes: bool,
     commodities: Option<&CommodityDisplayMap>,
 ) -> String {
-    let side_glyph = match offer.side {
-        OfferSide::Buy => '▲',
-        OfferSide::Sell => '▼',
-    };
-    let parity_note = parity_for_asset(parities, offer.good).map_or_else(String::new, |p| {
-        let diff = offer.price_per_unit_cred - p;
-        format!(" ({} vs parity {p})", format_signed_delta(diff))
-    });
     let book = offer
         .domain_id
         .map_or_else(|| "Open".to_owned(), |d| format!("Dom#{d}"));
     let hyb = if offer.is_hybrid { " [tfHybrid]" } else { "" };
     let lock = if cancel_locked {
-        " ▼ [CANCEL LOCKED]"
+        " [CANCEL LOCKED]"
     } else {
         ""
     };
     format!(
-        "  Offer #{} S{} {} {:?} {} x{} @{}{} [{}]{}{}",
+        "  Offer #{} S{} {:?} {} x{} @{} [{}]{}{}",
         offer.offer_id,
         offer.maker,
-        side_glyph,
         offer.side,
         format_asset_label(offer.good, commodities, plain_codes),
         offer.remaining_units,
         offer.price_per_unit_cred,
-        parity_note,
         book,
         hyb,
         lock
@@ -1317,31 +1297,34 @@ fn format_charter_line(ch: &ActiveCharter) -> String {
     )
 }
 
+fn styled_tab_item(text: &str, enabled: bool, active: bool) -> ViewTabItem {
+    let style = if active {
+        ViewStyle::plain().with_fg(ViewColor::Cyan).bold()
+    } else if !enabled {
+        ViewStyle::plain().with_fg(ViewColor::DarkGray)
+    } else {
+        ViewStyle::plain()
+    };
+    ViewTabItem {
+        label: ViewLabel::styled(text.to_owned(), style),
+        enabled,
+    }
+}
+
 fn build_center_tabs_panel(
     obs: &SeatObservation,
     state: &SeatUiState,
     commodities: Option<&CommodityDisplayMap>,
 ) -> ViewPanel {
+    let active_idx = state.active_tab.index();
     let tab_bar = ViewTabBar {
         tabs: vec![
-            ViewTabItem {
-                label: ViewLabel::plain("1: Market & Contracts".to_owned()),
-                enabled: true,
-            },
-            ViewTabItem {
-                label: ViewLabel::plain("2: Workshop, Deals & Politics".to_owned()),
-                enabled: true,
-            },
-            ViewTabItem {
-                label: ViewLabel::plain("3: What-If Sandbox".to_owned()),
-                enabled: true,
-            },
-            ViewTabItem {
-                label: ViewLabel::plain("4: Diplomatic Desk (Disabled)".to_owned()),
-                enabled: false,
-            },
+            styled_tab_item("1: Market & Contracts", true, active_idx == 0),
+            styled_tab_item("2: Workshop, Deals & Politics", true, active_idx == 1),
+            styled_tab_item("3: What-If Sandbox", true, active_idx == 2),
+            styled_tab_item("4: Diplomatic Desk (Disabled)", false, active_idx == 3),
         ],
-        active_index: state.active_tab.index(),
+        active_index: active_idx,
     };
 
     let mut rows = if state.resume_digest_open {
@@ -1840,35 +1823,42 @@ fn append_what_if_preview_result(
     };
 
     let cred_delta = preview.post_sweep_seat_state.cred - preview.pre_seat_state.cred;
-    let debt_improvement =
-        preview.pre_seat_state.cred_debt - preview.post_sweep_seat_state.cred_debt;
+    let debt_delta = preview.post_sweep_seat_state.cred_debt - preview.pre_seat_state.cred_debt;
     let eq_delta =
         preview.post_sweep_seat_state.project_equity - preview.pre_seat_state.project_equity;
+    rows.push(ViewRow::from_spans(vec![
+        ViewSpan::plain(format!(
+            "Preview T{} S{}: Pre CRED {} -> Post-Mkt {} -> Post-Sweep {} (",
+            preview.turn,
+            preview.seat,
+            preview.pre_seat_state.cred,
+            preview.post_market_seat_state.cred,
+            preview.post_sweep_seat_state.cred,
+        )),
+        ViewSpan::styled(
+            format_signed_delta(cred_delta),
+            signed_delta_style(cred_delta, true),
+        ),
+        ViewSpan::plain(format!(
+            ") (Debt {} ",
+            preview.post_sweep_seat_state.cred_debt
+        )),
+        ViewSpan::styled(
+            format_signed_delta(debt_delta),
+            signed_delta_style(debt_delta, false),
+        ),
+        ViewSpan::plain(format!(
+            ", Eq {} ",
+            preview.post_sweep_seat_state.project_equity
+        )),
+        ViewSpan::styled(
+            format_signed_delta(eq_delta),
+            signed_delta_style(eq_delta, true),
+        ),
+        ViewSpan::plain(")".to_owned()),
+    ]));
     rows.push(ViewRow::from_plain(format!(
-        "Preview T{} S{}: Pre CRED {} -> Post-Mkt {} -> Post-Sweep {} ({}) (Debt {} {}, Eq {} {})",
-        preview.turn,
-        preview.seat,
-        preview.pre_seat_state.cred,
-        preview.post_market_seat_state.cred,
-        preview.post_sweep_seat_state.cred,
-        format_signed_delta(cred_delta),
-        preview.post_sweep_seat_state.cred_debt,
-        format_signed_delta(debt_improvement),
-        preview.post_sweep_seat_state.project_equity,
-        format_signed_delta(eq_delta),
-    )));
-    let upkeep_glyph = if preview.upkeep.new_shortfall_debt > 0 {
-        '▼'
-    } else {
-        '='
-    };
-    let spoil_glyph = if preview.spoilage.perishable_spoiled_units > 0 {
-        '▼'
-    } else {
-        '='
-    };
-    rows.push(ViewRow::from_plain(format!(
-        "  {upkeep_glyph} Upkeep: req {} paid {} interest {} shortfall {} debt_repaid {} | Spoiled: {spoil_glyph} {}",
+        "  Upkeep: req {} paid {} interest {} shortfall {} debt_repaid {} | Spoiled: {}",
         preview.upkeep.upkeep_required,
         preview.upkeep.paid_with_refined,
         preview.upkeep.debt_interest_accrued,
@@ -1880,7 +1870,7 @@ fn append_what_if_preview_result(
         for r in &preview.refused_market_actions {
             let safe_msg = scrub_secret_text(&r.message);
             rows.push(ViewRow::from_plain(format!(
-                "  ▼ Refused Action #{}: [{}]",
+                "  Refused Action #{}: [{}]",
                 r.action_index, r.error_code
             )));
             rows.push(ViewRow::from_plain(format!("    {safe_msg}")));
@@ -1898,13 +1888,8 @@ fn append_what_if_preview_result(
     )));
     for hm in &preview.post_sweep_predicates.season_end.holdings {
         if hm.units > 0 {
-            let mark_glyph = if hm.units_marked_by_bids > 0 {
-                '▲'
-            } else {
-                '='
-            };
             rows.push(ViewRow::from_plain(format!(
-                "  {mark_glyph} Close Mark {}: {}u => {} (bids:{}, floor:{})",
+                "  Close Mark {}: {}u => {} (bids:{}, floor:{})",
                 format_asset_label(hm.good, commodities, state.plain_codes),
                 hm.units,
                 hm.marked_value,
@@ -2028,19 +2013,9 @@ fn append_predicates_rows(
         commodities,
         state.plain_codes,
     );
-    let upkeep_glyph = if p.upkeep.shortfall_units > 0 {
-        '▼'
-    } else {
-        '='
-    };
-    let spoil_glyph = if p.spoilage.spoil_units_total > 0 {
-        '▼'
-    } else {
-        '='
-    };
     rows.push(ViewRow::from_plain("--- State Predicates ---".to_owned()));
     rows.push(ViewRow::from_plain(format!(
-        "{upkeep_glyph} Upkeep ({upkeep_label}): owe {} | free {} | sell {} | short {} -> debt+ {} @{}bps",
+        "Upkeep ({upkeep_label}): owe {} | free {} | sell {} | short {} -> debt+ {} @{}bps",
         p.upkeep.owed_units,
         p.upkeep.held_units,
         p.upkeep.held_on_own_resting_sells,
@@ -2049,7 +2024,7 @@ fn append_predicates_rows(
         p.upkeep.interest_bps
     )));
     rows.push(ViewRow::from_plain(format!(
-        "{spoil_glyph} Spoilage & Workshop: own_yield {} | spoil_total {} (sells {}) | cap_runs {}",
+        "Spoilage & Workshop: own_yield {} | spoil_total {} (sells {}) | cap_runs {}",
         p.spoilage.own_raw_yield_at_sweep,
         p.spoilage.spoil_units_total,
         p.spoilage.spoil_units_on_resting_offers,
@@ -2079,9 +2054,8 @@ fn append_predicates_rows(
     )));
     for g in &p.scarcity {
         if g.own_units > 0 || g.open_book_units_offered > 0 || g.open_book_units_bid > 0 {
-            let book_glyph = delta_glyph(g.open_book_units_bid - g.open_book_units_offered);
             rows.push(ViewRow::from_plain(format!(
-                "  {book_glyph} Scarcity {}: own={} tbl={} ask={} bid={} tariff={}bps",
+                "  Scarcity {}: own={} tbl={} ask={} bid={} tariff={}bps",
                 format_asset_label(g.good, commodities, state.plain_codes),
                 g.own_units,
                 g.table_units_held,
@@ -2442,7 +2416,7 @@ pub(crate) fn build_awaiting_reveal_screen(
             TurnPhase::AwaitingMandateReveal
         )),
         ViewRow::from_plain(
-            "= Season closed — Turn-1 mandates stay sealed until all seats submit reveals."
+            "Season closed — Turn-1 mandates stay sealed until all seats submit reveals."
                 .to_owned(),
         ),
         ViewRow::from_plain(format!(
@@ -2511,20 +2485,19 @@ pub(crate) fn build_end_of_season_screen(
         );
     }
 
+    let eos_active_idx = match state.active_tab {
+        EndOfSeasonTab::Scoreboard => 0,
+        EndOfSeasonTab::Mandates => 1,
+        EndOfSeasonTab::SeasonMetrics => 2,
+        EndOfSeasonTab::ReplayExport => 3,
+    };
     let tabs = ViewTabBar {
         tabs: ALL_END_OF_SEASON_TABS
             .iter()
-            .map(|tab| ViewTabItem {
-                label: ViewLabel::plain(tab.label().to_owned()),
-                enabled: true,
-            })
+            .enumerate()
+            .map(|(i, tab)| styled_tab_item(tab.label(), true, i == eos_active_idx))
             .collect(),
-        active_index: match state.active_tab {
-            EndOfSeasonTab::Scoreboard => 0,
-            EndOfSeasonTab::Mandates => 1,
-            EndOfSeasonTab::SeasonMetrics => 2,
-            EndOfSeasonTab::ReplayExport => 3,
-        },
+        active_index: eos_active_idx,
     };
 
     let mut rows = Vec::new();
@@ -2588,7 +2561,6 @@ pub(crate) fn build_end_of_season_screen(
             let mut trows = Vec::new();
             for (idx, entry) in data.scoreboard.standings.iter().enumerate() {
                 let rank = idx + 1;
-                let tg = credit_tier_glyph(entry.credit_tier);
                 trows.push(ViewTableRow {
                     cells: vec![
                         ViewTableCell::aligned(
@@ -2617,7 +2589,7 @@ pub(crate) fn build_end_of_season_screen(
                             ViewAlign::Right,
                             ViewStyle::plain(),
                         ),
-                        ViewTableCell::plain(format!("{tg}{:?}", entry.credit_tier)),
+                        ViewTableCell::plain(format!("{:?}", entry.credit_tier)),
                     ],
                     style: ViewStyle::plain(),
                 });
@@ -2630,10 +2602,8 @@ pub(crate) fn build_end_of_season_screen(
                 });
             }
             for (idx, entry) in data.scoreboard.standings.iter().enumerate() {
-                let eq_g = delta_glyph(entry.total_equity);
-                let tier_g = credit_tier_glyph(entry.credit_tier);
                 rows.push(ViewRow::from_plain(format!(
-                    "  Rank #{} — S{} ({}) | {eq_g} TotalEq={} ProjEq={} NetEq={} MandEq={} Tier={tier_g}{:?} HonorPen={}",
+                    "  Rank #{} — S{} ({}) | TotalEq={} ProjEq={} NetEq={} MandEq={} Tier={:?} HonorPen={}",
                     idx + 1,
                     entry.seat,
                     guild_name_for_seat(entry.seat),
@@ -2683,7 +2653,6 @@ pub(crate) fn build_end_of_season_screen(
                     format_mandate_provenance(
                         idx,
                         mandate.kind,
-                        bonus_awarded,
                         data,
                         commodities,
                         state.plain_codes
@@ -2703,13 +2672,13 @@ pub(crate) fn build_end_of_season_screen(
                     .iter()
                     .find(|e| e.seat == metric.seat);
                 let (defaults, breaches, broken, honor_pen, tier) =
-                    entry.map_or((0, 0, 0, 0, "▲Aaa".to_owned()), |e| {
+                    entry.map_or((0, 0, 0, 0, "Aaa".to_owned()), |e| {
                         (
                             e.hard_credit_defaults,
                             e.bond_breaches,
                             e.broken_promises,
                             e.honor_penalties,
-                            format!("{}{:?}", credit_tier_glyph(e.credit_tier), e.credit_tier),
+                            format!("{:?}", e.credit_tier),
                         )
                     });
                 rows.push(ViewRow::from_plain(format!(
@@ -2728,13 +2697,8 @@ pub(crate) fn build_end_of_season_screen(
                 if let Some(pred) = data.close_predicates.get(idx) {
                     for h in &pred.season_end.holdings {
                         if h.units > 0 {
-                            let mark_g = if h.units_marked_by_bids > 0 {
-                                '▲'
-                            } else {
-                                '='
-                            };
                             rows.push(ViewRow::from_plain(format!(
-                                "  {mark_g} Mark {}: units={} marked={} (bid_u={} floor_u={} floor_val={})",
+                                "  Mark {}: units={} marked={} (bid_u={} floor_u={} floor_val={})",
                                 format_asset_label(h.good, commodities, state.plain_codes),
                                 h.units,
                                 h.marked_value,
@@ -2753,13 +2717,13 @@ pub(crate) fn build_end_of_season_screen(
             ));
             let msg = match data.export_state {
                 ReplayExportState::Ready => {
-                    "= Status: Ready — press `e` or `Enter` to verify & export SeasonReplayLog JSON and wipe `.seal`."
+                    "Status: Ready — press `e` or `Enter` to verify & export SeasonReplayLog JSON and wipe `.seal`."
                 }
                 ReplayExportState::Exported => {
-                    "▲ Status: Exported & Verified — SeasonReplayLog written cleanly and private `.seal` wiped."
+                    "Status: Exported & Verified — SeasonReplayLog written cleanly and private `.seal` wiped."
                 }
                 ReplayExportState::Failed => {
-                    "▼ Status: Export Failed — private `.seal` was preserved on disk; see details below."
+                    "Status: Export Failed — private `.seal` was preserved on disk; see details below."
                 }
             };
             rows.push(ViewRow::from_plain(msg.to_owned()));
@@ -2833,10 +2797,10 @@ pub(crate) fn build_resume_digest_rows(
     let receipts = &obs.public_receipts;
     if receipts.is_empty() {
         rows.push(ViewRow::from_plain(
-            "Previously This Season (= T1 opening — 0 prior turns swept) [d: toggle]".to_owned(),
+            "Previously This Season (T1 opening — 0 prior turns swept) [d: toggle]".to_owned(),
         ));
         rows.push(ViewRow::from_plain(
-            "  = Season opens at Turn 1; no prior PublicSweepReceipt history yet.".to_owned(),
+            "  Season opens at Turn 1; no prior PublicSweepReceipt history yet.".to_owned(),
         ));
         return rows;
     }
@@ -2904,11 +2868,7 @@ pub(crate) fn build_resume_digest_rows(
             converted_to_ai_turn = Some(r.turn);
         }
         for f in &r.fills {
-            if matches!(
-                f.kind,
-                FillKind::BatchFill | FillKind::AtomicSwap | FillKind::ContractDelivery
-            ) && f.net_units > 0
-            {
+            if fill_records_partner_delivery(f) {
                 if f.from == Some(seat_u8) {
                     seat_fills_out = seat_fills_out.saturating_add(1);
                     if f.to != seat_u8 && usize::from(f.to) < 6 {
@@ -2935,40 +2895,50 @@ pub(crate) fn build_resume_digest_rows(
             format!("TM=S{tm}, CC={cc_str}")
         },
     );
-    let custody_desc = if let Some(t) = converted_to_ai_turn {
-        format!("▼ converted_to_ai@T{t}")
+    let (custody_desc, custody_style) = if let Some(t) = converted_to_ai_turn {
+        (
+            format!("▼ converted_to_ai@T{t}"),
+            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+        )
     } else if !regent_turns.is_empty() || !non_reveal_turns.is_empty() {
-        format!(
-            "▼ regent_turns={:?} non_reveal={:?}",
-            regent_turns, non_reveal_turns
+        (
+            format!(
+                "▼ regent_turns={:?} non_reveal={:?}",
+                regent_turns, non_reveal_turns
+            ),
+            ViewStyle::plain().with_fg(ViewColor::Yellow).bold(),
         )
     } else {
-        "= 0 Regent/non-reveal interventions".to_owned()
+        (
+            "= 0 Regent/non-reveal interventions".to_owned(),
+            ViewStyle::plain(),
+        )
     };
 
     rows.push(ViewRow::from_plain(format!(
         "Previously This Season (Turns T{first_t}..=T{last_t}, {count} swept) [d: toggle]"
     )));
+    rows.push(ViewRow::from_spans(vec![
+        ViewSpan::plain(format!("  Seat S{seat_u8}: PBRS cum ")),
+        ViewSpan::styled(
+            format_signed_delta(cum_pbrs),
+            signed_delta_style(cum_pbrs, true),
+        ),
+        ViewSpan::plain(format!(" (last T{last_t}: ")),
+        ViewSpan::styled(
+            format_signed_delta(last_pbrs),
+            signed_delta_style(last_pbrs, true),
+        ),
+        ViewSpan::plain(format!(
+            ") | fills in:{seat_fills_in} out:{seat_fills_out} partners:{partner_count} | "
+        )),
+        ViewSpan::styled(custody_desc, custody_style),
+    ]));
     rows.push(ViewRow::from_plain(format!(
-        "  Seat S{seat_u8}: PBRS cum {} (last T{last_t}: {}) | fills in:{} out:{} partners:{} | {}",
-        format_signed_delta(cum_pbrs),
-        format_signed_delta(last_pbrs),
-        seat_fills_in,
-        seat_fills_out,
-        partner_count,
-        custody_desc,
+        "  Table Totals: trades={batch_trades} swaps={atomic_swaps} conv={converter_runs} proj={projects_done} debt={total_debt} spoil={total_spoilage}"
     )));
-    let debt_g = if total_debt > 0 { '▼' } else { '=' };
-    let spoil_g = if total_spoilage > 0 { '▼' } else { '=' };
     rows.push(ViewRow::from_plain(format!(
-        "  Table Totals: trades={batch_trades} swaps={atomic_swaps} conv={converter_runs} proj={projects_done} debt={debt_g}{total_debt} spoil={spoil_g}{total_spoilage}"
-    )));
-    let cash_g = if cashed_checks > 0 { '▲' } else { '=' };
-    let bounce_g = if bounced_checks > 0 { '▼' } else { '=' };
-    let prom_g = if broken_promises > 0 { '▼' } else { '=' };
-    rows.push(ViewRow::from_plain(format!(
-        "  Credit/Gov: checks({cash_g}{cashed_checks}/{bounce_g}{bounced_checks}) esc({}/{}) promises({prom_g}{broken_promises}) officers({officers_desc}) charters={charters_count} shocks={shocks_activated}/fcst={forecasts_count}",
-        escrows_finished, escrows_forfeited
+        "  Credit/Gov: checks({cashed_checks}/{bounced_checks}) esc({escrows_finished}/{escrows_forfeited}) promises({broken_promises}) officers({officers_desc}) charters={charters_count} shocks={shocks_activated}/fcst={forecasts_count}"
     )));
 
     let recent_start = receipts.len().saturating_sub(3);
@@ -2976,20 +2946,14 @@ pub(crate) fn build_resume_digest_rows(
         let mut notes = Vec::new();
         for sh in &r.newly_activated_shocks {
             notes.push(format!(
-                "{} shock S{} {:?} {}bps",
-                shock_glyph(sh.kind),
-                sh.target_seat,
-                sh.kind,
-                sh.magnitude_bps
+                "shock S{} {:?} {}bps",
+                sh.target_seat, sh.kind, sh.magnitude_bps
             ));
         }
         for fc in &r.public_forecasts {
             notes.push(format!(
-                "{} fcst S{} {:?}@T{}",
-                shock_glyph(fc.kind),
-                fc.target_seat,
-                fc.kind,
-                fc.realize_turn
+                "fcst S{} {:?}@T{}",
+                fc.target_seat, fc.kind, fc.realize_turn
             ));
         }
         if let Some((tm, cc)) = r.elected_officers {
@@ -3000,10 +2964,10 @@ pub(crate) fn build_resume_digest_rows(
             notes.push(format!("charters={}", r.charters_awarded.len()));
         }
         if !r.checks_bounced.is_empty() {
-            notes.push(format!("▼ bounced={}", r.checks_bounced.len()));
+            notes.push(format!("bounced={}", r.checks_bounced.len()));
         }
         if !r.broken_promises.is_empty() {
-            notes.push(format!("▼ broken={}", r.broken_promises.len()));
+            notes.push(format!("broken={}", r.broken_promises.len()));
         }
         if let Some(first_fill) = r.fills.first()
             && r.fills.len() == 1
@@ -3014,44 +2978,35 @@ pub(crate) fn build_resume_digest_rows(
             );
             notes.push(format!("fill {good_s} u={}", first_fill.net_units));
         }
-        let rd_g = if r.total_upkeep_shortfall_debt > 0 {
-            '▼'
-        } else {
-            '='
-        };
-        let rs_g = if r.total_spoilage_clawed_back > 0 {
-            '▼'
-        } else {
-            '='
-        };
         let rp = r.pbrs_deltas.get(seat_idx).copied().unwrap_or(0);
         let tail = if notes.is_empty() {
             String::new()
         } else {
             format!(" | {}", notes.join("; "))
         };
-        rows.push(ViewRow::from_plain(format!(
-            "  Recent T{}: pbrs={} trades={} swaps={} conv={} proj={} debt={rd_g}{} spoil={rs_g}{}{tail}",
-            r.turn,
-            format_signed_delta(rp),
-            r.batch_trades_cleared,
-            r.atomic_swaps_settled,
-            r.converter_batches_run,
-            r.projects_completed,
-            r.total_upkeep_shortfall_debt,
-            r.total_spoilage_clawed_back,
-        )));
+        rows.push(ViewRow::from_spans(vec![
+            ViewSpan::plain(format!("  Recent T{}: pbrs=", r.turn)),
+            ViewSpan::styled(format_signed_delta(rp), signed_delta_style(rp, true)),
+            ViewSpan::plain(format!(
+                " trades={} swaps={} conv={} proj={} debt={} spoil={}{tail}",
+                r.batch_trades_cleared,
+                r.atomic_swaps_settled,
+                r.converter_batches_run,
+                r.projects_completed,
+                r.total_upkeep_shortfall_debt,
+                r.total_spoilage_clawed_back,
+            )),
+        ]));
     }
     rows
 }
 
-fn build_screen_reader_turn_screen(
+fn build_screen_reader_turn_rows(
     obs: &SeatObservation,
     state: &SeatUiState,
     pass: PassKind,
     commodities: Option<&CommodityDisplayMap>,
-    viewport: ViewportSize,
-) -> SeatScreenView {
+) -> (Vec<ViewRow>, usize) {
     let mut rows = Vec::new();
     let header_panel = build_header_panel(
         obs,
@@ -3093,6 +3048,7 @@ fn build_screen_reader_turn_screen(
     for r in header_panel.rows {
         rows.push(r);
     }
+    let mode_tag = turn_mode_tag(state);
     let focus_label = match state.selection.focus_zone {
         FocusZone::PublicLedger => "Public Ledger",
         FocusZone::CenterTabs => "Center Composer",
@@ -3104,7 +3060,7 @@ fn build_screen_reader_turn_screen(
         CenterTab::WhatIfSandbox => "3: What-If Sandbox",
     };
     rows.push(ViewRow::from_plain(format!(
-        "Focus Zone: {focus_label} | Active Tab: {tab_label}"
+        "Focus Zone: {focus_label} | Mode: {mode_tag} | Active Tab: {tab_label}"
     )));
     rows.push(ViewRow::from_plain(String::new()));
 
@@ -3130,19 +3086,19 @@ fn build_screen_reader_turn_screen(
     rows.push(ViewRow::from_plain(
         "=== PUBLIC TABLE & LEDGER MIRROR ===".to_owned(),
     ));
+    let ledger_start = rows.len();
     for s in &obs.seats {
         let role = match s.identity {
             SeatIdentity::Human => "Human",
             SeatIdentity::AiSyndicate => "ClubBot",
         };
-        let tier_g = credit_tier_glyph(s.credit_tier);
         let frz = if s.wash_frozen_until_turn > 0 {
-            format!("▼ frozen until T{}", s.wash_frozen_until_turn)
+            format!("frozen until T{}", s.wash_frozen_until_turn)
         } else {
-            "= clear".to_owned()
+            "clear".to_owned()
         };
         rows.push(ViewRow::from_plain(format!(
-            "  S{} ({}, {}) | CRED={} | Debt={} | Tier={tier_g}{:?} | ProjectEq={} | Tariffs={}/{}bps | Defaults={} Broken={} Freeze={frz}",
+            "  S{} ({}, {}) | CRED={} | Debt={} | Tier={:?} | ProjectEq={} | Tariffs={}/{}bps | Defaults={} Broken={} Freeze={frz}",
             s.seat,
             guild_name_for_seat(s.seat),
             role,
@@ -3162,14 +3118,20 @@ fn build_screen_reader_turn_screen(
         commodities,
         LedgerTableLayout::FullStacked,
     ));
+    let ledger_end = rows.len().saturating_sub(1);
     rows.push(ViewRow::from_plain(String::new()));
 
     rows.push(ViewRow::from_plain(format!(
         "=== ACTIVE WORKSPACE: {tab_label} ==="
     )));
+    let workspace_header = rows.len().saturating_sub(1);
+    let mut center_selected_row: Option<usize> = None;
     for row in center_tab_rows(obs, state, commodities) {
         let plain = row.plain_text();
         if let Some(rest) = plain.strip_prefix("> ") {
+            if center_selected_row.is_none() {
+                center_selected_row = Some(rows.len());
+            }
             rows.push(ViewRow::from_plain(format!("[SELECTED] {rest}")));
         } else {
             rows.push(row);
@@ -3181,8 +3143,34 @@ fn build_screen_reader_turn_screen(
         "=== PRIVATE VAULT (SEAT S{} ONLY) ===",
         obs.seat
     )));
+    let drawer_start = rows.len();
     rows.extend(private_drawer_rows(obs, state, commodities));
+    let drawer_end = rows.len().saturating_sub(1);
 
+    let target_row = match state.selection.focus_zone {
+        FocusZone::PublicLedger => (ledger_start + state.selection.ledger_row_idx).min(ledger_end),
+        FocusZone::CenterTabs => center_selected_row.unwrap_or(workspace_header),
+        FocusZone::PrivateDrawer => (drawer_start + state.selection.drawer_row_idx).min(drawer_end),
+    };
+    (rows, target_row)
+}
+
+pub(crate) fn screen_reader_target_and_total(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+) -> (usize, usize) {
+    let (rows, target) = build_screen_reader_turn_rows(obs, state, PassKind::SubPassA, None);
+    (target, rows.len())
+}
+
+fn build_screen_reader_turn_screen(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+    pass: PassKind,
+    commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    let (rows, _) = build_screen_reader_turn_rows(obs, state, pass, commodities);
     let total = rows.len();
     let offset = state.screen_reader_scroll.min(total.saturating_sub(1));
     let digest_key = if state.resume_digest_open {
@@ -3190,6 +3178,7 @@ fn build_screen_reader_turn_screen(
     } else {
         "d:Digest"
     };
+    let mode_tag = turn_mode_tag(state);
 
     let mut view = SeatScreenView {
         layout: if viewport.height >= 8 {
@@ -3216,7 +3205,7 @@ fn build_screen_reader_turn_screen(
                 "Linear Mode | 1-3:Tabs F6:Zone [/]:Item Arrows:Act PgUp/PgDn:Scroll".to_owned(),
             )],
             right: vec![ViewSpan::plain(format!(
-                "[{focus_label}] c:Codes {digest_key} r:Chron p:WhatIf Ctrl+L:Lock q:Quit"
+                "[{mode_tag}] c:Codes {digest_key} r:Chron p:WhatIf Ctrl+L:Lock q:Quit"
             ))],
             style: ViewStyle::plain(),
         }),
@@ -3229,7 +3218,6 @@ fn build_screen_reader_turn_screen(
 fn format_mandate_provenance(
     seat_idx: usize,
     kind: MandateKind,
-    _bonus_awarded: i64,
     data: &league_seat_types::EndOfSeasonData,
     commodities: Option<&CommodityDisplayMap>,
     plain_codes: bool,
@@ -3244,54 +3232,19 @@ fn format_mandate_provenance(
                 .iter()
                 .find(|e| e.seat == seat_u8)
                 .map_or(0, |e| e.project_equity);
-            if let Some(series) = data.project_equity_by_turn.get(seat_idx)
-                && !series.is_empty()
-            {
-                let mut prev = 0_i64;
-                let mut deliveries = Vec::new();
-                let mut hit_turn: Option<u8> = None;
-                for (t_idx, &cum) in series.iter().enumerate() {
-                    let turn_num = (t_idx + 1) as u8;
-                    let delta = cum - prev;
-                    if delta > 0 {
-                        deliveries.push(format!("T{turn_num}(+{delta})"));
-                    }
-                    if hit_turn.is_none() && cum >= target {
-                        hit_turn = Some(turn_num);
-                    }
-                    prev = cum;
-                }
-                let deliv_str = if deliveries.is_empty() {
-                    "none".to_owned()
-                } else {
-                    deliveries.join(", ")
-                };
-                let hit_str = hit_turn.map_or_else(
-                    || format!("unmet at T{close_t}"),
-                    |t| format!("target reached T{t}"),
-                );
-                format!(
-                    "Provenance: project equity {final_proj}/{target} [deliveries: {deliv_str}; {hit_str}]"
-                )
+            let status_note = if final_proj >= target {
+                format!("target met by T{close_t}")
             } else {
-                let status_note = if final_proj >= target {
-                    format!("target met by T{close_t}")
-                } else {
-                    format!("unmet at T{close_t}")
-                };
-                format!("Provenance: project equity {final_proj}/{target} [{status_note}]")
-            }
+                format!("unmet at T{close_t}")
+            };
+            format!("Provenance: project equity {final_proj}/{target} [{status_note}]")
         }
         MandateKind::MinActivePartners { min_partners } => {
             let mut first_partner_turn: [Option<u8>; 6] = [None; 6];
             let mut partner_order: Vec<(u8, u8)> = Vec::new();
             for r in &data.public_receipts {
                 for f in &r.fills {
-                    if matches!(
-                        f.kind,
-                        FillKind::BatchFill | FillKind::AtomicSwap | FillKind::ContractDelivery
-                    ) && f.net_units > 0
-                    {
+                    if fill_records_partner_delivery(f) {
                         let peer = if f.from == Some(seat_u8) && f.to != seat_u8 {
                             Some(f.to)
                         } else if f.to == seat_u8 {
@@ -3359,23 +3312,6 @@ fn format_mandate_provenance(
                     qualified.push(format!("{label}={} since T{since_t}", sc.own_units));
                 }
             }
-            if qualified.is_empty() {
-                for sc in &close_pred.season_end.holdings {
-                    if let AssetId::Refined(_) = sc.good
-                        && sc.units >= min_each
-                    {
-                        let label = format_asset_label(sc.good, commodities, plain_codes);
-                        let since_t = earliest_continuous_refined_turn(
-                            seat_idx,
-                            sc.good,
-                            min_each,
-                            close_t,
-                            &data.predicate_turns,
-                        );
-                        qualified.push(format!("{label}={} since T{since_t}", sc.units));
-                    }
-                }
-            }
             let summary = if qualified.is_empty() {
                 "none".to_owned()
             } else {
@@ -3394,18 +3330,12 @@ fn format_mandate_provenance(
                 .iter()
                 .find(|e| e.seat == seat_u8)
                 .map_or(CreditTier::Aaa, |e| e.credit_tier);
-            let tier_rank = |t: CreditTier| match t {
-                CreditTier::Aaa => 0_u8,
-                CreditTier::Bbb => 1,
-                CreditTier::B => 2,
-                CreditTier::D => 3,
-            };
             let tier_from_bps = |bps: u16| -> CreditTier {
-                if bps <= 400 {
+                if bps <= CreditTier::Aaa.interest_bps() {
                     CreditTier::Aaa
-                } else if bps <= 1_000 {
+                } else if bps <= CreditTier::Bbb.interest_bps() {
                     CreditTier::Bbb
-                } else if bps <= 1_800 {
+                } else if bps <= CreditTier::B.interest_bps() {
                     CreditTier::B
                 } else {
                     CreditTier::D
@@ -3413,14 +3343,13 @@ fn format_mandate_provenance(
             };
             let mut drop_turns = Vec::new();
             for tp in &data.predicate_turns {
-                if let Some(seat_pred) = tp.at_turn_start.get(seat_idx) {
-                    let t = tier_from_bps(seat_pred.upkeep.interest_bps);
-                    if tier_rank(t) > tier_rank(min_tier) {
-                        drop_turns.push(tp.turn);
-                    }
+                if let Some(seat_pred) = tp.at_turn_start.get(seat_idx)
+                    && tier_from_bps(seat_pred.upkeep.interest_bps) > min_tier
+                {
+                    drop_turns.push(tp.turn);
                 }
             }
-            if tier_rank(terminal_tier) <= tier_rank(min_tier) && drop_turns.is_empty() {
+            if terminal_tier <= min_tier && drop_turns.is_empty() {
                 format!(
                     "Provenance: credit >= {min_tier:?} held T1..=T{close_t} (terminal {terminal_tier:?})"
                 )

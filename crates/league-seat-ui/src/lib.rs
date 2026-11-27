@@ -2118,7 +2118,6 @@ mod tests {
             export_state: ReplayExportState::Ready,
             public_receipts: Vec::new(),
             predicate_turns: Vec::new(),
-            project_equity_by_turn: Vec::new(),
         };
         let ui = EndOfSeasonUiState::new();
         let tab1_txt = render_end_of_season_screen(&eos_data, &ui, None, vp).plain_text();
@@ -2168,8 +2167,10 @@ mod tests {
     #[test]
     fn snapshot_accessibility_glyphs_no_color_screen_reader_and_resume_digest() {
         use league_seat_types::{
-            ActiveShock, CredOffer, FillKind, FillRecord, OfferSide, PublicSweepReceipt,
-            ShockForecastEvent, ShockKind, TurnPhase, ViewColor,
+            ActiveShock, BrokenPromiseRecord, CharterRole, CredOffer, CurtainPinMode, FillKind,
+            FillRecord, OfferSide, PublicSweepReceipt, SeatSpoilagePreview, SeatUpkeepPreview,
+            ShockForecastEvent, ShockKind, Step0To7SweepSummary, TurnPhase, ViewColor,
+            WhatIfPreview,
         };
 
         let make_rcpt = |turn: u8| PublicSweepReceipt {
@@ -2233,21 +2234,67 @@ mod tests {
                 created_turn: 23,
             },
         );
-        obs.offers.insert(
-            78,
-            CredOffer {
-                offer_id: 78,
-                maker: 2,
-                side: OfferSide::Buy,
-                good: AssetId::Raw(0),
-                remaining_units: 400,
-                price_per_unit_cred: 1_900,
-                locked_cred: 760,
-                domain_id: None,
-                is_hybrid: false,
-                created_turn: 23,
+        let mut r21 = make_rcpt(21);
+        r21.fills = vec![
+            FillRecord {
+                turn: 21,
+                kind: FillKind::BatchFill,
+                good: Some(AssetId::Raw(0)),
+                from: Some(1),
+                to: 0,
+                units: 500,
+                net_units: 460,
+                cred_amount: 500,
+                unit_price_cred: Some(1_000),
             },
-        );
+            FillRecord {
+                turn: 21,
+                kind: FillKind::ContractDelivery,
+                good: Some(AssetId::Refined(0)),
+                from: Some(0),
+                to: 2,
+                units: 200,
+                net_units: 190,
+                cred_amount: 300,
+                unit_price_cred: Some(1_500),
+            },
+            FillRecord {
+                turn: 21,
+                kind: FillKind::CheckCashed,
+                good: Some(AssetId::Cred),
+                from: Some(0),
+                to: 3,
+                units: 100,
+                net_units: 100,
+                cred_amount: 100,
+                unit_price_cred: None,
+            },
+            FillRecord {
+                turn: 21,
+                kind: FillKind::TownImport,
+                good: Some(AssetId::Raw(1)),
+                from: None,
+                to: 0,
+                units: 100,
+                net_units: 100,
+                cred_amount: 400,
+                unit_price_cred: None,
+            },
+        ];
+        r21.public_forecasts = vec![ShockForecastEvent {
+            target_seat: 1,
+            kind: ShockKind::SupplyFreeze,
+            realize_turn: 25,
+        }];
+        r21.charters_awarded = vec![(CharterRole::ClearinghouseBroker, 1)];
+        r21.broken_promises = vec![BrokenPromiseRecord {
+            pledge_id: 11,
+            promisor: 2,
+            counterparty: 0,
+            weight: 200,
+        }];
+        r21.pbrs_deltas = vec![320, -140, 0, 50];
+
         let mut r22 = make_rcpt(22);
         r22.batch_trades_cleared = 2;
         r22.atomic_swaps_settled = 1;
@@ -2267,23 +2314,61 @@ mod tests {
         }];
         r22.fills = vec![FillRecord {
             turn: 22,
-            kind: FillKind::BatchFill,
-            good: Some(AssetId::Raw(0)),
+            kind: FillKind::AtomicSwap,
+            good: None,
             from: Some(1),
             to: 0,
-            units: 500,
-            net_units: 460,
-            cred_amount: 500,
-            unit_price_cred: Some(1_000),
+            units: 100,
+            net_units: 0,
+            cred_amount: 100,
+            unit_price_cred: None,
         }];
-        r22.pbrs_deltas = vec![320, -140, 0, 50];
-        let r23 = make_rcpt(23);
-        obs.public_receipts = vec![r22, r23];
+        r22.pbrs_deltas = vec![-120, 0, 0, 0];
 
-        // 1. Standard view with `no_color = true`, `resume_digest_open = true`, and What-If + glyphs.
+        let r23 = make_rcpt(23);
+        obs.public_receipts = vec![r21, r22, r23];
+
+        // 1. Standard view with `no_color = true`, `resume_digest_open = true`, What-If falling debt.
         let mut st = SeatUiState::new();
         st.set_no_color(true);
         st.set_resume_digest_open(true);
+        let mut pre_seat = obs.seats[0].clone();
+        pre_seat.cred_debt = 600;
+        let mut post_seat = obs.seats[0].clone();
+        post_seat.cred_debt = 480;
+        let wf = WhatIfPreview {
+            seat: obs.seat,
+            turn: obs.turn,
+            baseline_predicates: obs.baseline_predicates.clone(),
+            pre_seat_state: pre_seat,
+            post_market_seat_state: obs.seats[0].clone(),
+            post_sweep_seat_state: post_seat,
+            post_sweep_predicates: obs.baseline_predicates.clone(),
+            close_mark_caveat: league_seat_types::HYPOTHETICAL_CLOSE_MARK_CAVEAT.to_owned(),
+            refused_market_actions: Vec::new(),
+            converter_orders: Vec::new(),
+            project_orders: Vec::new(),
+            swap_orders: Vec::new(),
+            check_orders: Vec::new(),
+            escrow_orders: Vec::new(),
+            upkeep: SeatUpkeepPreview {
+                upkeep_good: 3,
+                upkeep_required: 1_800,
+                paid_with_refined: 1_800,
+                debt_interest_accrued: 0,
+                new_shortfall_debt: 0,
+                debt_repaid_cred: 0,
+            },
+            spoilage: SeatSpoilagePreview {
+                perishable_spoiled_units: 0,
+            },
+            public_fills: Vec::new(),
+            step0_to_7_receipt: Step0To7SweepSummary::from_public_sweep_receipt(
+                &obs.public_receipts[0],
+            ),
+        };
+        st.set_what_if_preview(Some(wf.clone()));
+        st.active_tab = CenterTab::WhatIfSandbox;
         assert!(st.no_color() && st.resume_digest_open());
         let turn_no_color = render_turn_screen(&obs, &st, PassKind::SubPassA, None, vp);
         for z in &turn_no_color.zones {
@@ -2299,26 +2384,38 @@ mod tests {
             }
         }
         let no_color_txt = turn_no_color.plain_text();
-        assert!(no_color_txt.contains("= [OPEN BOOK]"));
-        assert!(no_color_txt.contains("▲ S0 DemandSurge 1500bps"));
-        assert!(no_color_txt.contains("▼ S1 SupplyFreeze at T25"));
-        assert!(no_color_txt.contains("▲ Buy"));
-        assert!(no_color_txt.contains("▼ Sell"));
-        assert!(no_color_txt.contains("vs parity"));
+        assert!(no_color_txt.contains("[OPEN BOOK]"));
+        assert!(no_color_txt.contains("Active Shocks: S0 DemandSurge 1500bps"));
+        assert!(no_color_txt.contains("Forecasts: S1 SupplyFreeze at T25"));
+        assert!(no_color_txt.contains("Debt 480 ▼-120"));
+        assert!(!no_color_txt.contains("vs parity"));
         assert!(
-            no_color_txt.contains("Previously This Season (Turns T22..=T23, 2 swept) [d: toggle]")
+            no_color_txt.contains("Previously This Season (Turns T21..=T23, 3 swept) [d: toggle]")
         );
-        assert!(no_color_txt.contains("Seat S0: PBRS cum ▲+320 (last T23: =0)"));
-        assert!(no_color_txt.contains("fills in:1 out:0 partners:1"));
-        assert!(
-            no_color_txt
-                .contains("Table Totals: trades=2 swaps=1 conv=3 proj=1 debt=▼400 spoil=▼150")
-        );
-        assert!(
-            no_color_txt
-                .contains("Credit/Gov: checks(▲1/▼1) esc(0/0) promises(=0) officers(TM=S1, CC=S2)")
-        );
+        assert!(no_color_txt.contains("Seat S0: PBRS cum ▲+200 (last T23: =0)"));
+        assert!(no_color_txt.contains("fills in:2 out:2 partners:3"));
+        assert!(no_color_txt.contains("= 0 Regent/non-reveal interventions"));
         assert!(no_color_txt.contains("d:HideDigest"));
+
+        // Rising debt prints ▲+...
+        let mut st_rise = st.clone();
+        let mut wf_rise = wf;
+        wf_rise.pre_seat_state.cred_debt = 100;
+        wf_rise.post_sweep_seat_state.cred_debt = 350;
+        st_rise.set_what_if_preview(Some(wf_rise));
+        let rise_txt =
+            render_turn_screen(&obs, &st_rise, PassKind::SubPassA, None, vp).plain_text();
+        assert!(rise_txt.contains("Debt 350 ▲+250"));
+
+        // Regent / non-reveal & converted_to_ai custody paths in digest.
+        let mut obs_reg = obs.clone();
+        obs_reg.public_receipts[1].regent_acted_seats = vec![0];
+        obs_reg.public_receipts[2].non_reveal_seats = vec![0];
+        let reg_txt = render_turn_screen(&obs_reg, &st, PassKind::SubPassA, None, vp).plain_text();
+        assert!(reg_txt.contains("▼ regent_turns=[22] non_reveal=[23]"));
+        obs_reg.public_receipts[2].converted_to_ai = vec![0];
+        let ai_txt = render_turn_screen(&obs_reg, &st, PassKind::SubPassA, None, vp).plain_text();
+        assert!(ai_txt.contains("▼ converted_to_ai@T23"));
 
         // Determinism + `[d]` toggle snapshot.
         let again = render_turn_screen(&obs, &st, PassKind::SubPassA, None, vp).plain_text();
@@ -2340,10 +2437,11 @@ mod tests {
         let mut st_t1 = st.clone();
         st_t1.set_resume_digest_open(true);
         let t1_txt = render_turn_screen(&obs_t1, &st_t1, PassKind::SubPassA, None, vp).plain_text();
-        assert!(t1_txt.contains("Previously This Season (= T1 opening — 0 prior turns swept)"));
+        assert!(t1_txt.contains("Previously This Season (T1 opening — 0 prior turns swept)"));
 
-        // 2. `--screen-reader` linear plain-text Turn view snapshot + scrolling + inline modal.
+        // 2. `--screen-reader` linear mode: edit tags, collapsed digest, arrow auto-scroll, modal.
         let mut sr_state = st.clone();
+        sr_state.active_tab = CenterTab::MarketAndContracts;
         sr_state.set_screen_reader(true);
         let sr_view = render_turn_screen(&obs, &sr_state, PassKind::SubPassA, None, vp);
         assert_eq!(sr_view.zones.len(), 1);
@@ -2365,6 +2463,7 @@ mod tests {
             "=== ACTIVE WORKSPACE: 1: Market & Contracts ===",
             "=== PRIVATE VAULT (SEAT S0 ONLY) ===",
             "[SELECTED] Side: Buy",
+            "[Focus: Center]",
         ] {
             assert!(
                 sr_txt.contains(heading),
@@ -2372,19 +2471,106 @@ mod tests {
             );
         }
 
-        // Scroll in screen-reader mode via PageDown/PageUp/Home and inline Chronicle modal.
-        let sr_paged = handle_seat_key(
+        // Edit Draft (`e`) and Edit Notes (`n`) tags stay visible in screen-reader mode.
+        let sr_edit_draft = handle_seat_key(
             &obs,
             sr_state.clone(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('e'), SeatKeyModifiers::NONE),
+        );
+        assert!(
+            sr_edit_draft
+                .view
+                .plain_text()
+                .contains("EDIT DRAFT (Enter apply | Esc cancel)")
+        );
+        let sr_edit_notes = handle_seat_key(
+            &obs,
+            sr_state.clone(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('n'), SeatKeyModifiers::NONE),
+        );
+        assert!(
+            sr_edit_notes
+                .view
+                .plain_text()
+                .contains("EDIT NOTES (Enter/Esc done)")
+        );
+
+        // Collapsed digest in screen-reader mode + arrow selection scrolling + PageUp/PageDown/Home.
+        let sr_collapsed = handle_seat_key(
+            &obs,
+            sr_state.clone(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('d'), SeatKeyModifiers::NONE),
+        );
+        assert!(
+            sr_collapsed
+                .view
+                .plain_text()
+                .contains("Collapsed summary for Turns")
+        );
+        let sr_vp_short = ViewportSize::new(100, 24);
+        let sr_arrow = handle_seat_key(
+            &obs,
+            sr_state.clone(),
+            PassKind::SubPassA,
+            None,
+            sr_vp_short,
+            key(SeatKeyCode::Down, SeatKeyModifiers::NONE),
+        );
+        assert!(sr_arrow.state.screen_reader_scroll() > 0);
+        let sr_up_bound = handle_seat_key(
+            &obs,
+            sr_arrow.state.clone(),
+            PassKind::SubPassA,
+            None,
+            sr_vp_short,
+            key(SeatKeyCode::Up, SeatKeyModifiers::NONE),
+        );
+        let sr_f6 = handle_seat_key(
+            &obs,
+            sr_up_bound.state,
+            PassKind::SubPassA,
+            None,
+            sr_vp_short,
+            key(SeatKeyCode::F(6), SeatKeyModifiers::NONE),
+        );
+        let sr_home = handle_seat_key(
+            &obs,
+            sr_f6.state.clone(),
+            PassKind::SubPassA,
+            None,
+            sr_vp_short,
+            key(SeatKeyCode::Home, SeatKeyModifiers::NONE),
+        );
+        assert_eq!(sr_home.state.screen_reader_scroll(), 0);
+        let sr_paged = handle_seat_key(
+            &obs,
+            sr_home.state,
             PassKind::SubPassA,
             None,
             vp,
             key(SeatKeyCode::PageDown, SeatKeyModifiers::NONE),
         );
         assert!(sr_paged.state.screen_reader_scroll() > 0);
-        let sr_chron = handle_seat_key(
+        let sr_pageup = handle_seat_key(
             &obs,
             sr_paged.state,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::PageUp, SeatKeyModifiers::NONE),
+        );
+        let sr_chron = handle_seat_key(
+            &obs,
+            sr_pageup.state,
             PassKind::SubPassA,
             None,
             vp,
@@ -2397,7 +2583,17 @@ mod tests {
                 .contains("=== ACTIVE MODAL: SWEEP CHRONICLE")
         );
 
-        // 3. Curtain / Neutral / AwaitingReveal / Lobby via `apply_accessibility` + overrides.
+        // 3. Curtain (PIN retry/lockout, armed, small viewport) / Neutral / Lobby / EOS.
+        let small_sr = render_turn_screen(
+            &obs,
+            &sr_state,
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(60, 18),
+        );
+        assert!(!small_sr.zones[0].panel.bordered);
+        assert!(small_sr.plain_text().contains("▼ Terminal too small"));
+
         let curtain_sr = crate::apply_accessibility(
             curtain_view(
                 TableId(9),
@@ -2419,6 +2615,26 @@ mod tests {
         );
         assert!(curtain_sr.plain_text().contains("▲ HAND-OFF ARMED"));
 
+        let curtain_pin_fail = curtain_view(
+            TableId(9),
+            Turn(2),
+            PassKind::SubPassA,
+            Seat(0),
+            vp,
+            false,
+            CurtainPinPrompt {
+                mode: CurtainPinMode::VerifyPin,
+                entered_count: 2,
+                failed_attempts: 1,
+                locked_out_reset: false,
+            },
+        );
+        assert!(
+            curtain_pin_fail
+                .plain_text()
+                .contains("▼ ENTER 4-DIGIT SEAT PIN")
+        );
+
         let standby_sr = crate::apply_accessibility(
             neutral_session_view(
                 TableId(9),
@@ -2432,7 +2648,7 @@ mod tests {
             true,
             true,
         );
-        assert!(standby_sr.plain_text().contains("▼ Pass advance failed"));
+        assert!(standby_sr.plain_text().contains("Pass advance failed"));
 
         let lobby_sr = render_lobby_screen(
             &LobbyState::new(),
@@ -2497,7 +2713,6 @@ mod tests {
         };
 
         let mut close_preds = vec![pred_base.clone(); 4];
-        // Seat 2 satisfies MinRefinedVariety (2 distinct refined >= 1500) continuously from T4 / T9.
         close_preds[2].scarcity = vec![
             make_scarcity(AssetId::Refined(0), 1_800),
             make_scarcity(AssetId::Refined(2), 1_600),
@@ -2509,7 +2724,7 @@ mod tests {
             sweep: Vec::new(),
         };
         tp_t4.at_turn_start[2].scarcity = vec![make_scarcity(AssetId::Refined(0), 1_500)];
-        tp_t4.at_turn_start[3].upkeep.interest_bps = 1_800; // B rating (below Aaa)
+        tp_t4.at_turn_start[3].upkeep.interest_bps = CreditTier::B.interest_bps();
 
         let mut tp_t9 = TurnPredicateRecord {
             turn: 9,
@@ -2520,7 +2735,7 @@ mod tests {
             make_scarcity(AssetId::Refined(0), 1_800),
             make_scarcity(AssetId::Refined(2), 1_600),
         ];
-        tp_t9.at_turn_start[3].upkeep.interest_bps = 1_800;
+        tp_t9.at_turn_start[3].upkeep.interest_bps = CreditTier::Bbb.interest_bps();
 
         let empty_rcpt = |turn: u8, fills: Vec<FillRecord>| PublicSweepReceipt {
             turn,
@@ -2573,13 +2788,13 @@ mod tests {
             8,
             vec![FillRecord {
                 turn: 8,
-                kind: FillKind::AtomicSwap,
-                good: Some(AssetId::Refined(1)),
+                kind: FillKind::CheckCashed,
+                good: Some(AssetId::Cred),
                 from: Some(2),
                 to: 1,
                 units: 400,
                 net_units: 400,
-                cred_amount: 0,
+                cred_amount: 400,
                 unit_price_cred: None,
             }],
         );
@@ -2676,19 +2891,15 @@ mod tests {
             export_state: ReplayExportState::Ready,
             public_receipts: vec![r3, r8],
             predicate_turns: vec![tp_t4, tp_t9],
-            project_equity_by_turn: vec![
-                vec![0, 0, 0, 8_000, 8_000, 8_000, 20_000, 20_000, 20_000, 20_000],
-                vec![0; 10],
-                vec![0; 10],
-                vec![0; 10],
-            ],
         };
 
         let mut ui = EndOfSeasonUiState::new();
         ui.set_no_color(true);
+        ui.set_screen_reader(true);
+        assert!(ui.no_color() && ui.screen_reader());
         let tab2 = handle_end_of_season_key(
             &eos,
-            ui,
+            ui.clone(),
             None,
             vp,
             key(SeatKeyCode::Char('2'), SeatKeyModifiers::NONE),
@@ -2697,12 +2908,12 @@ mod tests {
         assert!(txt.contains("▲ AWARDED +5000"));
         assert!(txt.contains("▼ Unmet (+0)"));
         assert!(
-            txt.contains("Provenance: project equity 20000/18000 [deliveries: T4(+8000), T7(+12000); target reached T7]"),
+            txt.contains("Provenance: project equity 20000/18000 [target met by T10]"),
             "missing project equity provenance:\n{txt}"
         );
         assert!(
             txt.contains("Provenance: active partners 2/2 [S0@T3, S2@T8; target met T8]"),
-            "missing active partners provenance:\n{txt}"
+            "missing CheckCashed active partners provenance:\n{txt}"
         );
         assert!(
             txt.contains("since T4"),
@@ -2716,6 +2927,41 @@ mod tests {
             txt.contains("Provenance: credit below Aaa at T4..=T9 (terminal B)"),
             "missing MaintainCleanCredit breach turn span:\n{txt}"
         );
+
+        // Edge / unmet / empty provenance branches.
+        let mut eos_edge = eos.clone();
+        eos_edge.scoreboard.standings[0].project_equity = 2_000;
+        eos_edge.scoreboard.standings[3].credit_tier = CreditTier::D;
+        eos_edge.public_receipts.clear();
+        eos_edge.predicate_turns.clear();
+        eos_edge.close_predicates.clear();
+        let tab2_empty = handle_end_of_season_key(
+            &eos_edge,
+            ui.clone(),
+            None,
+            vp,
+            key(SeatKeyCode::Char('2'), SeatKeyModifiers::NONE),
+        );
+        let empty_txt = tab2_empty.view.plain_text();
+        assert!(empty_txt.contains("Provenance: project equity 2000/18000 [unmet at T10]"));
+        assert!(
+            empty_txt.contains("Provenance: active partners target 2 [evaluated at T10 close]")
+        );
+        assert!(empty_txt.contains("Provenance: refined >= 1500 x2 evaluated at T10"));
+        assert!(empty_txt.contains("Provenance: terminal credit D below Aaa at T10"));
+
+        // Clean credit held + unmet active partners with 1 fill.
+        eos_edge.revealed_mandates[3] = PrivateMandate {
+            kind: MandateKind::MaintainCleanCredit {
+                min_tier: CreditTier::D,
+            },
+            bonus_equity: 3_000,
+        };
+        eos_edge.public_receipts = vec![empty_rcpt(3, Vec::new())];
+        let tab2_clean =
+            render_end_of_season_screen(&eos_edge, &tab2_empty.state, None, vp).plain_text();
+        assert!(tab2_clean.contains("Provenance: active partners 0/2 [none; unmet at T10]"));
+        assert!(tab2_clean.contains("Provenance: credit >= D held T1..=T10 (terminal D)"));
 
         let _ = LobbyCliOverrides::default();
     }

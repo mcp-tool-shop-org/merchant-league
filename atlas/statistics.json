@@ -205,7 +205,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-seat-types",
-      "qualifyingSourceCommits": 4,
+      "qualifyingSourceCommits": 5,
       "rebaseline": null
     },
     {
@@ -223,7 +223,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-seat-ui",
-      "qualifyingSourceCommits": 3,
+      "qualifyingSourceCommits": 4,
       "rebaseline": null
     },
     {
@@ -255,7 +255,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-tui",
-      "qualifyingSourceCommits": 6,
+      "qualifyingSourceCommits": 7,
       "rebaseline": null
     },
     {
@@ -330,8 +330,8 @@
         "path": ".polyglot-pins.json"
       },
       {
-        "commits": 94,
-        "lines": 644,
+        "commits": 95,
+        "lines": 650,
         "path": "CHANGELOG.md"
       },
       {
@@ -385,8 +385,8 @@
         "path": "README.ja.md"
       },
       {
-        "commits": 14,
-        "lines": 192,
+        "commits": 15,
+        "lines": 195,
         "path": "README.md"
       },
       {
@@ -410,8 +410,8 @@
         "path": "SHIP_GATE.md"
       },
       {
-        "commits": 86,
-        "lines": 1874,
+        "commits": 87,
+        "lines": 1884,
         "path": "atlas/README.md"
       },
       {
@@ -420,18 +420,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 86,
-        "lines": 6981,
+        "commits": 87,
+        "lines": 7025,
         "path": "atlas/page.json"
       },
       {
-        "commits": 86,
-        "lines": 24647,
+        "commits": 87,
+        "lines": 25011,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 86,
-        "lines": 96171,
+        "commits": 87,
+        "lines": 96843,
         "path": "atlas/structure.json"
       },
       {
@@ -1375,8 +1375,8 @@
         "path": "crates/league-seat-types/src/types.rs"
       },
       {
-        "commits": 4,
-        "lines": 1242,
+        "commits": 5,
+        "lines": 1262,
         "path": "crates/league-seat-types/src/view.rs"
       },
       {
@@ -1390,23 +1390,23 @@
         "path": "crates/league-seat-ui/clippy.toml"
       },
       {
-        "commits": 3,
-        "lines": 1518,
+        "commits": 4,
+        "lines": 1547,
         "path": "crates/league-seat-ui/src/composer.rs"
       },
       {
-        "commits": 4,
-        "lines": 2216,
+        "commits": 5,
+        "lines": 2786,
         "path": "crates/league-seat-ui/src/lib.rs"
       },
       {
-        "commits": 3,
-        "lines": 2626,
+        "commits": 4,
+        "lines": 3921,
         "path": "crates/league-seat-ui/src/render.rs"
       },
       {
-        "commits": 3,
-        "lines": 1207,
+        "commits": 4,
+        "lines": 1289,
         "path": "crates/league-seat-ui/src/state.rs"
       },
       {
@@ -1445,8 +1445,8 @@
         "path": "crates/league-tui/Cargo.toml"
       },
       {
-        "commits": 6,
-        "lines": 9492,
+        "commits": 7,
+        "lines": 10109,
         "path": "crates/league-tui/src/host.rs"
       },
       {
@@ -1455,8 +1455,8 @@
         "path": "crates/league-tui/src/lib.rs"
       },
       {
-        "commits": 6,
-        "lines": 6216,
+        "commits": 7,
+        "lines": 6443,
         "path": "crates/league-tui/src/main.rs"
       },
       {
@@ -1465,8 +1465,8 @@
         "path": "docs/checkpoint-trust.md"
       },
       {
-        "commits": 20,
-        "lines": 607,
+        "commits": 21,
+        "lines": 614,
         "path": "docs/club-mode-design.md"
       },
       {
@@ -1930,13 +1930,13 @@
         "path": "site/src/content/docs/handbook/index.md"
       },
       {
-        "commits": 6,
-        "lines": 234,
+        "commits": 7,
+        "lines": 247,
         "path": "site/src/content/docs/handbook/playing-a-turn.md"
       },
       {
-        "commits": 8,
-        "lines": 136,
+        "commits": 9,
+        "lines": 140,
         "path": "site/src/content/docs/handbook/reference.md"
       },
       {
@@ -3785,38 +3785,38 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-27T14:16:39.027Z",
+  "generatedAt": "2026-11-27T15:49:22.190Z",
   "generatedFrom": {
-    "commit": "3310884bb60e11619a96ef372c8aea333aef8b39"
+    "commit": "7ec3a142b12ae7c7509890addf1276f4dd27dd55"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
       "b": "atlas/README.md",
-      "either": 89,
-      "shared": 55,
-      "strength": 0.617978
+      "either": 90,
+      "shared": 56,
+      "strength": 0.622222
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/page.json",
-      "either": 89,
-      "shared": 55,
-      "strength": 0.617978
+      "either": 90,
+      "shared": 56,
+      "strength": 0.622222
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/statistics.json",
-      "either": 89,
-      "shared": 55,
-      "strength": 0.617978
+      "either": 90,
+      "shared": 56,
+      "strength": 0.622222
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/structure.json",
-      "either": 89,
-      "shared": 55,
-      "strength": 0.617978
+      "either": 90,
+      "shared": 56,
+      "strength": 0.622222
     },
     {
       "a": "README.es.md",
@@ -4024,43 +4024,43 @@
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 67,
-      "shared": 67,
+      "either": 68,
+      "shared": 68,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 67,
-      "shared": 67,
+      "either": 68,
+      "shared": 68,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 67,
-      "shared": 67,
+      "either": 68,
+      "shared": 68,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 67,
-      "shared": 67,
+      "either": 68,
+      "shared": 68,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 67,
-      "shared": 67,
+      "either": 68,
+      "shared": 68,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 67,
-      "shared": 67,
+      "either": 68,
+      "shared": 68,
       "strength": 1
     },
     {
@@ -4563,16 +4563,16 @@
     {
       "a": "crates/league-tui/src/host.rs",
       "b": "crates/league-tui/src/main.rs",
-      "either": 6,
-      "shared": 4,
-      "strength": 0.666667
+      "either": 7,
+      "shared": 5,
+      "strength": 0.714286
     },
     {
       "a": "crates/league-tui/src/main.rs",
       "b": "site/src/content/docs/handbook/playing-a-turn.md",
-      "either": 7,
-      "shared": 4,
-      "strength": 0.571429
+      "either": 8,
+      "shared": 5,
+      "strength": 0.625
     },
     {
       "a": "scripts/check-copy.sh",
@@ -4592,16 +4592,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-26T09:56:17-05:00",
+    "headDate": "2026-11-27T09:20:04-05:00",
     "inScopeFiles": 690,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 106,
+    "qualifyingCommits": 107,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-30T14:56:17.000Z",
+    "since": "2026-05-31T14:20:04.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

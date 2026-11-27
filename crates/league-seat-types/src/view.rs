@@ -1116,9 +1116,6 @@ pub struct EndOfSeasonData {
     /// Ordered per-turn public/post-close state predicate snapshots (`StatePredicateSection.turns`).
     #[serde(default)]
     pub predicate_turns: Vec<TurnPredicateRecord>,
-    /// Per-seat (`0..seat_count`) cumulative Tier-3 `project_equity` after each turn (`T1..=closed_turn`).
-    #[serde(default)]
-    pub project_equity_by_turn: Vec<Vec<i64>>,
 }
 
 #[cfg(test)]
