@@ -5,7 +5,8 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::commit::PrivateMandate;
-use crate::predicates_types::{SeatSeasonMetrics, SeatStatePredicates};
+use crate::observation::PublicSweepReceipt;
+use crate::predicates_types::{SeatSeasonMetrics, SeatStatePredicates, TurnPredicateRecord};
 use crate::scoring_types::FinalScoreboard;
 use crate::types::{TableId, Turn};
 
@@ -1058,6 +1059,12 @@ pub struct LobbyCliOverrides {
     pub untimed: bool,
     /// `true` when `--pins` was passed on CLI.
     pub pins_enabled: bool,
+    /// `true` when `--no-color` or a non-empty `NO_COLOR` env var suppresses ANSI palette colors.
+    #[serde(default)]
+    pub no_color: bool,
+    /// `true` when `--screen-reader` enables linear plain-text rendering without box borders.
+    #[serde(default)]
+    pub screen_reader: bool,
 }
 
 /// Public progress counter rendered during `TurnPhase::AwaitingMandateReveal` before finalization.
@@ -1103,6 +1110,12 @@ pub struct EndOfSeasonData {
     pub season_metrics: Vec<SeatSeasonMetrics>,
     /// Replay export status for Tab 4 (`Ready`, `Exported`, `Failed`).
     pub export_state: ReplayExportState,
+    /// Ordered public sweep receipts (`T1..=closed_turn`) for mandate delivery/bounce turn provenance.
+    #[serde(default)]
+    pub public_receipts: Vec<PublicSweepReceipt>,
+    /// Ordered per-turn public/post-close state predicate snapshots (`StatePredicateSection.turns`).
+    #[serde(default)]
+    pub predicate_turns: Vec<TurnPredicateRecord>,
 }
 
 #[cfg(test)]
@@ -1131,6 +1144,8 @@ mod tests {
         assert_eq!(ov.turn_clock_secs, None);
         assert!(!ov.untimed);
         assert!(!ov.pins_enabled);
+        assert!(!ov.no_color);
+        assert!(!ov.screen_reader);
 
         let prog = AwaitingRevealProgress {
             revealed_count: 1,

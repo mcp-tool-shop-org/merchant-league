@@ -38,6 +38,16 @@ Once the Curtain lifts for an active human seat, the turn renders inside a respo
 
 Goods appear with both their role-qualified guild name and 3-letter ledger code (for example `Rough Timber [TMB]`, `Seasoned Timber [TMB]`, and `Clearinghouse Marks [CRED]`). Press `c` at any time to toggle between guild names and plain codes.
 
+### Accessibility, glyphs & linear `--screen-reader` mode
+
+- **`NO_COLOR` and `--no-color`:** Setting a non-empty `NO_COLOR` environment variable or passing `--no-color` suppresses every ANSI foreground and background palette color across all Club Mode screens (Lobby, Privacy Curtain, four-zone Turn workspace, Session Standby, and End of Season).
+- **`▲` / `▼` / `=` glyphs:** Every genuinely color-coded indicator pairs with an explicit ASCII/Unicode shape marker — market lock status (`=` `[OPEN BOOK]` vs `▼` `[CANCEL LOCKED]`), Curtain state and PIN retries (`▲`/`=`/`▼`), `▼ Terminal too small`, What-If `CRED`/debt/equity trajectory deltas (`▼` when debt drops, `▲` when debt rises), resume digest `PBRS` and Regent/AI intervention badges, refusal banners (`▼ REFUSED`), and awarded vs unmet mandates — so screens remain unambiguous without color.
+- **`--screen-reader`:** Renders a linear plain-text, borderless layout (zero box-drawing frames or multi-column side-by-side splits) reading top-to-bottom across Header (including `EDIT DRAFT` / `EDIT NOTES` mode tags), **Previously This Season** digest, Public Table & Ledger Mirror, Active Workspace (`[SELECTED]` marks focused controls), and Private Vault, scrolling automatically with arrow/zone selection as well as `PageUp`/`PageDown`/`Home`.
+
+### Previously This Season resume digest
+
+When resuming a saved season (`--resume`) with completed turns, lifting the Privacy Curtain automatically opens the **Previously This Season** digest built deterministically from `PublicSweepReceipt`s (`pbrs_deltas`, bilateral trade fills/partners, table-wide clearing/converter/project/upkeep/spoilage totals, credit/governance outcomes, and up to the last three swept turns). Press `d` at any time to collapse or re-open the digest without exposing any private seat data.
+
 ## Reading the public ledger abbreviations
 
 The compact five-column table inside **Public Table & Ledger Mirror** uses fixed abbreviations so leading digits never clip across narrow layouts (`100×30` and `120×40`), paired with full unclipped **Standing & Legend** rows scrollable directly below the table:
@@ -96,7 +106,7 @@ When Step 8 rolls a close (`Turns 24..=32`), the turn moves to `AwaitingMandateR
 1. **Standby mandate reveals (`AwaitingMandateReveal`):** The screen stays on the strictly public standby counter (`Reveals: k/N`) showing **zero** mandates until all `N` seat reveals are submitted (`Enter` or `Space`).
 2. **End-of-Season 4-tab summary (`Completed`):** Submitting the final reveal calls `finalize_season()` and opens four tabs:
    - `1: Scoreboard` — ranked `FinalScoreboard` and standings ties.
-   - `2: Mandates` — every seat's unsealed Turn-1 `PrivateMandate` and earned `MandateBonus`.
+   - `2: Mandates` — every seat's unsealed Turn-1 `PrivateMandate`, earned `MandateBonus`, and deterministic turn-number `Provenance:` summary (`T<n>` project delivery turns, `S<p>@T<n>` active-partner fills, continuous refined holding turns, or credit rating trajectory across `T1..=T{close}`).
    - `3: Metrics & Marks` — close-marking splits (`HoldingMark`) and `SeatSeasonMetrics` solvency/honor stats (`c` toggles plain codes).
    - `4: Replay Export` — press `e` or `Enter` to serialize, verify, and atomically write `club-<id>.replay.json`, then automatically wipe the private `.seal` file. If another season's replay already occupies the target path, export refuses `REPLAY_TARGET_EXISTS` without overwriting it; if export fails (for instance an unwritable directory), `.seal` stays intact on disk, Tab 4 displays the exact `TUI_REPLAY_EXPORT_FAILED` or `REPLAY_TARGET_EXISTS` reason and hint, and exiting returns CLI exit code **`3`** (partial success) so you can resolve the path or retry into another `--save-dir`.
 
@@ -116,6 +126,7 @@ When Step 8 rolls a close (`Turns 24..=32`), the turn moves to `AwaitingMandateR
 | **Turn** | `e` / `n` | Edit free-text composer override (`e`) or Private Vault note (`n`), `Enter`/`Esc` finishes |
 | **Turn** | `Enter` / `p` / `Del` / `Backspace` / `X` | Submit action, stage bundle, run What-If (`p`), or clear staged entries (`X` clears all) |
 | **Turn / EOS** | `c` | Toggle in-world guild commodity names + `[CODE]` vs plain `[CODE]` |
+| **Turn** | `d` | Expand or collapse the deterministic **Previously This Season** resume digest |
 | **Turn** | `r` / `F2` | Open or close the Sweep Chronicle modal |
 | **Turn** | `Ctrl+l` / `Ctrl+L` | Lock active pass, clear drafts, and raise the Privacy Curtain |
 | **Curtain** | `Space` then `Enter` (+ 4 digits + `Enter` if PINs on) | Lift Privacy Curtain after `400 ms` dead time |

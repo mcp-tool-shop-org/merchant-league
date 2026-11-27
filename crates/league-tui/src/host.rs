@@ -16,12 +16,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use league_core::club::host::{ClubPauseCursor, ClubSessionCheckpoint};
 use league_core::{
     AiPreviewRequest, ClubBot, ClubHost, EngineError, MarketAction, OrderReveal, PrivateMandate,
-    SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, SeatObservation, StructuredError,
-    TableId, ToStructuredError, Turn, TurnPhase, preview_seat_bundle, preview_what_if,
-    scrub_secret_text,
+    PublicSweepReceipt, SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, SeatObservation,
+    StructuredError, TableId, ToStructuredError, Turn, TurnPhase, preview_seat_bundle,
+    preview_what_if, scrub_secret_text,
 };
 #[cfg(test)]
-use league_core::{PublicSweepReceipt, RevealSalt, SealedEvalSeed, SealedMandateDeal, TableSpec};
+use league_core::{RevealSalt, SealedEvalSeed, SealedMandateDeal, TableSpec};
 use league_gen::{
     GenError, GeneratorConfig, RingTable, SeatCount, SeedPool, TablePurpose, TableSetupOptions,
     generate_ring_table_for_setup, is_reserved_test_seed, ring_table_to_table_spec, seed_pool,
@@ -57,6 +57,8 @@ pub(crate) const EXIT_PARTIAL_SUCCESS: u8 = 3;
 
 /// Environment variable selecting default diagnostic log verbosity for `league-tui`.
 pub(crate) const LEAGUE_LOG_LEVEL_ENV: &str = "LEAGUE_LOG_LEVEL";
+/// Standard environment variable (`https://no-color.org/`) disabling terminal colors when non-empty.
+pub(crate) const NO_COLOR_ENV: &str = "NO_COLOR";
 
 /// CLI error output encoding selected via `--error-format` (`SHIP_GATE.md` `:26`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -723,11 +725,9 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar) -> u1
             }
             let mut st = map_style(item.label.style);
             if idx == tab_bar.active_index {
-                st = st
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD | Modifier::REVERSED);
+                st = st.add_modifier(Modifier::BOLD | Modifier::REVERSED);
             } else if !item.enabled {
-                st = st.fg(Color::DarkGray).add_modifier(Modifier::DIM);
+                st = st.add_modifier(Modifier::DIM);
             }
             let safe_chip = strip_terminal_controls(&chip);
             line_width += safe_chip.chars().count();
@@ -1150,6 +1150,28 @@ fn write_atomic_file_bytes(target: &Path, bytes: &[u8]) -> Result<(), String> {
     write_res
 }
 
+fn build_end_of_season_data_with_provenance(
+    table_id: TableId,
+    scoreboard: league_core::FinalScoreboard,
+    revealed_mandates: Vec<PrivateMandate>,
+    close_predicates: Vec<league_core::SeatStatePredicates>,
+    season_metrics: Vec<league_core::SeatSeasonMetrics>,
+    public_receipts: Vec<PublicSweepReceipt>,
+    predicate_turns: Vec<league_core::TurnPredicateRecord>,
+) -> EndOfSeasonData {
+    EndOfSeasonData {
+        table_id,
+        closed_turn: Turn(scoreboard.closed_turn),
+        scoreboard,
+        revealed_mandates,
+        close_predicates,
+        season_metrics,
+        export_state: ReplayExportState::Ready,
+        public_receipts,
+        predicate_turns,
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct EndOfSeasonSessionState {
     data: EndOfSeasonData,
@@ -1184,6 +1206,9 @@ pub struct TuiHostSession {
     post_season_error: Option<StructuredError>,
     turn_clock_budget_secs: Option<u16>,
     clock_explicitly_untimed: bool,
+    no_color: bool,
+    screen_reader: bool,
+    pending_resume_digest: Vec<bool>,
     active_pass_started_at: Option<Duration>,
     now: Duration,
     curtain_dead_until: Option<Duration>,
@@ -1291,6 +1316,9 @@ impl TuiHostSession {
             post_season_error: None,
             turn_clock_budget_secs: ckpt.turn_clock_secs,
             clock_explicitly_untimed: ckpt.untimed,
+            no_color: false,
+            screen_reader: false,
+            pending_resume_digest: vec![false; n],
             active_pass_started_at: None,
             now: Duration::ZERO,
             curtain_dead_until: None,
@@ -1308,16 +1336,17 @@ impl TuiHostSession {
                 ClubSessionCheckpoint::load_completed_season_artifacts(&session.host)
                     .map_err(|err| scrub_engine_error(&err))?;
             let revealed_mandates = extract_revealed_mandates(&replay_log, n)?;
+            let eos_data = build_end_of_season_data_with_provenance(
+                session.host.table_id(),
+                scoreboard,
+                revealed_mandates,
+                section.at_close,
+                season_metrics,
+                session.host.public_receipts().to_vec(),
+                section.turns,
+            );
             session.end_of_season = Some(EndOfSeasonSessionState {
-                data: EndOfSeasonData {
-                    table_id: session.host.table_id(),
-                    closed_turn: Turn(scoreboard.closed_turn),
-                    scoreboard,
-                    revealed_mandates,
-                    close_predicates: section.at_close,
-                    season_metrics,
-                    export_state: ReplayExportState::Ready,
-                },
+                data: eos_data,
                 ui_state: EndOfSeasonUiState::new(),
                 replay_log,
                 export_error: None,
@@ -1489,6 +1518,12 @@ impl TuiHostSession {
     fn restore_seat_ui_from_host(&mut self, seat: Seat) {
         let idx = usize::from(seat.0);
         self.seat_states[idx].clear_for_hand_off();
+        if let Some(pending) = self.pending_resume_digest.get_mut(idx)
+            && *pending
+        {
+            *pending = false;
+            self.seat_states[idx].set_resume_digest_open(true);
+        }
         let synced = self.pending_bundles[idx].clone();
         self.seat_states[idx].set_staged_bundle(synced);
         let note = self.seat_notes[idx].clone();
@@ -1874,6 +1909,39 @@ impl TuiHostSession {
         Ok(session)
     }
 
+    /// Applies CLI/env accessibility options (`NO_COLOR` / `--no-color` and `--screen-reader`)
+    /// consistently across the host session and all seat/end-of-season UI state holders.
+    pub(crate) fn configure_accessibility(&mut self, no_color: bool, screen_reader: bool) {
+        self.no_color = no_color;
+        self.screen_reader = screen_reader;
+        for state in &mut self.seat_states {
+            state.set_no_color(no_color);
+            state.set_screen_reader(screen_reader);
+        }
+        if let Some(eos) = &mut self.end_of_season {
+            eos.ui_state.set_no_color(no_color);
+            eos.ui_state.set_screen_reader(screen_reader);
+        }
+    }
+
+    /// Expands the `"Previously This Season"` resume digest for human seats when resuming a
+    /// season that already has swept [`PublicSweepReceipt`] turns.
+    pub(crate) fn activate_resume_digest_if_swept(&mut self) {
+        if self.host.public_receipts().is_empty() {
+            return;
+        }
+        for (idx, is_human) in self.human_seats.iter().copied().enumerate() {
+            if is_human {
+                if let Some(pending) = self.pending_resume_digest.get_mut(idx) {
+                    *pending = true;
+                }
+                if let Some(state) = self.seat_states.get_mut(idx) {
+                    state.set_resume_digest_open(true);
+                }
+            }
+        }
+    }
+
     /// Opens the Privacy Curtain for the currently active human seat using `open_curtain_for_seat`.
     pub(crate) fn open_initial_curtain_for_active_human(&mut self) {
         if self.curtain.is_none()
@@ -1988,14 +2056,18 @@ impl TuiHostSession {
         viewport: ViewportSize,
     ) -> Result<SeatScreenView, EngineError> {
         if let Some(curtain) = &self.curtain {
-            return Ok(league_seat_ui::curtain_view(
-                self.host.table_id(),
-                Turn(self.host.turn()),
-                self.pass,
-                curtain.next_seat,
-                viewport,
-                curtain.space_armed,
-                Self::curtain_pin_prompt(curtain),
+            return Ok(league_seat_ui::apply_accessibility(
+                league_seat_ui::curtain_view(
+                    self.host.table_id(),
+                    Turn(self.host.turn()),
+                    self.pass,
+                    curtain.next_seat,
+                    viewport,
+                    curtain.space_armed,
+                    Self::curtain_pin_prompt(curtain),
+                ),
+                self.no_color,
+                self.screen_reader,
             ));
         }
         let Some(target_seat) = self.active_human_seat() else {
@@ -2015,14 +2087,20 @@ impl TuiHostSession {
                     if let Some(err) = &self.post_season_error
                         && let Some(status) = &mut view.status_line
                     {
-                        let banner =
-                            scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                        let banner = scrub_secret_text(&format!(
+                            "▼ REFUSED [{}]: {}",
+                            err.code, err.message
+                        ));
                         status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                             banner,
                             ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                         )]));
                     }
-                    return Ok(view);
+                    return Ok(league_seat_ui::apply_accessibility(
+                        view,
+                        self.no_color,
+                        self.screen_reader,
+                    ));
                 }
                 if self.host.phase() == TurnPhase::Completed
                     && let Some(eos) = &self.end_of_season
@@ -2066,14 +2144,20 @@ impl TuiHostSession {
                     if let Some(err) = &eos.export_error
                         && let Some(status) = &mut view.status_line
                     {
-                        let banner =
-                            scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                        let banner = scrub_secret_text(&format!(
+                            "▼ REFUSED [{}]: {}",
+                            err.code, err.message
+                        ));
                         status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                             banner,
                             ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                         )]));
                     }
-                    return Ok(view);
+                    return Ok(league_seat_ui::apply_accessibility(
+                        view,
+                        self.no_color || self.screen_reader,
+                        false,
+                    ));
                 }
             }
             let mut view = league_seat_ui::neutral_session_view(
@@ -2113,13 +2197,18 @@ impl TuiHostSession {
             if let Some(err) = &self.advance_halted_error
                 && let Some(status) = &mut view.status_line
             {
-                let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                let banner =
+                    scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
                 status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                     banner,
                     ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                 )]));
             }
-            return Ok(view);
+            return Ok(league_seat_ui::apply_accessibility(
+                view,
+                self.no_color,
+                self.screen_reader,
+            ));
         };
         let obs = self.observe_seat_checked(target_seat)?;
         let idx = usize::from(target_seat.0);
@@ -2133,13 +2222,17 @@ impl TuiHostSession {
         if let Some(err) = &self.last_errors[idx]
             && let Some(status) = &mut view.status_line
         {
-            let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+            let banner = scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
             status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                 banner,
                 ViewStyle::plain().with_fg(ViewColor::Red).bold(),
             )]));
         }
-        Ok(view)
+        Ok(league_seat_ui::apply_accessibility(
+            view,
+            self.no_color || self.screen_reader,
+            false,
+        ))
     }
 
     /// Renders the active view (Curtain, neutral standby, or active seat's turn screen) onto `frame`.
@@ -2610,17 +2703,21 @@ impl TuiHostSession {
                         &replay_log,
                         usize::from(self.host.seat_count()),
                     )?;
+                    let eos_data = build_end_of_season_data_with_provenance(
+                        self.host.table_id(),
+                        scoreboard,
+                        revealed_mandates,
+                        section.at_close,
+                        season_metrics,
+                        self.host.public_receipts().to_vec(),
+                        section.turns,
+                    );
+                    let mut eos_ui_state = EndOfSeasonUiState::new();
+                    eos_ui_state.set_no_color(self.no_color);
+                    eos_ui_state.set_screen_reader(self.screen_reader);
                     self.end_of_season = Some(EndOfSeasonSessionState {
-                        data: EndOfSeasonData {
-                            table_id: self.host.table_id(),
-                            closed_turn: Turn(scoreboard.closed_turn),
-                            scoreboard,
-                            revealed_mandates,
-                            close_predicates: section.at_close,
-                            season_metrics,
-                            export_state: ReplayExportState::Ready,
-                        },
-                        ui_state: EndOfSeasonUiState::new(),
+                        data: eos_data,
+                        ui_state: eos_ui_state,
                         replay_log,
                         export_error: None,
                     });
@@ -3174,13 +3271,17 @@ impl LobbyHostSession {
         if let Some(err) = &self.last_error
             && let Some(status) = &mut view.status_line
         {
-            let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+            let banner = scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
             status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                 banner,
                 ViewStyle::plain().with_fg(ViewColor::Red).bold(),
             )]));
         }
-        view
+        league_seat_ui::apply_accessibility(
+            view,
+            self.overrides.no_color || self.overrides.screen_reader,
+            false,
+        )
     }
 
     /// Renders the Lobby screen onto `frame`.
@@ -3411,6 +3512,7 @@ impl LobbyHostSession {
 
         let mut session = TuiHostSession::from_ring_table(&ring, table_id, humans, bot_tie_seed)
             .map_err(|err| self.record_refusal(err.to_structured_error()))?;
+        session.configure_accessibility(self.overrides.no_color, self.overrides.screen_reader);
         session.configure_turn_clock(effective_clock);
         if self.overrides.pins_enabled || lobby_pins {
             session.enable_seat_pins();
@@ -8353,6 +8455,7 @@ mod tests {
             turn_clock_secs: Some(180),
             untimed: false,
             pins_enabled: true,
+            ..LobbyCliOverrides::default()
         });
         cli_wins.state_mut().set_untimed(true);
         cli_wins.state_mut().set_pins_enabled(false);
@@ -8368,6 +8471,7 @@ mod tests {
             turn_clock_secs: None,
             untimed: true,
             pins_enabled: false,
+            ..LobbyCliOverrides::default()
         });
         for _ in 0..6 {
             cli_untimed.handle_key_event(key_code(SeatKeyCode::Down), vp);
@@ -8744,5 +8848,402 @@ mod tests {
         );
         assert_eq!(exported.turns.len(), log.turns.len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn assert_buffer_no_color(terminal: &Terminal<TestBackend>, label: &str) {
+        let buf = terminal.backend().buffer();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                assert_eq!(
+                    cell.fg,
+                    Color::Reset,
+                    "{label}: cell ({x},{y}) `{}` leaked fg={:?}",
+                    cell.symbol(),
+                    cell.fg
+                );
+                assert_eq!(
+                    cell.bg,
+                    Color::Reset,
+                    "{label}: cell ({x},{y}) `{}` leaked bg={:?}",
+                    cell.symbol(),
+                    cell.bg
+                );
+            }
+        }
+    }
+
+    fn assert_no_box_chars(text: &str, label: &str) {
+        for ch in ['┌', '─', '┐', '│', '└', '┘', '├', '┤', '┬', '┴', '┼'] {
+            assert!(
+                !text.contains(ch),
+                "{label}: unexpected box-drawing char `{ch}` in linear screen-reader frame:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_color_suppresses_every_ratatui_cell_color_with_glyph_pairings_snapshot() {
+        let vp = ViewportSize::new(100, 30);
+        let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "test backend");
+
+        // 1. Lobby with NO_COLOR + refusal alert banner.
+        let mut lobby = LobbyHostSession::new(LobbyCliOverrides {
+            no_color: true,
+            ..LobbyCliOverrides::default()
+        });
+        lobby.state_mut().set_untimed(true);
+        let _ = lobby.validate_and_start(TableId(81_991), 7, None);
+        lobby.handle_key_event(key_code(SeatKeyCode::Down), vp);
+        lobby.handle_key_event(key(' '), vp); // toggle S0 to ClubBot -> NO_HUMAN_SEATS refusal
+        let _ = lobby.validate_and_start(TableId(81_991), 7, None);
+        must_ok(
+            terminal.draw(|f| lobby.render_frame(f)),
+            "draw no-color lobby",
+        );
+        assert_buffer_no_color(&terminal, "Lobby");
+        let lobby_screen = screen_text(&terminal);
+        assert!(lobby_screen.contains("▼ REFUSED [NO_HUMAN_SEATS]"));
+        assert!(lobby_screen.contains("--no-color / NO_COLOR"));
+
+        // Fix seat 0 back to Human and start.
+        lobby.handle_key_event(key(' '), vp);
+        let mut session = must_ok(
+            lobby.validate_and_start(TableId(81_991), 7, None),
+            "start no-color table",
+        );
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw curtain")),
+            "draw curtain",
+        );
+        assert_buffer_no_color(&terminal, "Curtain");
+        assert!(screen_text(&terminal).contains("= PRIVACY CURTAIN"));
+
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+        must_ok(session.handle_key_event(key(' '), vp), "curtain space");
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw armed curtain")),
+            "draw armed curtain",
+        );
+        assert_buffer_no_color(&terminal, "Armed Curtain");
+        assert!(screen_text(&terminal).contains("▲ HAND-OFF ARMED"));
+
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "curtain enter",
+        );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+        must_ok(session.handle_key_event(key('p'), vp), "run what-if");
+        session.record_scrubbed_host_error("CANCEL_LOCKED", "Phase-1 cancel lock is active");
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw turn no_color")),
+            "draw turn no_color",
+        );
+        assert_buffer_no_color(&terminal, "Turn");
+        let turn_buf = screen_text(&terminal);
+        assert!(turn_buf.contains("[OPEN BOOK]"));
+        assert!(turn_buf.contains("▼ REFUSED [CANCEL_LOCKED]"));
+        assert!(turn_buf.contains("Preview T1 S0:"));
+    }
+
+    #[test]
+    fn screen_reader_end_to_end_multi_seat_handoffs_keep_linear_no_box_chars_and_zero_leaks() {
+        use league_core::{
+            CheckProposal, CreditTier, GradedMandateCard, SealedEvalSeed,
+            deal_graded_mandates_with_entropy,
+        };
+
+        let ring = dev_ring_table(1);
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41_u8 + i; 32])).collect();
+        let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x77; 32]), "eval seed");
+        let (mut spec, cmap, _deal, eval_seed) = must_ok(
+            ring_table_to_table_spec_with_explicit_entropy(
+                &ring,
+                TableId(81_992),
+                &[0, 1, 2, 3],
+                [0x11; 32],
+                &salts,
+                eval_seed,
+            ),
+            "bridge",
+        );
+        spec.mandate_deck = vec![
+            GradedMandateCard {
+                card_id: 1,
+                kind: MandateKind::MinActivePartners { min_partners: 1 },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 4_000,
+            },
+            GradedMandateCard {
+                card_id: 2,
+                kind: MandateKind::MinProjectEquity { target: 25_000 },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 5_000,
+            },
+            GradedMandateCard {
+                card_id: 3,
+                kind: MandateKind::MinRefinedVariety {
+                    distinct_goods: 2,
+                    min_each: 1_500,
+                },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 4_500,
+            },
+            GradedMandateCard {
+                card_id: 4,
+                kind: MandateKind::MaintainCleanCredit {
+                    min_tier: CreditTier::Aaa,
+                },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: 3_500,
+            },
+        ];
+        let mut chosen = None;
+        for b in 1_u8..=255 {
+            let (commits, deal) = must_ok(
+                deal_graded_mandates_with_entropy(
+                    TableId(81_992),
+                    4,
+                    [b; 32],
+                    &salts,
+                    &spec.mandate_deck,
+                ),
+                "deal",
+            );
+            if matches!(
+                deal.seat_reveals[0].mandate.kind,
+                MandateKind::MinActivePartners { min_partners: 1 }
+            ) {
+                spec.dealt_mandate_commits = commits;
+                chosen = Some(deal);
+                break;
+            }
+        }
+        let deal = must_some(chosen, "distinct deal giving S0 MinActivePartners");
+        let mut session = must_ok(
+            TuiHostSession::from_explicit_setup(
+                spec,
+                ring.seed,
+                Some(cmap.to_display_map()),
+                deal,
+                eval_seed,
+                53,
+            ),
+            "explicit setup",
+        );
+        session.configure_accessibility(true, true);
+
+        let vp = ViewportSize::new(100, 30);
+        let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "test backend");
+
+        let obs0 = must_ok(session.build_seat_observation(Seat(0)), "obs0");
+        let obs1 = must_ok(session.build_seat_observation(Seat(1)), "obs1");
+        let obs2 = must_ok(session.build_seat_observation(Seat(2)), "obs2");
+        let obs3 = must_ok(session.build_seat_observation(Seat(3)), "obs3");
+        let mandates = [
+            mandate_short_marker(must_some(obs0.own_mandate(), "m0").kind),
+            mandate_short_marker(must_some(obs1.own_mandate(), "m1").kind),
+            mandate_short_marker(must_some(obs2.own_mandate(), "m2").kind),
+            mandate_short_marker(must_some(obs3.own_mandate(), "m3").kind),
+        ];
+        let notes = [
+            "S0_PRIVATE_NOTE_ALPHA",
+            "S1_PRIVATE_NOTE_BRAVO",
+            "S2_PRIVATE_NOTE_CHARLIE",
+            "S3_PRIVATE_NOTE_DELTA",
+        ];
+
+        // Turn 1: S0 writes private note + draws Check to S1; S1 writes note + stages CheckCash.
+        let mut check_id_for_s1: Option<u64> = None;
+        let mut resume_digest_armed = false;
+        let mut verified_turn2_s0 = false;
+        let mut verified_turn2_s1 = false;
+        let mut turn2_s1_pbrs = String::new();
+        while session.phase() == TurnPhase::TalkAndMarket {
+            if session.is_curtain_open() {
+                if session.turn() == 2 && !resume_digest_armed {
+                    session.activate_resume_digest_if_swept();
+                    resume_digest_armed = true;
+                }
+                let c_full = must_ok(session.build_current_view(vp), "curtain full").plain_text();
+                assert!(!c_full.contains("Previously This Season"));
+                assert!(!c_full.contains("PBRS cum"));
+                assert!(!c_full.contains("Provenance:"));
+                for m in &mandates {
+                    assert!(!c_full.contains(m));
+                }
+                for n in &notes {
+                    assert!(!c_full.contains(n));
+                }
+                must_ok(
+                    terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr curtain")),
+                    "draw sr curtain",
+                );
+                assert_buffer_no_color(&terminal, "ScreenReader Curtain");
+                assert_no_box_chars(&screen_text(&terminal), "ScreenReader Curtain");
+
+                session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+                must_ok(session.handle_key_event(key(' '), vp), "space");
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                    "enter",
+                );
+                session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+            } else if let Some(active) = session.active_human_seat() {
+                let s_idx = usize::from(active.0);
+                if session.turn() == 1 && session.pass() == PassKind::SubPassA {
+                    // Check EDIT NOTES tag in screen-reader mode while entering seat private note.
+                    must_ok(session.handle_key_event(key('n'), vp), "enter notes edit");
+                    let edit_txt =
+                        must_ok(session.build_current_view(vp), "edit view").plain_text();
+                    assert!(edit_txt.contains("EDIT NOTES (Enter/Esc done)"));
+                    for ch in notes[s_idx].chars() {
+                        must_ok(session.handle_key_event(key(ch), vp), "type note");
+                    }
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                        "finish note",
+                    );
+
+                    if active == Seat(0) {
+                        must_ok(
+                            session.apply_seat_intent(
+                                Seat(0),
+                                SeatIntent::submit_market_action(MarketAction::CreateCheck {
+                                    seat: 0,
+                                    check: CheckProposal {
+                                        payee: 1,
+                                        asset: AssetId::Cred,
+                                        send_max: 500,
+                                        deliver_min: 100,
+                                        due_turn: 1,
+                                        expiration_turn: 5,
+                                    },
+                                }),
+                            ),
+                            "S0 creates Check to S1",
+                        );
+                        let obs_after = must_ok(session.build_seat_observation(Seat(0)), "obs c");
+                        check_id_for_s1 = obs_after.checks.keys().copied().next();
+                    }
+                } else if session.turn() == 1
+                    && session.pass() == PassKind::SubPassB
+                    && active == Seat(1)
+                    && let Some(cid) = check_id_for_s1.take()
+                {
+                    must_ok(
+                        session.apply_seat_intent(
+                            Seat(1),
+                            SeatIntent::update_bundle(BundleDraftAction::StageCheckCash(cid)),
+                        ),
+                        "S1 stages CheckCash",
+                    );
+                }
+
+                if session.turn() == 2
+                    && session.pass() == PassKind::SubPassA
+                    && active == Seat(1)
+                    && !verified_turn2_s1
+                {
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Down), vp),
+                        "sr down scroll",
+                    );
+                    let full_s1 =
+                        must_ok(session.build_current_view(vp), "t2 s1 full").plain_text();
+                    assert!(full_s1.contains("Previously This Season (Turns T1..=T1, 1 swept)"));
+                    assert!(full_s1.contains("Seat S1: PBRS cum "));
+                    assert!(!full_s1.contains("Seat S0: PBRS cum "));
+                    assert!(full_s1.contains(notes[1]));
+                    assert!(full_s1.contains(&mandates[1]));
+                    assert!(!full_s1.contains("Provenance:"));
+                    for other in [0_usize, 2, 3] {
+                        assert!(!full_s1.contains(notes[other]));
+                        assert!(!full_s1.contains(&mandates[other]));
+                    }
+                    if let Some(p_line) = full_s1.lines().find(|l| l.contains("Seat S1: PBRS cum "))
+                    {
+                        turn2_s1_pbrs = p_line.to_owned();
+                    }
+                    must_ok(
+                        terminal
+                            .draw(|f| must_ok(session.render_current_frame(f), "draw sr turn 2")),
+                        "draw sr turn 2",
+                    );
+                    assert_buffer_no_color(&terminal, "ScreenReader Turn 2");
+                    assert_no_box_chars(&screen_text(&terminal), "ScreenReader Turn 2");
+                    verified_turn2_s1 = true;
+                } else if session.turn() == 2
+                    && session.pass() == PassKind::SubPassA
+                    && active == Seat(0)
+                    && !verified_turn2_s0
+                {
+                    let full_s0 =
+                        must_ok(session.build_current_view(vp), "t2 s0 full").plain_text();
+                    assert!(full_s0.contains("Previously This Season (Turns T1..=T1, 1 swept)"));
+                    assert!(full_s0.contains("Seat S0: PBRS cum "));
+                    assert!(!full_s0.contains("Seat S1: PBRS cum "));
+                    let s0_pbrs_line = full_s0
+                        .lines()
+                        .find(|l| l.contains("Seat S0: PBRS cum "))
+                        .unwrap_or("");
+                    assert_ne!(s0_pbrs_line, turn2_s1_pbrs);
+                    assert!(full_s0.contains(notes[0]));
+                    assert!(full_s0.contains(&mandates[0]));
+                    assert!(!full_s0.contains("Provenance:"));
+                    for other in 1..4 {
+                        assert!(!full_s0.contains(notes[other]));
+                        assert!(!full_s0.contains(&mandates[other]));
+                    }
+                    verified_turn2_s0 = true;
+                }
+                must_ok(session.handle_key_event(ctrl_key('l'), vp), "handoff");
+            }
+        }
+        assert!(verified_turn2_s0 && verified_turn2_s1);
+
+        // AwaitingMandateReveal standby frames: no mandate, note, digest, or provenance anywhere.
+        assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
+        for _ in 0..4_usize {
+            let r_full = must_ok(session.build_current_view(vp), "reveal full").plain_text();
+            assert!(r_full.contains("=== MERCHANT LEAGUE — SESSION STANDBY ==="));
+            assert!(r_full.contains("AwaitingMandateReveal"));
+            assert!(!r_full.contains("Previously This Season"));
+            assert!(!r_full.contains("Provenance:"));
+            for m in &mandates {
+                assert!(!r_full.contains(m));
+            }
+            for n in &notes {
+                assert!(!r_full.contains(n));
+            }
+            must_ok(
+                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr reveal")),
+                "draw sr reveal",
+            );
+            assert_buffer_no_color(&terminal, "ScreenReader Reveal");
+            assert_no_box_chars(&screen_text(&terminal), "ScreenReader Reveal");
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                "submit reveal",
+            );
+        }
+
+        assert_eq!(session.phase(), TurnPhase::Completed);
+        must_ok(session.handle_key_event(key('2'), vp), "eos tab 2");
+        let eos_full = must_ok(session.build_current_view(vp), "eos full").plain_text();
+        for m in &mandates {
+            assert!(eos_full.contains(m));
+        }
+        assert!(eos_full.contains("▲ AWARDED +"));
+        assert!(
+            eos_full.contains("Provenance: active partners 1/1 [S1@T1; target met T1]"),
+            "CheckCashed partner provenance missing/mismatched in EndOfSeason:\n{eos_full}"
+        );
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr eos mandates")),
+            "draw sr eos mandates",
+        );
+        assert_buffer_no_color(&terminal, "ScreenReader EOS Mandates");
+        assert_no_box_chars(&screen_text(&terminal), "ScreenReader EOS Mandates");
     }
 }

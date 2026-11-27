@@ -6,14 +6,14 @@ use alloc::vec::Vec;
 
 use league_seat_types::{
     ActiveCharter, AssetId, CLOSING_ROLL_START_TURN, COMMODITY_DISPLAY_CATALOG,
-    CommodityDisplayMap, CredOffer, CreditCheck, CurtainPinMode, CurtainPinPrompt, DualEscrowVault,
-    FillRecord, HYPOTHETICAL_CLOSE_MARK_CAVEAT, IntentPledge, IntentTarget, MandateKind,
-    MarketAction, PublicSweepReceipt, ScreenLayout, Seat, SeatIdentity, SeatObservation,
-    SeatScreenView, SeatState, TokenEscrowVault, Turn, TurnClockDisplay, TurnPhase, ViewAlign,
-    ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint,
-    ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell,
-    ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize,
-    format_numeraire_display, scrub_secret_text,
+    CommodityDisplayMap, CredOffer, CreditCheck, CreditTier, CurtainPinMode, CurtainPinPrompt,
+    DualEscrowVault, FillKind, FillRecord, HYPOTHETICAL_CLOSE_MARK_CAVEAT, IntentPledge,
+    IntentTarget, MandateKind, MarketAction, PublicSweepReceipt, ScreenLayout, Seat, SeatIdentity,
+    SeatObservation, SeatScreenView, SeatState, TokenEscrowVault, Turn, TurnClockDisplay,
+    TurnPhase, ViewAlign, ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow,
+    ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem,
+    ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel,
+    ViewportSize, format_numeraire_display, scrub_secret_text,
 };
 
 use crate::composer::{
@@ -23,6 +23,103 @@ use crate::state::{
     ALL_MARKET_KINDS, BundleSection, CenterTab, FocusZone, MarketActionKind, PassKind, SeatUiState,
     visible_bundle_sections,
 };
+
+fn format_signed_delta(delta: i64) -> String {
+    if delta > 0 {
+        format!("▲+{delta}")
+    } else if delta < 0 {
+        format!("▼{delta}")
+    } else {
+        "=0".to_owned()
+    }
+}
+
+fn signed_delta_style(delta: i64, positive_is_good: bool) -> ViewStyle {
+    if delta == 0 {
+        return ViewStyle::plain();
+    }
+    let good = if positive_is_good {
+        delta > 0
+    } else {
+        delta < 0
+    };
+    ViewStyle::plain().with_fg(if good {
+        ViewColor::Green
+    } else {
+        ViewColor::Red
+    })
+}
+
+/// Matches every settlement kind that `league-core` records in `EngineState::delivery_ledger`
+/// (`BatchFill`, `ContractDelivery`, `CheckCashed`, and `AtomicSwap`).
+fn fill_records_partner_delivery(f: &FillRecord) -> bool {
+    match f.kind {
+        FillKind::BatchFill | FillKind::ContractDelivery | FillKind::CheckCashed => f.net_units > 0,
+        FillKind::AtomicSwap => f.net_units > 0 || f.cred_amount > 0,
+        FillKind::TownImport
+        | FillKind::EscrowFinished
+        | FillKind::EscrowRefunded
+        | FillKind::EscrowForfeited
+        | FillKind::EscrowBreachRefunded => false,
+    }
+}
+
+fn strip_style_colors(style: &mut ViewStyle) {
+    style.fg = ViewColor::Reset;
+    style.bg = ViewColor::Reset;
+}
+
+fn strip_panel_colors(panel: &mut ViewPanel) {
+    if let Some(title) = &mut panel.title {
+        strip_style_colors(&mut title.style);
+    }
+    if let Some(tab_bar) = &mut panel.tabs {
+        for item in &mut tab_bar.tabs {
+            strip_style_colors(&mut item.label.style);
+        }
+    }
+    if let Some(table) = &mut panel.table {
+        for col in &mut table.columns {
+            strip_style_colors(&mut col.header.style);
+        }
+        for row in &mut table.rows {
+            strip_style_colors(&mut row.style);
+            for cell in &mut row.cells {
+                for sp in &mut cell.spans {
+                    strip_style_colors(&mut sp.style);
+                }
+            }
+        }
+    }
+    for row in &mut panel.rows {
+        for sp in &mut row.spans {
+            strip_style_colors(&mut sp.style);
+        }
+    }
+}
+
+pub(crate) fn strip_colors_in_view(view: &mut SeatScreenView) {
+    for z in &mut view.zones {
+        strip_panel_colors(&mut z.panel);
+    }
+    if let Some(status) = &mut view.status_line {
+        strip_style_colors(&mut status.style);
+        if let Some(alert) = &mut status.alert {
+            for sp in &mut alert.spans {
+                strip_style_colors(&mut sp.style);
+            }
+        }
+        for sp in &mut status.left {
+            strip_style_colors(&mut sp.style);
+        }
+        for sp in &mut status.right {
+            strip_style_colors(&mut sp.style);
+        }
+    }
+    if let Some(modal) = &mut view.modal {
+        strip_panel_colors(&mut modal.panel);
+    }
+}
 
 const GUILD_NAMES: [&str; 6] = [
     "Aurelia House",
@@ -66,6 +163,50 @@ pub(crate) fn format_asset_label(
     }
 }
 
+pub(crate) fn apply_view_accessibility(
+    mut view: SeatScreenView,
+    no_color: bool,
+    screen_reader: bool,
+) -> SeatScreenView {
+    if screen_reader {
+        if let Some(modal) = view.modal.take()
+            && let Some(first) = view.zones.first_mut()
+        {
+            let mut prefix = Vec::new();
+            if let Some(title) = modal.panel.title {
+                prefix.push(ViewRow::from_plain(format!(
+                    "=== ACTIVE MODAL: {} ===",
+                    title.text
+                )));
+            }
+            prefix.extend(modal.panel.rows);
+            prefix.push(ViewRow::from_plain(String::new()));
+            prefix.append(&mut first.panel.rows);
+            first.panel.rows = prefix;
+        }
+        for z in &mut view.zones {
+            z.panel.bordered = false;
+            z.panel.tabs = None;
+            z.panel.alignment = ViewAlign::Left;
+            if let Some(title) = z.panel.title.take() {
+                z.panel.rows.insert(
+                    0,
+                    ViewRow::from_plain(format!("=== {} ===", title.text.to_uppercase())),
+                );
+            }
+            if let Some(tbl) = z.panel.table.take() {
+                for row in tbl.rows {
+                    z.panel.rows.push(ViewRow::from_plain(row.plain_text()));
+                }
+            }
+        }
+    }
+    if no_color || screen_reader {
+        strip_colors_in_view(&mut view);
+    }
+    view
+}
+
 pub(crate) fn build_curtain_view(
     table_id: league_seat_types::TableId,
     turn: Turn,
@@ -77,7 +218,7 @@ pub(crate) fn build_curtain_view(
 ) -> SeatScreenView {
     let layout = ScreenLayout::layout_for_viewport(viewport);
     if layout.mode == ViewLayoutMode::TooSmall {
-        return build_too_small_view(viewport, layout);
+        return build_too_small_view_with_options(viewport, layout, false, false);
     }
 
     let mut rows = vec![
@@ -91,25 +232,32 @@ pub(crate) fn build_curtain_view(
         ViewRow::from_plain(String::new()),
     ];
 
-    let (prompt, footer_left, footer_right) = match pin_prompt.mode {
+    let (prompt_row, footer_left, footer_right) = match pin_prompt.mode {
         CurtainPinMode::Inactive => {
             if pin_prompt.locked_out_reset {
-                rows.push(ViewRow::from_plain(
-                    "PIN entry failed 3 times — Curtain re-locked.".to_owned(),
-                ));
+                rows.push(ViewRow::from_spans(vec![ViewSpan::styled(
+                    "▼ PIN entry failed 3 times — Curtain re-locked.".to_owned(),
+                    ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                )]));
             }
-            let msg = if space_armed {
-                "HAND-OFF ARMED ([Space] received) — press [Enter] to reveal seat screen"
+            let (msg, msg_style) = if space_armed {
+                (
+                    "▲ HAND-OFF ARMED ([Space] received) — press [Enter] to reveal seat screen",
+                    ViewStyle::plain().with_fg(ViewColor::Yellow).bold(),
+                )
             } else {
-                "PRIVACY CURTAIN — press [Space] then [Enter] when ready to reveal seat screen"
+                (
+                    "= PRIVACY CURTAIN — press [Space] then [Enter] when ready to reveal seat screen",
+                    ViewStyle::plain().with_fg(ViewColor::Cyan),
+                )
             };
             (
-                msg.to_owned(),
+                ViewRow::from_spans(vec![ViewSpan::styled(msg.to_owned(), msg_style)]),
                 "Space:Arm Hand-Off | Enter:Confirm Reveal | q:Quit".to_owned(),
                 if space_armed {
-                    "Armed".to_owned()
+                    "▲ Armed".to_owned()
                 } else {
-                    "Locked Curtain".to_owned()
+                    "= Locked Curtain".to_owned()
                 },
             )
         }
@@ -118,35 +266,46 @@ pub(crate) fn build_curtain_view(
             let masked: String = (0..4)
                 .map(|idx| if idx < filled { '*' } else { '_' })
                 .collect();
-            let heading = match pin_prompt.mode {
-                CurtainPinMode::SetInitialPin => {
-                    format!("SET 4-DIGIT SEAT PIN: [{masked}] (digits never echoed)")
-                }
+            let (heading, heading_style) = match pin_prompt.mode {
+                CurtainPinMode::SetInitialPin => (
+                    format!("SET 4-DIGIT SEAT PIN: [{masked}] (digits never echoed)"),
+                    ViewStyle::plain(),
+                ),
                 CurtainPinMode::VerifyPin => {
                     if pin_prompt.failed_attempts > 0 {
-                        format!(
-                            "ENTER 4-DIGIT SEAT PIN: [{masked}] (wrong PIN; attempt {}/3)",
-                            pin_prompt.failed_attempts + 1
+                        (
+                            format!(
+                                "▼ ENTER 4-DIGIT SEAT PIN: [{masked}] (wrong PIN; attempt {}/3)",
+                                pin_prompt.failed_attempts + 1
+                            ),
+                            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
                         )
                     } else {
-                        format!("ENTER 4-DIGIT SEAT PIN: [{masked}]")
+                        (
+                            format!("ENTER 4-DIGIT SEAT PIN: [{masked}]"),
+                            ViewStyle::plain(),
+                        )
                     }
                 }
-                CurtainPinMode::Inactive => String::new(),
+                CurtainPinMode::Inactive => (String::new(), ViewStyle::plain()),
             };
             (
-                heading,
+                ViewRow::from_spans(vec![ViewSpan::styled(heading, heading_style)]),
                 "0-9:PIN Digit | Backspace:Erase | Enter:Submit PIN | Esc:Cancel".to_owned(),
                 "PIN Gate".to_owned(),
             )
         }
     };
-    rows.push(ViewRow::from_plain(prompt));
+    rows.push(prompt_row);
     let panel = ViewPanel {
         title: Some(ViewLabel::styled(
             "Hot-Seat Privacy Curtain".to_owned(),
             ViewStyle {
-                fg: ViewColor::Cyan,
+                fg: if space_armed {
+                    ViewColor::Yellow
+                } else {
+                    ViewColor::Cyan
+                },
                 bg: ViewColor::Reset,
                 bold: true,
                 ..ViewStyle::plain()
@@ -193,7 +352,7 @@ pub(crate) fn build_neutral_session_view(
 ) -> SeatScreenView {
     let layout = ScreenLayout::layout_for_viewport(viewport);
     if layout.mode == ViewLayoutMode::TooSmall {
-        return build_too_small_view(viewport, layout);
+        return build_too_small_view_with_options(viewport, layout, false, false);
     }
 
     let state_note = if quit_requested {
@@ -207,6 +366,16 @@ pub(crate) fn build_neutral_session_view(
     } else {
         "No human seat active — session standby."
     };
+    let rows = vec![
+        ViewRow::from_plain(format!(
+            "Table #{} | Turn {} | Phase: {:?} | Pass: {}",
+            table_id.0,
+            turn.0,
+            phase,
+            pass.label()
+        )),
+        ViewRow::from_plain(state_note.to_owned()),
+    ];
     let panel = ViewPanel {
         title: Some(ViewLabel::styled(
             "Merchant League — Session Standby".to_owned(),
@@ -221,16 +390,7 @@ pub(crate) fn build_neutral_session_view(
         bordered: true,
         tabs: None,
         table: None,
-        rows: vec![
-            ViewRow::from_plain(format!(
-                "Table #{} | Turn {} | Phase: {:?} | Pass: {}",
-                table_id.0,
-                turn.0,
-                phase,
-                pass.label()
-            )),
-            ViewRow::from_plain(state_note.to_owned()),
-        ],
+        rows,
         selected_row: None,
         scroll: None,
     };
@@ -254,6 +414,20 @@ pub(crate) fn build_neutral_session_view(
     }
 }
 
+fn turn_mode_tag(state: &SeatUiState) -> &'static str {
+    if state.composer_edit_active {
+        "EDIT DRAFT (Enter apply | Esc cancel)"
+    } else if state.notes_edit_active {
+        "EDIT NOTES (Enter/Esc done)"
+    } else {
+        match state.selection.focus_zone {
+            FocusZone::PublicLedger => "Focus: Ledger",
+            FocusZone::CenterTabs => "Focus: Center",
+            FocusZone::PrivateDrawer => "Focus: Private",
+        }
+    }
+}
+
 pub(crate) fn build_turn_screen(
     obs: &SeatObservation,
     state: &SeatUiState,
@@ -263,7 +437,16 @@ pub(crate) fn build_turn_screen(
 ) -> SeatScreenView {
     let layout = ScreenLayout::layout_for_viewport(viewport);
     if layout.mode == ViewLayoutMode::TooSmall {
-        return build_too_small_view(viewport, layout);
+        return build_too_small_view_with_options(
+            viewport,
+            layout,
+            state.no_color,
+            state.screen_reader,
+        );
+    }
+
+    if state.screen_reader {
+        return build_screen_reader_turn_screen(obs, state, pass, commodities, viewport);
     }
 
     let zones = vec![
@@ -297,19 +480,14 @@ pub(crate) fn build_turn_screen(
         None
     };
 
-    let mode_tag = if state.composer_edit_active {
-        "EDIT DRAFT (Enter apply | Esc cancel)"
-    } else if state.notes_edit_active {
-        "EDIT NOTES (Enter/Esc done)"
+    let mode_tag = turn_mode_tag(state);
+    let digest_key = if state.resume_digest_open {
+        "d:HideDigest"
     } else {
-        match state.selection.focus_zone {
-            FocusZone::PublicLedger => "Focus: Ledger",
-            FocusZone::CenterTabs => "Focus: Center",
-            FocusZone::PrivateDrawer => "Focus: Private",
-        }
+        "d:Digest"
     };
 
-    SeatScreenView {
+    let mut view = SeatScreenView {
         layout,
         zones,
         status_line: Some(ViewStatusLine {
@@ -318,31 +496,47 @@ pub(crate) fn build_turn_screen(
                 "1-3:Tabs F6:Zone [/]:Item Arrows/+/-:Adj e:Draft n:Notes Enter:Apply".to_owned(),
             )],
             right: vec![ViewSpan::plain(format!(
-                "[{mode_tag}] c:Codes r:Chron p:WhatIf Ctrl+L:Lock q:Quit"
+                "[{mode_tag}] c:Codes {digest_key} r:Chron p:WhatIf Ctrl+L:Lock q:Quit"
             ))],
             style: ViewStyle::plain(),
         }),
         modal,
+    };
+    if state.no_color {
+        strip_colors_in_view(&mut view);
     }
+    view
 }
 
-fn build_too_small_view(viewport: ViewportSize, layout: ScreenLayout) -> SeatScreenView {
+fn build_too_small_view_with_options(
+    viewport: ViewportSize,
+    layout: ScreenLayout,
+    no_color: bool,
+    screen_reader: bool,
+) -> SeatScreenView {
+    let warn_style = ViewStyle::plain().with_fg(ViewColor::Yellow).bold();
     let panel = ViewPanel {
-        title: Some(ViewLabel::styled(
-            "Terminal too small".to_owned(),
-            ViewStyle {
-                fg: ViewColor::Yellow,
-                bg: ViewColor::Reset,
-                bold: true,
-                ..ViewStyle::plain()
-            },
-        )),
-        alignment: ViewAlign::Center,
-        bordered: true,
+        title: if screen_reader {
+            None
+        } else {
+            Some(ViewLabel::styled(
+                "▼ Terminal too small".to_owned(),
+                warn_style,
+            ))
+        },
+        alignment: if screen_reader {
+            ViewAlign::Left
+        } else {
+            ViewAlign::Center
+        },
+        bordered: !screen_reader,
         tabs: None,
         table: None,
         rows: vec![
-            ViewRow::from_plain("Terminal too small".to_owned()),
+            ViewRow::from_spans(vec![ViewSpan::styled(
+                "▼ Terminal too small".to_owned(),
+                warn_style,
+            )]),
             ViewRow::from_plain(format!(
                 "Minimum viewport: 80x24 | Current: {}x{}",
                 viewport.width, viewport.height
@@ -352,7 +546,7 @@ fn build_too_small_view(viewport: ViewportSize, layout: ScreenLayout) -> SeatScr
         selected_row: None,
         scroll: None,
     };
-    SeatScreenView {
+    let mut view = SeatScreenView {
         layout,
         zones: vec![ViewZonePanel {
             zone: ViewZoneId::SingleFull,
@@ -360,7 +554,11 @@ fn build_too_small_view(viewport: ViewportSize, layout: ScreenLayout) -> SeatScr
         }],
         status_line: None,
         modal: None,
+    };
+    if no_color || screen_reader {
+        strip_colors_in_view(&mut view);
     }
+    view
 }
 
 fn format_clock_badge(clock: TurnClockDisplay) -> String {
@@ -756,10 +954,10 @@ fn build_seat_table_row(s: &SeatState, table_layout: LedgerTableLayout) -> ViewT
         SeatIdentity::AiSyndicate => "BOT",
     };
     let tier = match s.credit_tier {
-        league_seat_types::CreditTier::Aaa => "Aaa",
-        league_seat_types::CreditTier::Bbb => "Bbb",
-        league_seat_types::CreditTier::B => "B",
-        league_seat_types::CreditTier::D => "D",
+        CreditTier::Aaa => "Aaa",
+        CreditTier::Bbb => "Bbb",
+        CreditTier::B => "B",
+        CreditTier::D => "D",
     };
     let frz = if s.wash_frozen_until_turn > 0 {
         format!("T{}", s.wash_frozen_until_turn)
@@ -1099,34 +1297,49 @@ fn format_charter_line(ch: &ActiveCharter) -> String {
     )
 }
 
+fn styled_tab_item(text: &str, enabled: bool, active: bool) -> ViewTabItem {
+    let style = if active {
+        ViewStyle::plain().with_fg(ViewColor::Cyan).bold()
+    } else if !enabled {
+        ViewStyle::plain().with_fg(ViewColor::DarkGray)
+    } else {
+        ViewStyle::plain()
+    };
+    ViewTabItem {
+        label: ViewLabel::styled(text.to_owned(), style),
+        enabled,
+    }
+}
+
 fn build_center_tabs_panel(
     obs: &SeatObservation,
     state: &SeatUiState,
     commodities: Option<&CommodityDisplayMap>,
 ) -> ViewPanel {
+    let active_idx = state.active_tab.index();
     let tab_bar = ViewTabBar {
         tabs: vec![
-            ViewTabItem {
-                label: ViewLabel::plain("1: Market & Contracts".to_owned()),
-                enabled: true,
-            },
-            ViewTabItem {
-                label: ViewLabel::plain("2: Workshop, Deals & Politics".to_owned()),
-                enabled: true,
-            },
-            ViewTabItem {
-                label: ViewLabel::plain("3: What-If Sandbox".to_owned()),
-                enabled: true,
-            },
-            ViewTabItem {
-                label: ViewLabel::plain("4: Diplomatic Desk (Disabled)".to_owned()),
-                enabled: false,
-            },
+            styled_tab_item("1: Market & Contracts", true, active_idx == 0),
+            styled_tab_item("2: Workshop, Deals & Politics", true, active_idx == 1),
+            styled_tab_item("3: What-If Sandbox", true, active_idx == 2),
+            styled_tab_item("4: Diplomatic Desk (Disabled)", false, active_idx == 3),
         ],
-        active_index: state.active_tab.index(),
+        active_index: active_idx,
     };
 
-    let rows = center_tab_rows(obs, state, commodities);
+    let mut rows = if state.resume_digest_open {
+        let mut combined = build_resume_digest_rows(obs, state.plain_codes, commodities);
+        combined.push(ViewRow::from_plain(
+            "----------------------------------------".to_owned(),
+        ));
+        combined.extend(center_tab_rows(obs, state, commodities));
+        combined
+    } else {
+        center_tab_rows(obs, state, commodities)
+    };
+    if rows.is_empty() {
+        rows.push(ViewRow::from_plain(String::new()));
+    }
     let total = rows.len();
     let offset = state.center_scroll.min(total.saturating_sub(1));
 
@@ -1609,16 +1822,41 @@ fn append_what_if_preview_result(
         return;
     };
 
-    rows.push(ViewRow::from_plain(format!(
-        "Preview T{} S{}: Pre CRED {} -> Post-Mkt {} -> Post-Sweep {} (Debt {}, Eq {})",
-        preview.turn,
-        preview.seat,
-        preview.pre_seat_state.cred,
-        preview.post_market_seat_state.cred,
-        preview.post_sweep_seat_state.cred,
-        preview.post_sweep_seat_state.cred_debt,
-        preview.post_sweep_seat_state.project_equity,
-    )));
+    let cred_delta = preview.post_sweep_seat_state.cred - preview.pre_seat_state.cred;
+    let debt_delta = preview.post_sweep_seat_state.cred_debt - preview.pre_seat_state.cred_debt;
+    let eq_delta =
+        preview.post_sweep_seat_state.project_equity - preview.pre_seat_state.project_equity;
+    rows.push(ViewRow::from_spans(vec![
+        ViewSpan::plain(format!(
+            "Preview T{} S{}: Pre CRED {} -> Post-Mkt {} -> Post-Sweep {} (",
+            preview.turn,
+            preview.seat,
+            preview.pre_seat_state.cred,
+            preview.post_market_seat_state.cred,
+            preview.post_sweep_seat_state.cred,
+        )),
+        ViewSpan::styled(
+            format_signed_delta(cred_delta),
+            signed_delta_style(cred_delta, true),
+        ),
+        ViewSpan::plain(format!(
+            ") (Debt {} ",
+            preview.post_sweep_seat_state.cred_debt
+        )),
+        ViewSpan::styled(
+            format_signed_delta(debt_delta),
+            signed_delta_style(debt_delta, false),
+        ),
+        ViewSpan::plain(format!(
+            ", Eq {} ",
+            preview.post_sweep_seat_state.project_equity
+        )),
+        ViewSpan::styled(
+            format_signed_delta(eq_delta),
+            signed_delta_style(eq_delta, true),
+        ),
+        ViewSpan::plain(")".to_owned()),
+    ]));
     rows.push(ViewRow::from_plain(format!(
         "  Upkeep: req {} paid {} interest {} shortfall {} debt_repaid {} | Spoiled: {}",
         preview.upkeep.upkeep_required,
@@ -1983,13 +2221,23 @@ pub(crate) fn build_lobby_screen(
 ) -> SeatScreenView {
     let layout = ScreenLayout::layout_for_viewport(viewport);
     if layout.mode == ViewLayoutMode::TooSmall {
-        return build_too_small_view(viewport, layout);
+        return build_too_small_view_with_options(
+            viewport,
+            layout,
+            overrides.no_color,
+            overrides.screen_reader,
+        );
     }
 
     let sel = |row: usize, text: String| {
         if state.focus_row == row {
+            let prefix = if overrides.screen_reader {
+                "[SELECTED] "
+            } else {
+                "> "
+            };
             ViewRow::from_spans(vec![ViewSpan::styled(
-                format!("> {text}"),
+                format!("{prefix}{text}"),
                 ViewStyle::plain().with_fg(ViewColor::Cyan).bold(),
             )])
         } else {
@@ -1997,13 +2245,33 @@ pub(crate) fn build_lobby_screen(
         }
     };
 
-    let mut rows = vec![
-        ViewRow::from_plain(
-            "Configure offline Club Mode table (`dev` seed pool 0..=9999; CLI flags override Lobby):"
-                .to_owned(),
-        ),
-        sel(0, format!("Seat Count: {} (allowed 4..=6)", state.seat_count)),
-    ];
+    let mut rows = Vec::new();
+    if overrides.screen_reader {
+        rows.push(ViewRow::from_plain(
+            "=== CLUB MODE LOBBY (LINEAR) ===".to_owned(),
+        ));
+    }
+    rows.push(ViewRow::from_plain(
+        "Configure offline Club Mode table (`dev` seed pool 0..=9999; CLI flags override Lobby):"
+            .to_owned(),
+    ));
+    if overrides.no_color || overrides.screen_reader {
+        let mut flags = Vec::new();
+        if overrides.no_color {
+            flags.push("--no-color / NO_COLOR");
+        }
+        if overrides.screen_reader {
+            flags.push("--screen-reader");
+        }
+        rows.push(ViewRow::from_plain(format!(
+            "Accessibility active: {}",
+            flags.join(", ")
+        )));
+    }
+    rows.push(sel(
+        0,
+        format!("Seat Count: {} (allowed 4..=6)", state.seat_count),
+    ));
 
     for (s, is_human) in state
         .human_seats
@@ -2077,17 +2345,21 @@ pub(crate) fn build_lobby_screen(
         .min(total_rows.saturating_sub(1));
 
     let panel = ViewPanel {
-        title: Some(ViewLabel::styled(
-            "Merchant League — Club Mode Lobby".to_owned(),
-            ViewStyle {
-                fg: ViewColor::Cyan,
-                bg: ViewColor::Reset,
-                bold: true,
-                ..ViewStyle::plain()
-            },
-        )),
+        title: if overrides.screen_reader {
+            None
+        } else {
+            Some(ViewLabel::styled(
+                "Merchant League — Club Mode Lobby".to_owned(),
+                ViewStyle {
+                    fg: ViewColor::Cyan,
+                    bg: ViewColor::Reset,
+                    bold: true,
+                    ..ViewStyle::plain()
+                },
+            ))
+        },
         alignment: ViewAlign::Left,
-        bordered: true,
+        bordered: !overrides.screen_reader,
         tabs: None,
         table: None,
         rows,
@@ -2098,7 +2370,7 @@ pub(crate) fn build_lobby_screen(
         }),
     };
 
-    SeatScreenView {
+    let mut view = SeatScreenView {
         layout: if viewport.height >= 8 {
             ScreenLayout::single_panel_with_status(viewport)
         } else {
@@ -2118,7 +2390,11 @@ pub(crate) fn build_lobby_screen(
             style: ViewStyle::plain(),
         }),
         modal: None,
+    };
+    if overrides.no_color || overrides.screen_reader {
+        strip_colors_in_view(&mut view);
     }
+    view
 }
 
 pub(crate) fn build_awaiting_reveal_screen(
@@ -2129,8 +2405,25 @@ pub(crate) fn build_awaiting_reveal_screen(
 ) -> SeatScreenView {
     let layout = ScreenLayout::layout_for_viewport(viewport);
     if layout.mode == ViewLayoutMode::TooSmall {
-        return build_too_small_view(viewport, layout);
+        return build_too_small_view_with_options(viewport, layout, false, false);
     }
+
+    let rows = vec![
+        ViewRow::from_plain(format!(
+            "Table #{} | Turn {} | Phase: {:?}",
+            table_id.0,
+            turn.0,
+            TurnPhase::AwaitingMandateReveal
+        )),
+        ViewRow::from_plain(
+            "Season closed — Turn-1 mandates stay sealed until all seats submit reveals."
+                .to_owned(),
+        ),
+        ViewRow::from_plain(format!(
+            "Mandate reveals submitted: {}/{} — press Enter to submit next reveal.",
+            progress.revealed_count, progress.seat_count
+        )),
+    ];
 
     let panel = ViewPanel {
         title: Some(ViewLabel::styled(
@@ -2146,22 +2439,7 @@ pub(crate) fn build_awaiting_reveal_screen(
         bordered: true,
         tabs: None,
         table: None,
-        rows: vec![
-            ViewRow::from_plain(format!(
-                "Table #{} | Turn {} | Phase: {:?}",
-                table_id.0,
-                turn.0,
-                TurnPhase::AwaitingMandateReveal
-            )),
-            ViewRow::from_plain(
-                "Season closed — Turn-1 mandates stay sealed until all seats submit reveals."
-                    .to_owned(),
-            ),
-            ViewRow::from_plain(format!(
-                "Mandate reveals submitted: {}/{} — press Enter to submit next reveal.",
-                progress.revealed_count, progress.seat_count
-            )),
-        ],
+        rows,
         selected_row: None,
         scroll: None,
     };
@@ -2199,31 +2477,42 @@ pub(crate) fn build_end_of_season_screen(
 
     let layout = ScreenLayout::layout_for_viewport(viewport);
     if layout.mode == ViewLayoutMode::TooSmall {
-        return build_too_small_view(viewport, layout);
+        return build_too_small_view_with_options(
+            viewport,
+            layout,
+            state.no_color,
+            state.screen_reader,
+        );
     }
 
+    let eos_active_idx = match state.active_tab {
+        EndOfSeasonTab::Scoreboard => 0,
+        EndOfSeasonTab::Mandates => 1,
+        EndOfSeasonTab::SeasonMetrics => 2,
+        EndOfSeasonTab::ReplayExport => 3,
+    };
     let tabs = ViewTabBar {
         tabs: ALL_END_OF_SEASON_TABS
             .iter()
-            .map(|tab| ViewTabItem {
-                label: ViewLabel::plain(tab.label().to_owned()),
-                enabled: true,
-            })
+            .enumerate()
+            .map(|(i, tab)| styled_tab_item(tab.label(), true, i == eos_active_idx))
             .collect(),
-        active_index: match state.active_tab {
-            EndOfSeasonTab::Scoreboard => 0,
-            EndOfSeasonTab::Mandates => 1,
-            EndOfSeasonTab::SeasonMetrics => 2,
-            EndOfSeasonTab::ReplayExport => 3,
-        },
+        active_index: eos_active_idx,
     };
 
-    let mut rows = vec![ViewRow::from_plain(format!(
+    let mut rows = Vec::new();
+    if state.screen_reader {
+        rows.push(ViewRow::from_plain(format!(
+            "=== END OF SEASON: {} ===",
+            state.active_tab.label()
+        )));
+    }
+    rows.push(ViewRow::from_plain(format!(
         "Table #{} | Closed Turn {} | {} seats",
         data.table_id.0,
         data.closed_turn.0,
         data.scoreboard.standings.len()
-    ))];
+    )));
     let mut table = None;
 
     match state.active_tab {
@@ -2305,14 +2594,16 @@ pub(crate) fn build_end_of_season_screen(
                     style: ViewStyle::plain(),
                 });
             }
-            table = Some(ViewTable {
-                columns,
-                rows: trows,
-                selected_row: None,
-            });
+            if !state.screen_reader {
+                table = Some(ViewTable {
+                    columns,
+                    rows: trows,
+                    selected_row: None,
+                });
+            }
             for (idx, entry) in data.scoreboard.standings.iter().enumerate() {
                 rows.push(ViewRow::from_plain(format!(
-                    "  Rank #{} — S{} ({}) | TotalEq={} ProjEq={} NetEq={} MandEq={} HonorPen={}",
+                    "  Rank #{} — S{} ({}) | TotalEq={} ProjEq={} NetEq={} MandEq={} Tier={:?} HonorPen={}",
                     idx + 1,
                     entry.seat,
                     guild_name_for_seat(entry.seat),
@@ -2320,6 +2611,7 @@ pub(crate) fn build_end_of_season_screen(
                     entry.project_equity,
                     entry.net_asset_equity,
                     entry.mandate_bonus,
+                    entry.credit_tier,
                     entry.honor_penalties
                 )));
             }
@@ -2337,17 +2629,34 @@ pub(crate) fn build_end_of_season_screen(
                     .find(|e| e.seat == seat_u8)
                     .map_or(0, |e| e.mandate_bonus);
                 let status = if bonus_awarded > 0 {
-                    format!("AWARDED +{bonus_awarded}")
+                    format!("▲ AWARDED +{bonus_awarded}")
                 } else {
-                    "Unmet (+0)".to_owned()
+                    "▼ Unmet (+0)".to_owned()
                 };
+                let status_style = if bonus_awarded > 0 {
+                    ViewStyle::plain().with_fg(ViewColor::Green).bold()
+                } else {
+                    ViewStyle::plain().with_fg(ViewColor::DarkGray)
+                };
+                rows.push(ViewRow::from_spans(vec![
+                    ViewSpan::plain(format!(
+                        "S{} ({}): {} | BaseBonus: {} | ",
+                        seat_u8,
+                        guild_name_for_seat(seat_u8),
+                        format_mandate_kind(mandate.kind),
+                        mandate.bonus_equity,
+                    )),
+                    ViewSpan::styled(status, status_style),
+                ]));
                 rows.push(ViewRow::from_plain(format!(
-                    "S{} ({}): {} | BaseBonus: {} | {}",
-                    seat_u8,
-                    guild_name_for_seat(seat_u8),
-                    format_mandate_kind(mandate.kind),
-                    mandate.bonus_equity,
-                    status
+                    "  {}",
+                    format_mandate_provenance(
+                        idx,
+                        mandate.kind,
+                        data,
+                        commodities,
+                        state.plain_codes
+                    )
                 )));
             }
         }
@@ -2423,18 +2732,26 @@ pub(crate) fn build_end_of_season_screen(
 
     let total_rows = rows.len() + table.as_ref().map_or(0, |t| t.rows.len() + 1);
     let panel = ViewPanel {
-        title: Some(ViewLabel::styled(
-            "Merchant League — End of Season".to_owned(),
-            ViewStyle {
-                fg: ViewColor::Cyan,
-                bg: ViewColor::Reset,
-                bold: true,
-                ..ViewStyle::plain()
-            },
-        )),
+        title: if state.screen_reader {
+            None
+        } else {
+            Some(ViewLabel::styled(
+                "Merchant League — End of Season".to_owned(),
+                ViewStyle {
+                    fg: ViewColor::Cyan,
+                    bg: ViewColor::Reset,
+                    bold: true,
+                    ..ViewStyle::plain()
+                },
+            ))
+        },
         alignment: ViewAlign::Left,
-        bordered: true,
-        tabs: Some(tabs),
+        bordered: !state.screen_reader,
+        tabs: if state.screen_reader {
+            None
+        } else {
+            Some(tabs)
+        },
         table,
         rows,
         selected_row: None,
@@ -2444,7 +2761,7 @@ pub(crate) fn build_end_of_season_screen(
         }),
     };
 
-    SeatScreenView {
+    let mut view = SeatScreenView {
         layout: if viewport.height >= 8 {
             ScreenLayout::single_panel_with_status(viewport)
         } else {
@@ -2464,5 +2781,612 @@ pub(crate) fn build_end_of_season_screen(
             style: ViewStyle::plain(),
         }),
         modal: None,
+    };
+    if state.no_color || state.screen_reader {
+        strip_colors_in_view(&mut view);
     }
+    view
+}
+
+pub(crate) fn build_resume_digest_rows(
+    obs: &SeatObservation,
+    plain_codes: bool,
+    commodities: Option<&CommodityDisplayMap>,
+) -> Vec<ViewRow> {
+    let mut rows = Vec::new();
+    let receipts = &obs.public_receipts;
+    if receipts.is_empty() {
+        rows.push(ViewRow::from_plain(
+            "Previously This Season (T1 opening — 0 prior turns swept) [d: toggle]".to_owned(),
+        ));
+        rows.push(ViewRow::from_plain(
+            "  Season opens at Turn 1; no prior PublicSweepReceipt history yet.".to_owned(),
+        ));
+        return rows;
+    }
+
+    let first_t = receipts.first().map_or(1, |r| r.turn);
+    let last_t = receipts.last().map_or(first_t, |r| r.turn);
+    let count = receipts.len();
+    let seat_u8 = obs.seat;
+    let seat_idx = usize::from(seat_u8);
+
+    let mut cum_pbrs: i64 = 0;
+    let mut last_pbrs: i64 = 0;
+    let mut batch_trades: usize = 0;
+    let mut atomic_swaps: usize = 0;
+    let mut converter_runs: usize = 0;
+    let mut projects_done: usize = 0;
+    let mut total_debt: i64 = 0;
+    let mut total_spoilage: i64 = 0;
+    let mut cashed_checks: usize = 0;
+    let mut bounced_checks: usize = 0;
+    let mut escrows_finished: usize = 0;
+    let mut escrows_forfeited: usize = 0;
+    let mut broken_promises: usize = 0;
+    let mut charters_count: usize = 0;
+    let mut shocks_activated: usize = 0;
+    let mut forecasts_count: usize = 0;
+    let mut last_officers: Option<(u8, Option<u8>)> = None;
+    let mut seat_fills_in: usize = 0;
+    let mut seat_fills_out: usize = 0;
+    let mut partner_flags = [false; 6];
+    let mut regent_turns: Vec<u8> = Vec::new();
+    let mut non_reveal_turns: Vec<u8> = Vec::new();
+    let mut converted_to_ai_turn: Option<u8> = None;
+
+    for r in receipts {
+        if let Some(&delta) = r.pbrs_deltas.get(seat_idx) {
+            cum_pbrs = cum_pbrs.saturating_add(delta);
+            last_pbrs = delta;
+        }
+        batch_trades = batch_trades.saturating_add(r.batch_trades_cleared);
+        atomic_swaps = atomic_swaps.saturating_add(r.atomic_swaps_settled);
+        converter_runs = converter_runs.saturating_add(r.converter_batches_run);
+        projects_done = projects_done.saturating_add(r.projects_completed);
+        total_debt = total_debt.saturating_add(r.total_upkeep_shortfall_debt);
+        total_spoilage = total_spoilage.saturating_add(r.total_spoilage_clawed_back);
+        cashed_checks = cashed_checks.saturating_add(r.checks_cashed.len());
+        bounced_checks = bounced_checks.saturating_add(r.checks_bounced.len());
+        escrows_finished = escrows_finished.saturating_add(r.escrows_finished.len());
+        escrows_forfeited =
+            escrows_forfeited.saturating_add(r.escrows_cancelled_or_forfeited.len());
+        broken_promises = broken_promises.saturating_add(r.broken_promises.len());
+        charters_count = charters_count.saturating_add(r.charters_awarded.len());
+        shocks_activated = shocks_activated.saturating_add(r.newly_activated_shocks.len());
+        forecasts_count = forecasts_count.saturating_add(r.public_forecasts.len());
+        if let Some(officers) = r.elected_officers {
+            last_officers = Some(officers);
+        }
+        if r.regent_acted_seats.contains(&seat_u8) {
+            regent_turns.push(r.turn);
+        }
+        if r.non_reveal_seats.contains(&seat_u8) {
+            non_reveal_turns.push(r.turn);
+        }
+        if r.converted_to_ai.contains(&seat_u8) && converted_to_ai_turn.is_none() {
+            converted_to_ai_turn = Some(r.turn);
+        }
+        for f in &r.fills {
+            if fill_records_partner_delivery(f) {
+                if f.from == Some(seat_u8) {
+                    seat_fills_out = seat_fills_out.saturating_add(1);
+                    if f.to != seat_u8 && usize::from(f.to) < 6 {
+                        partner_flags[usize::from(f.to)] = true;
+                    }
+                } else if f.to == seat_u8 {
+                    seat_fills_in = seat_fills_in.saturating_add(1);
+                    if let Some(peer) = f.from
+                        && peer != seat_u8
+                        && usize::from(peer) < 6
+                    {
+                        partner_flags[usize::from(peer)] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    let partner_count = partner_flags.iter().filter(|&&p| p).count();
+    let officers_desc = last_officers.map_or_else(
+        || "none".to_owned(),
+        |(tm, cc)| {
+            let cc_str = cc.map_or_else(|| "None".to_owned(), |c| format!("S{c}"));
+            format!("TM=S{tm}, CC={cc_str}")
+        },
+    );
+    let (custody_desc, custody_style) = if let Some(t) = converted_to_ai_turn {
+        (
+            format!("▼ converted_to_ai@T{t}"),
+            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+        )
+    } else if !regent_turns.is_empty() || !non_reveal_turns.is_empty() {
+        (
+            format!(
+                "▼ regent_turns={:?} non_reveal={:?}",
+                regent_turns, non_reveal_turns
+            ),
+            ViewStyle::plain().with_fg(ViewColor::Yellow).bold(),
+        )
+    } else {
+        (
+            "= 0 Regent/non-reveal interventions".to_owned(),
+            ViewStyle::plain(),
+        )
+    };
+
+    rows.push(ViewRow::from_plain(format!(
+        "Previously This Season (Turns T{first_t}..=T{last_t}, {count} swept) [d: toggle]"
+    )));
+    rows.push(ViewRow::from_spans(vec![
+        ViewSpan::plain(format!("  Seat S{seat_u8}: PBRS cum ")),
+        ViewSpan::styled(
+            format_signed_delta(cum_pbrs),
+            signed_delta_style(cum_pbrs, true),
+        ),
+        ViewSpan::plain(format!(" (last T{last_t}: ")),
+        ViewSpan::styled(
+            format_signed_delta(last_pbrs),
+            signed_delta_style(last_pbrs, true),
+        ),
+        ViewSpan::plain(format!(
+            ") | fills in:{seat_fills_in} out:{seat_fills_out} partners:{partner_count} | "
+        )),
+        ViewSpan::styled(custody_desc, custody_style),
+    ]));
+    rows.push(ViewRow::from_plain(format!(
+        "  Table Totals: trades={batch_trades} swaps={atomic_swaps} conv={converter_runs} proj={projects_done} debt={total_debt} spoil={total_spoilage}"
+    )));
+    rows.push(ViewRow::from_plain(format!(
+        "  Credit/Gov: checks({cashed_checks}/{bounced_checks}) esc({escrows_finished}/{escrows_forfeited}) promises({broken_promises}) officers({officers_desc}) charters={charters_count} shocks={shocks_activated}/fcst={forecasts_count}"
+    )));
+
+    let recent_start = receipts.len().saturating_sub(3);
+    for r in &receipts[recent_start..] {
+        let mut notes = Vec::new();
+        for sh in &r.newly_activated_shocks {
+            notes.push(format!(
+                "shock S{} {:?} {}bps",
+                sh.target_seat, sh.kind, sh.magnitude_bps
+            ));
+        }
+        for fc in &r.public_forecasts {
+            notes.push(format!(
+                "fcst S{} {:?}@T{}",
+                fc.target_seat, fc.kind, fc.realize_turn
+            ));
+        }
+        if let Some((tm, cc)) = r.elected_officers {
+            let cc_str = cc.map_or_else(|| "None".to_owned(), |c| format!("S{c}"));
+            notes.push(format!("elected TM=S{tm}/CC={cc_str}"));
+        }
+        if !r.charters_awarded.is_empty() {
+            notes.push(format!("charters={}", r.charters_awarded.len()));
+        }
+        if !r.checks_bounced.is_empty() {
+            notes.push(format!("bounced={}", r.checks_bounced.len()));
+        }
+        if !r.broken_promises.is_empty() {
+            notes.push(format!("broken={}", r.broken_promises.len()));
+        }
+        if let Some(first_fill) = r.fills.first()
+            && r.fills.len() == 1
+        {
+            let good_s = first_fill.good.map_or_else(
+                || "CRED".to_owned(),
+                |g| format_asset_label(g, commodities, plain_codes),
+            );
+            notes.push(format!("fill {good_s} u={}", first_fill.net_units));
+        }
+        let rp = r.pbrs_deltas.get(seat_idx).copied().unwrap_or(0);
+        let tail = if notes.is_empty() {
+            String::new()
+        } else {
+            format!(" | {}", notes.join("; "))
+        };
+        rows.push(ViewRow::from_spans(vec![
+            ViewSpan::plain(format!("  Recent T{}: pbrs=", r.turn)),
+            ViewSpan::styled(format_signed_delta(rp), signed_delta_style(rp, true)),
+            ViewSpan::plain(format!(
+                " trades={} swaps={} conv={} proj={} debt={} spoil={}{tail}",
+                r.batch_trades_cleared,
+                r.atomic_swaps_settled,
+                r.converter_batches_run,
+                r.projects_completed,
+                r.total_upkeep_shortfall_debt,
+                r.total_spoilage_clawed_back,
+            )),
+        ]));
+    }
+    rows
+}
+
+fn build_screen_reader_turn_rows(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+    pass: PassKind,
+    commodities: Option<&CommodityDisplayMap>,
+) -> (Vec<ViewRow>, usize) {
+    let mut rows = Vec::new();
+    let header_panel = build_header_panel(
+        obs,
+        pass,
+        commodities,
+        state.plain_codes,
+        state.clock_display,
+    );
+
+    if state.chronicle_open {
+        rows.push(ViewRow::from_plain(
+            "=== ACTIVE MODAL: SWEEP CHRONICLE ([/] Turn | Esc/r Close) ===".to_owned(),
+        ));
+        if obs.public_receipts.is_empty() {
+            rows.push(ViewRow::from_plain(
+                "Sweep Chronicle: no completed PublicSweepReceipt turns yet.".to_owned(),
+            ));
+        } else {
+            let idx = state
+                .chronicle_receipt_idx
+                .min(obs.public_receipts.len() - 1);
+            rows.extend(chronicle_receipt_rows(
+                &obs.public_receipts[idx],
+                idx,
+                obs.public_receipts.len(),
+                state.plain_codes,
+                commodities,
+            ));
+        }
+        rows.push(ViewRow::from_plain(String::new()));
+    }
+
+    rows.push(ViewRow::from_plain(
+        "=== MERCHANT LEAGUE: SCREEN READER TURN VIEW ===".to_owned(),
+    ));
+    if let Some(title) = &header_panel.title {
+        rows.push(ViewRow::from_plain(title.text.clone()));
+    }
+    for r in header_panel.rows {
+        rows.push(r);
+    }
+    let mode_tag = turn_mode_tag(state);
+    let focus_label = match state.selection.focus_zone {
+        FocusZone::PublicLedger => "Public Ledger",
+        FocusZone::CenterTabs => "Center Composer",
+        FocusZone::PrivateDrawer => "Private Vault",
+    };
+    let tab_label = match state.active_tab {
+        CenterTab::MarketAndContracts => "1: Market & Contracts",
+        CenterTab::WorkshopDealsPolitics => "2: Workshop, Deals & Politics",
+        CenterTab::WhatIfSandbox => "3: What-If Sandbox",
+    };
+    rows.push(ViewRow::from_plain(format!(
+        "Focus Zone: {focus_label} | Mode: {mode_tag} | Active Tab: {tab_label}"
+    )));
+    rows.push(ViewRow::from_plain(String::new()));
+
+    rows.push(ViewRow::from_plain(
+        "=== PREVIOUSLY THIS SEASON ===".to_owned(),
+    ));
+    if state.resume_digest_open || obs.public_receipts.is_empty() {
+        rows.extend(build_resume_digest_rows(
+            obs,
+            state.plain_codes,
+            commodities,
+        ));
+    } else {
+        let first_t = obs.public_receipts.first().map_or(1, |r| r.turn);
+        let last_t = obs.public_receipts.last().map_or(first_t, |r| r.turn);
+        rows.push(ViewRow::from_plain(format!(
+            "Collapsed summary for Turns T{first_t}..=T{last_t} ({} swept) — press d to expand full digest.",
+            obs.public_receipts.len()
+        )));
+    }
+    rows.push(ViewRow::from_plain(String::new()));
+
+    rows.push(ViewRow::from_plain(
+        "=== PUBLIC TABLE & LEDGER MIRROR ===".to_owned(),
+    ));
+    let ledger_start = rows.len();
+    for s in &obs.seats {
+        let role = match s.identity {
+            SeatIdentity::Human => "Human",
+            SeatIdentity::AiSyndicate => "ClubBot",
+        };
+        let frz = if s.wash_frozen_until_turn > 0 {
+            format!("frozen until T{}", s.wash_frozen_until_turn)
+        } else {
+            "clear".to_owned()
+        };
+        rows.push(ViewRow::from_plain(format!(
+            "  S{} ({}, {}) | CRED={} | Debt={} | Tier={:?} | ProjectEq={} | Tariffs={}/{}bps | Defaults={} Broken={} Freeze={frz}",
+            s.seat,
+            guild_name_for_seat(s.seat),
+            role,
+            s.cred,
+            s.cred_debt,
+            s.credit_tier,
+            s.project_equity,
+            s.raw_tariff_bps,
+            s.refined_tariff_bps,
+            s.hard_credit_defaults,
+            s.broken_promises,
+        )));
+    }
+    rows.extend(public_ledger_body_rows(
+        obs,
+        state.plain_codes,
+        commodities,
+        LedgerTableLayout::FullStacked,
+    ));
+    let ledger_end = rows.len().saturating_sub(1);
+    rows.push(ViewRow::from_plain(String::new()));
+
+    rows.push(ViewRow::from_plain(format!(
+        "=== ACTIVE WORKSPACE: {tab_label} ==="
+    )));
+    let workspace_header = rows.len().saturating_sub(1);
+    let mut center_selected_row: Option<usize> = None;
+    for row in center_tab_rows(obs, state, commodities) {
+        let plain = row.plain_text();
+        if let Some(rest) = plain.strip_prefix("> ") {
+            if center_selected_row.is_none() {
+                center_selected_row = Some(rows.len());
+            }
+            rows.push(ViewRow::from_plain(format!("[SELECTED] {rest}")));
+        } else {
+            rows.push(row);
+        }
+    }
+    rows.push(ViewRow::from_plain(String::new()));
+
+    rows.push(ViewRow::from_plain(format!(
+        "=== PRIVATE VAULT (SEAT S{} ONLY) ===",
+        obs.seat
+    )));
+    let drawer_start = rows.len();
+    rows.extend(private_drawer_rows(obs, state, commodities));
+    let drawer_end = rows.len().saturating_sub(1);
+
+    let target_row = match state.selection.focus_zone {
+        FocusZone::PublicLedger => (ledger_start + state.selection.ledger_row_idx).min(ledger_end),
+        FocusZone::CenterTabs => center_selected_row.unwrap_or(workspace_header),
+        FocusZone::PrivateDrawer => (drawer_start + state.selection.drawer_row_idx).min(drawer_end),
+    };
+    (rows, target_row)
+}
+
+pub(crate) fn screen_reader_target_and_total(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+) -> (usize, usize) {
+    let (rows, target) = build_screen_reader_turn_rows(obs, state, PassKind::SubPassA, None);
+    (target, rows.len())
+}
+
+fn build_screen_reader_turn_screen(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+    pass: PassKind,
+    commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    let (rows, _) = build_screen_reader_turn_rows(obs, state, pass, commodities);
+    let total = rows.len();
+    let offset = state.screen_reader_scroll.min(total.saturating_sub(1));
+    let digest_key = if state.resume_digest_open {
+        "d:HideDigest"
+    } else {
+        "d:Digest"
+    };
+    let mode_tag = turn_mode_tag(state);
+
+    let mut view = SeatScreenView {
+        layout: if viewport.height >= 8 {
+            ScreenLayout::single_panel_with_status(viewport)
+        } else {
+            ScreenLayout::single_panel(viewport)
+        },
+        zones: vec![ViewZonePanel {
+            zone: ViewZoneId::SingleFull,
+            panel: ViewPanel {
+                title: None,
+                alignment: ViewAlign::Left,
+                bordered: false,
+                tabs: None,
+                table: None,
+                rows,
+                selected_row: None,
+                scroll: Some(ViewScroll { offset, total }),
+            },
+        }],
+        status_line: Some(ViewStatusLine {
+            alert: None,
+            left: vec![ViewSpan::plain(
+                "Linear Mode | 1-3:Tabs F6:Zone [/]:Item Arrows:Act PgUp/PgDn:Scroll".to_owned(),
+            )],
+            right: vec![ViewSpan::plain(format!(
+                "[{mode_tag}] c:Codes {digest_key} r:Chron p:WhatIf Ctrl+L:Lock q:Quit"
+            ))],
+            style: ViewStyle::plain(),
+        }),
+        modal: None,
+    };
+    strip_colors_in_view(&mut view);
+    view
+}
+
+fn format_mandate_provenance(
+    seat_idx: usize,
+    kind: MandateKind,
+    data: &league_seat_types::EndOfSeasonData,
+    commodities: Option<&CommodityDisplayMap>,
+    plain_codes: bool,
+) -> String {
+    let seat_u8 = seat_idx as u8;
+    let close_t = data.closed_turn.0;
+    match kind {
+        MandateKind::MinProjectEquity { target } => {
+            let final_proj = data
+                .scoreboard
+                .standings
+                .iter()
+                .find(|e| e.seat == seat_u8)
+                .map_or(0, |e| e.project_equity);
+            let status_note = if final_proj >= target {
+                format!("target met by T{close_t}")
+            } else {
+                format!("unmet at T{close_t}")
+            };
+            format!("Provenance: project equity {final_proj}/{target} [{status_note}]")
+        }
+        MandateKind::MinActivePartners { min_partners } => {
+            let mut first_partner_turn: [Option<u8>; 6] = [None; 6];
+            let mut partner_order: Vec<(u8, u8)> = Vec::new();
+            for r in &data.public_receipts {
+                for f in &r.fills {
+                    if fill_records_partner_delivery(f) {
+                        let peer = if f.from == Some(seat_u8) && f.to != seat_u8 {
+                            Some(f.to)
+                        } else if f.to == seat_u8 {
+                            f.from.filter(|&p| p != seat_u8)
+                        } else {
+                            None
+                        };
+                        if let Some(p) = peer
+                            && usize::from(p) < 6
+                            && first_partner_turn[usize::from(p)].is_none()
+                        {
+                            first_partner_turn[usize::from(p)] = Some(f.turn);
+                            partner_order.push((p, f.turn));
+                        }
+                    }
+                }
+            }
+            let count = partner_order.len();
+            if data.public_receipts.is_empty() {
+                return format!(
+                    "Provenance: active partners target {min_partners} [evaluated at T{close_t} close]"
+                );
+            }
+            let tags: Vec<String> = partner_order
+                .iter()
+                .map(|(p, t)| format!("S{p}@T{t}"))
+                .collect();
+            let list_str = if tags.is_empty() {
+                "none".to_owned()
+            } else {
+                tags.join(", ")
+            };
+            let target_idx = usize::from(min_partners);
+            let met_note = if target_idx == 0 {
+                "target met T1".to_owned()
+            } else if count >= target_idx {
+                format!("target met T{}", partner_order[target_idx - 1].1)
+            } else {
+                format!("unmet at T{close_t}")
+            };
+            format!("Provenance: active partners {count}/{min_partners} [{list_str}; {met_note}]")
+        }
+        MandateKind::MinRefinedVariety {
+            distinct_goods,
+            min_each,
+        } => {
+            let Some(close_pred) = data.close_predicates.get(seat_idx) else {
+                return format!(
+                    "Provenance: refined >= {min_each} x{distinct_goods} evaluated at T{close_t}"
+                );
+            };
+            let mut qualified = Vec::new();
+            for sc in &close_pred.scarcity {
+                if let AssetId::Refined(_) = sc.good
+                    && sc.own_units >= min_each
+                {
+                    let label = format_asset_label(sc.good, commodities, plain_codes);
+                    let since_t = earliest_continuous_refined_turn(
+                        seat_idx,
+                        sc.good,
+                        min_each,
+                        close_t,
+                        &data.predicate_turns,
+                    );
+                    qualified.push(format!("{label}={} since T{since_t}", sc.own_units));
+                }
+            }
+            let summary = if qualified.is_empty() {
+                "none".to_owned()
+            } else {
+                qualified.join(", ")
+            };
+            format!(
+                "Provenance: refined >= {min_each} at T{close_t}: {}/{} [{summary}]",
+                qualified.len(),
+                distinct_goods
+            )
+        }
+        MandateKind::MaintainCleanCredit { min_tier } => {
+            let terminal_tier = data
+                .scoreboard
+                .standings
+                .iter()
+                .find(|e| e.seat == seat_u8)
+                .map_or(CreditTier::Aaa, |e| e.credit_tier);
+            let tier_from_bps = |bps: u16| -> CreditTier {
+                if bps <= CreditTier::Aaa.interest_bps() {
+                    CreditTier::Aaa
+                } else if bps <= CreditTier::Bbb.interest_bps() {
+                    CreditTier::Bbb
+                } else if bps <= CreditTier::B.interest_bps() {
+                    CreditTier::B
+                } else {
+                    CreditTier::D
+                }
+            };
+            let mut drop_turns = Vec::new();
+            for tp in &data.predicate_turns {
+                if let Some(seat_pred) = tp.at_turn_start.get(seat_idx)
+                    && tier_from_bps(seat_pred.upkeep.interest_bps) > min_tier
+                {
+                    drop_turns.push(tp.turn);
+                }
+            }
+            if terminal_tier <= min_tier && drop_turns.is_empty() {
+                format!(
+                    "Provenance: credit >= {min_tier:?} held T1..=T{close_t} (terminal {terminal_tier:?})"
+                )
+            } else if !drop_turns.is_empty() {
+                format!(
+                    "Provenance: credit below {min_tier:?} at T{}..=T{} (terminal {terminal_tier:?})",
+                    drop_turns[0],
+                    drop_turns[drop_turns.len() - 1]
+                )
+            } else {
+                format!(
+                    "Provenance: terminal credit {terminal_tier:?} below {min_tier:?} at T{close_t}"
+                )
+            }
+        }
+    }
+}
+
+fn earliest_continuous_refined_turn(
+    seat_idx: usize,
+    good: AssetId,
+    min_each: i64,
+    close_t: u8,
+    predicate_turns: &[league_seat_types::TurnPredicateRecord],
+) -> u8 {
+    let mut since = close_t;
+    for tp in predicate_turns.iter().rev() {
+        let held = tp
+            .at_turn_start
+            .get(seat_idx)
+            .and_then(|sp| sp.scarcity.iter().find(|s| s.good == good))
+            .map_or(0, |s| s.own_units);
+        if held >= min_each {
+            since = tp.turn;
+        } else {
+            break;
+        }
+    }
+    since
 }

@@ -114,6 +114,74 @@ pub(crate) fn apply_seat_key(
         return handle_notes_text_key(state, key);
     }
 
+    if state.screen_reader && matches!(key.code, SeatKeyCode::PageUp | SeatKeyCode::PageDown) {
+        let step = usize::from(viewport.height.saturating_sub(4)).max(4);
+        if key.code == SeatKeyCode::PageUp {
+            state.screen_reader_scroll = state.screen_reader_scroll.saturating_sub(step);
+        } else {
+            state.screen_reader_scroll = state.screen_reader_scroll.saturating_add(step);
+        }
+        return None;
+    }
+
+    let sr_nav_key = state.screen_reader
+        && matches!(
+            key.code,
+            SeatKeyCode::Up
+                | SeatKeyCode::Down
+                | SeatKeyCode::Home
+                | SeatKeyCode::Tab
+                | SeatKeyCode::BackTab
+                | SeatKeyCode::F(6)
+                | SeatKeyCode::Char('[' | ']' | '1' | '2' | '3')
+        );
+    let prev_sr_target = if sr_nav_key {
+        Some(crate::render::screen_reader_target_and_total(obs, state).0)
+    } else {
+        None
+    };
+
+    let intent = apply_seat_key_body(obs, state, viewport, key);
+
+    if let Some(prev_target) = prev_sr_target {
+        let (target_row, total_rows) = crate::render::screen_reader_target_and_total(obs, state);
+        let vis_rows = usize::from(viewport.height.saturating_sub(2)).max(1);
+        if key.code == SeatKeyCode::Home {
+            state.screen_reader_scroll = 0;
+        } else if target_row != prev_target
+            || matches!(
+                key.code,
+                SeatKeyCode::Tab
+                    | SeatKeyCode::BackTab
+                    | SeatKeyCode::F(6)
+                    | SeatKeyCode::Char('[' | ']' | '1' | '2' | '3')
+            )
+        {
+            ensure_row_visible(
+                target_row,
+                &mut state.screen_reader_scroll,
+                vis_rows,
+                total_rows,
+            );
+        } else if key.code == SeatKeyCode::Up {
+            state.screen_reader_scroll = state.screen_reader_scroll.saturating_sub(1);
+        } else if key.code == SeatKeyCode::Down {
+            state.screen_reader_scroll = state
+                .screen_reader_scroll
+                .saturating_add(1)
+                .min(total_rows.saturating_sub(1));
+        }
+    }
+
+    intent
+}
+
+fn apply_seat_key_body(
+    obs: &SeatObservation,
+    state: &mut SeatUiState,
+    viewport: ViewportSize,
+    key: SeatKeyEvent,
+) -> Option<SeatIntent> {
     if key.is_repeat {
         return match key.code {
             SeatKeyCode::Char('1') => {
@@ -151,6 +219,7 @@ pub(crate) fn apply_seat_key(
             SeatKeyCode::Char('q')
             | SeatKeyCode::Esc
             | SeatKeyCode::Char('c')
+            | SeatKeyCode::Char('d')
             | SeatKeyCode::Char('l')
             | SeatKeyCode::Char('L')
             | SeatKeyCode::Char('r')
@@ -177,6 +246,14 @@ pub(crate) fn apply_seat_key(
         SeatKeyCode::Char('c') => {
             state.plain_codes = !state.plain_codes;
             None
+        }
+        SeatKeyCode::Char('d') => {
+            state.toggle_resume_digest();
+            None
+        }
+        SeatKeyCode::Home if state.screen_reader => {
+            state.screen_reader_scroll = 0;
+            dispatch_focused_zone_key(obs, state, viewport, key)
         }
         SeatKeyCode::Char('1') => {
             state.active_tab = CenterTab::MarketAndContracts;

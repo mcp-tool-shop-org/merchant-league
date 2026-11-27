@@ -88,6 +88,8 @@ struct CliOptions {
     turn_clock_secs: Option<u16>,
     untimed: bool,
     pins_enabled: bool,
+    no_color: bool,
+    screen_reader: bool,
     error_format: host::ErrorFormat,
     log_level: Option<host::LogLevel>,
     log_file: Option<PathBuf>,
@@ -305,6 +307,24 @@ where
                     ));
                 }
                 opts.pins_enabled = true;
+                idx += 1;
+            }
+            "--no-color" => {
+                if inline_val.is_some() {
+                    return CliAction::Error(host::TuiError::InvalidUsage(
+                        "--no-color takes no value".to_owned(),
+                    ));
+                }
+                opts.no_color = true;
+                idx += 1;
+            }
+            "--screen-reader" => {
+                if inline_val.is_some() {
+                    return CliAction::Error(host::TuiError::InvalidUsage(
+                        "--screen-reader takes no value".to_owned(),
+                    ));
+                }
+                opts.screen_reader = true;
                 idx += 1;
             }
             "--error-format" => {
@@ -765,6 +785,10 @@ fn apply_cli_session_options(
     opts: &CliOptions,
     is_resume: bool,
 ) {
+    session.configure_accessibility(opts.no_color, opts.screen_reader);
+    if is_resume {
+        session.activate_resume_digest_if_swept();
+    }
     if opts.untimed {
         session.configure_turn_clock(None);
     } else if let Some(secs) = opts.turn_clock_secs {
@@ -809,6 +833,8 @@ fn lobby_overrides_from_cli(opts: &CliOptions) -> LobbyCliOverrides {
         turn_clock_secs: opts.turn_clock_secs,
         untimed: opts.untimed,
         pins_enabled: opts.pins_enabled,
+        no_color: opts.no_color,
+        screen_reader: opts.screen_reader,
     }
 }
 
@@ -999,12 +1025,13 @@ where
             );
             let _ = writeln!(
                 out,
-                "Usage: league-tui [-h|--help] [-V|--version] [--save-dir <DIR>] [--resume <PATH>] [--turn-clock <180..=300> | --untimed] [--pins] [--error-format <text|json>] [--log-level <silent|normal|verbose|debug> | -q|--silent | -v|--verbose | --debug] [--log-file <PATH>]"
+                "Usage: league-tui [-h|--help] [-V|--version] [--save-dir <DIR>] [--resume <PATH>] [--turn-clock <180..=300> | --untimed] [--pins] [--no-color] [--screen-reader] [--error-format <text|json>] [--log-level <silent|normal|verbose|debug> | -q|--silent | -v|--verbose | --debug] [--log-file <PATH>]"
             );
             let _ = writeln!(
                 out,
-                "Precedence: CLI flags (--turn-clock, --untimed, --pins, --log-level/-q/-v/--debug) override Lobby choices, saved .seal settings, and env vars ({}); `--pin` values are forbidden on CLI.",
-                host::LEAGUE_LOG_LEVEL_ENV
+                "Precedence: CLI flags (--turn-clock, --untimed, --pins, --no-color, --screen-reader, --log-level/-q/-v/--debug) override Lobby choices, saved .seal settings, and env vars ({}, {}); `--pin` values are forbidden on CLI.",
+                host::LEAGUE_LOG_LEVEL_ENV,
+                host::NO_COLOR_ENV
             );
             let _ = writeln!(
                 out,
@@ -1016,7 +1043,9 @@ where
             let _ = writeln!(out, "league-tui {}", env!("CARGO_PKG_VERSION"));
             ExitCode::from(host::EXIT_OK)
         }
-        CliAction::RunClub(opts) => {
+        CliAction::RunClub(mut opts) => {
+            let env_no_color = env_reader(host::NO_COLOR_ENV).is_some_and(|v| !v.is_empty());
+            opts.no_color = opts.no_color || env_no_color;
             let level = match resolve_log_level(opts.log_level, env_reader) {
                 Ok(lvl) => lvl,
                 Err(err) => {
@@ -1260,6 +1289,8 @@ mod tests {
                 turn_clock_secs: Some(180),
                 untimed: false,
                 pins_enabled: true,
+                no_color: false,
+                screen_reader: false,
                 error_format: host::ErrorFormat::Json,
                 log_level: Some(host::LogLevel::Verbose),
                 log_file: None,
@@ -1273,6 +1304,8 @@ mod tests {
                 turn_clock_secs: None,
                 untimed: true,
                 pins_enabled: true,
+                no_color: false,
+                screen_reader: false,
                 error_format: host::ErrorFormat::Text,
                 log_level: Some(host::LogLevel::Silent),
                 log_file: None,
@@ -5732,5 +5765,191 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn cli_no_color_env_and_screen_reader_flags_and_resume_digest_wire_cleanly() {
+        assert_eq!(
+            parse_args(["league-tui", "--no-color", "--screen-reader"]),
+            CliAction::RunClub(CliOptions {
+                no_color: true,
+                screen_reader: true,
+                ..CliOptions::default()
+            })
+        );
+        assert!(matches!(
+            parse_args(["league-tui", "--no-color=1"]),
+            CliAction::Error(host::TuiError::InvalidUsage(_))
+        ));
+        assert!(matches!(
+            parse_args(["league-tui", "--screen-reader=yes"]),
+            CliAction::Error(host::TuiError::InvalidUsage(_))
+        ));
+
+        let mut seen_no_color: Option<bool> = None;
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let rc_env_on = dispatch_cli_with_env(
+            ["league-tui".to_owned()],
+            |k| (k == host::NO_COLOR_ENV).then(|| "1".to_owned()),
+            true,
+            &mut out,
+            &mut err,
+            |opts, _, _| {
+                seen_no_color = Some(opts.no_color);
+                Ok(())
+            },
+        );
+        assert_eq!(rc_env_on, ExitCode::SUCCESS);
+        assert_eq!(seen_no_color, Some(true));
+
+        let mut seen_empty_no_color: Option<bool> = None;
+        let rc_env_empty = dispatch_cli_with_env(
+            ["league-tui".to_owned()],
+            |k| (k == host::NO_COLOR_ENV).then(String::new),
+            true,
+            &mut out,
+            &mut err,
+            |opts, _, _| {
+                seen_empty_no_color = Some(opts.no_color);
+                Ok(())
+            },
+        );
+        assert_eq!(rc_env_empty, ExitCode::SUCCESS);
+        assert_eq!(seen_empty_no_color, Some(false));
+
+        let mut help_out = Vec::new();
+        let mut help_err = Vec::new();
+        let _ = dispatch_cli_with_env(
+            ["league-tui".to_owned(), "--help".to_owned()],
+            |_| None,
+            false,
+            &mut help_out,
+            &mut help_err,
+            |_, _, _| Ok(()),
+        );
+        let help_txt = String::from_utf8_lossy(&help_out);
+        assert!(help_txt.contains("[--no-color] [--screen-reader]"));
+        assert!(help_txt.contains("NO_COLOR"));
+
+        // Save after Turn 1 Sweep with bots, then resume via CLI and verify digest opens cleanly.
+        let ring = default_dev_ring_table().unwrap_or_else(|e| panic!("ring: {e}"));
+        let mut session = host::TuiHostSession::from_ring_table(&ring, TableId(81_990), &[0], 11)
+            .unwrap_or_else(|e| panic!("session: {e}"));
+        let dir =
+            std::env::temp_dir().join(format!("ml_step3_resume_digest_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let (save_path, seal_path) = default_save_paths(&dir, TableId(81_990));
+        session.enable_autosave(save_path.clone(), seal_path.clone());
+        let vp = ViewportSize::new(100, 30);
+
+        while session.turn() < 2 {
+            if session.is_curtain_open() {
+                session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                session
+                    .handle_key_event(
+                        league_seat_types::SeatKeyEvent::new(
+                            league_seat_types::SeatKeyCode::Char(' '),
+                            league_seat_types::SeatKeyModifiers::NONE,
+                        ),
+                        vp,
+                    )
+                    .unwrap_or_else(|e| panic!("space: {e}"));
+                session
+                    .handle_key_event(
+                        league_seat_types::SeatKeyEvent::new(
+                            league_seat_types::SeatKeyCode::Enter,
+                            league_seat_types::SeatKeyModifiers::NONE,
+                        ),
+                        vp,
+                    )
+                    .unwrap_or_else(|e| panic!("enter: {e}"));
+                session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+            } else {
+                session
+                    .handle_key_event(
+                        league_seat_types::SeatKeyEvent::new(
+                            league_seat_types::SeatKeyCode::Char('l'),
+                            league_seat_types::SeatKeyModifiers::CTRL,
+                        ),
+                        vp,
+                    )
+                    .unwrap_or_else(|e| panic!("handoff: {e}"));
+            }
+        }
+        assert_eq!(session.turn(), 2);
+
+        let mut resumed = build_session_for_cli(&CliOptions {
+            resume_path: Some(save_path),
+            no_color: true,
+            screen_reader: true,
+            ..CliOptions::default()
+        })
+        .unwrap_or_else(|e| panic!("resume cli: {e}"));
+        resumed.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed
+            .handle_key_event(
+                league_seat_types::SeatKeyEvent::new(
+                    league_seat_types::SeatKeyCode::Char(' '),
+                    league_seat_types::SeatKeyModifiers::NONE,
+                ),
+                vp,
+            )
+            .unwrap_or_else(|e| panic!("curtain space: {e}"));
+        resumed
+            .handle_key_event(
+                league_seat_types::SeatKeyEvent::new(
+                    league_seat_types::SeatKeyCode::Enter,
+                    league_seat_types::SeatKeyModifiers::NONE,
+                ),
+                vp,
+            )
+            .unwrap_or_else(|e| panic!("curtain enter: {e}"));
+        resumed.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+
+        let view = resumed
+            .build_current_view(vp)
+            .unwrap_or_else(|e| panic!("view: {e}"));
+        let txt = view.plain_text();
+        assert!(txt.contains("=== MERCHANT LEAGUE: SCREEN READER TURN VIEW ==="));
+        assert!(txt.contains("Previously This Season (Turns T1..=T1, 1 swept) [d: toggle]"));
+
+        // Toggling 'd' collapses and re-expands the resume digest interactively.
+        resumed
+            .handle_key_event(
+                league_seat_types::SeatKeyEvent::new(
+                    league_seat_types::SeatKeyCode::Char('d'),
+                    league_seat_types::SeatKeyModifiers::NONE,
+                ),
+                vp,
+            )
+            .unwrap_or_else(|e| panic!("toggle collapse: {e}"));
+        let view_collapsed = resumed
+            .build_current_view(vp)
+            .unwrap_or_else(|e| panic!("view collapsed: {e}"));
+        assert!(
+            !view_collapsed
+                .plain_text()
+                .contains("Previously This Season (Turns T1..=T1, 1 swept) [d: toggle]")
+        );
+        resumed
+            .handle_key_event(
+                league_seat_types::SeatKeyEvent::new(
+                    league_seat_types::SeatKeyCode::Char('d'),
+                    league_seat_types::SeatKeyModifiers::NONE,
+                ),
+                vp,
+            )
+            .unwrap_or_else(|e| panic!("toggle expand: {e}"));
+        let view_expanded = resumed
+            .build_current_view(vp)
+            .unwrap_or_else(|e| panic!("view expanded: {e}"));
+        assert!(
+            view_expanded
+                .plain_text()
+                .contains("Previously This Season (Turns T1..=T1, 1 swept) [d: toggle]")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
