@@ -738,6 +738,10 @@ pub struct SeatUiState {
     pub(crate) chronicle_receipt_idx: usize,
     pub(crate) chronicle_open: bool,
     pub(crate) plain_codes: bool,
+    pub(crate) no_color: bool,
+    pub(crate) screen_reader: bool,
+    pub(crate) resume_digest_open: bool,
+    pub(crate) screen_reader_scroll: usize,
     pub(crate) composer_edit_active: bool,
     pub(crate) notes_edit_active: bool,
     pub(crate) composer_draft: String,
@@ -770,9 +774,13 @@ impl SeatUiState {
     pub fn clear_for_hand_off(&mut self) {
         let active_tab = self.active_tab;
         let selection = self.selection;
+        let no_color = self.no_color;
+        let screen_reader = self.screen_reader;
         *self = Self::new();
         self.active_tab = active_tab;
         self.selection = selection;
+        self.no_color = no_color;
+        self.screen_reader = screen_reader;
     }
 
     /// Updates the host-supplied turn clock countdown display.
@@ -825,6 +833,54 @@ impl SeatUiState {
     /// Sets whether commodity labels render as plain 3-letter codes (`true`) or in-world names (`false`).
     pub fn set_plain_codes(&mut self, plain_codes: bool) {
         self.plain_codes = plain_codes;
+    }
+
+    /// Sets whether ANSI palette colors are suppressed (`NO_COLOR` / `--no-color`).
+    pub fn set_no_color(&mut self, enabled: bool) {
+        self.no_color = enabled;
+    }
+
+    /// Sets whether `--screen-reader` linear plain-text rendering is enabled.
+    pub fn set_screen_reader(&mut self, enabled: bool) {
+        self.screen_reader = enabled;
+    }
+
+    /// Opens or collapses the deterministic `"Previously This Season"` resume digest.
+    pub fn set_resume_digest_open(&mut self, open: bool) {
+        self.resume_digest_open = open;
+        if open {
+            self.center_scroll = 0;
+            self.screen_reader_scroll = 0;
+        }
+    }
+
+    /// Toggles the `"Previously This Season"` resume digest visibility.
+    pub fn toggle_resume_digest(&mut self) {
+        self.set_resume_digest_open(!self.resume_digest_open);
+    }
+
+    /// Returns `true` when ANSI palette colors are suppressed (`NO_COLOR` / `--no-color`).
+    #[must_use]
+    pub const fn no_color(&self) -> bool {
+        self.no_color
+    }
+
+    /// Returns `true` when `--screen-reader` linear plain-text rendering is active.
+    #[must_use]
+    pub const fn screen_reader(&self) -> bool {
+        self.screen_reader
+    }
+
+    /// Returns `true` when the `"Previously This Season"` resume digest is expanded.
+    #[must_use]
+    pub const fn resume_digest_open(&self) -> bool {
+        self.resume_digest_open
+    }
+
+    /// Returns the vertical scroll offset used by `--screen-reader` linear turn views.
+    #[must_use]
+    pub const fn screen_reader_scroll(&self) -> usize {
+        self.screen_reader_scroll
     }
 
     /// Returns the currently selected center tab.
@@ -1149,6 +1205,8 @@ pub struct EndOfSeasonUiState {
     pub(crate) active_tab: EndOfSeasonTab,
     pub(crate) scroll: usize,
     pub(crate) plain_codes: bool,
+    pub(crate) no_color: bool,
+    pub(crate) screen_reader: bool,
 }
 
 impl EndOfSeasonUiState {
@@ -1159,6 +1217,8 @@ impl EndOfSeasonUiState {
             active_tab: EndOfSeasonTab::Scoreboard,
             scroll: 0,
             plain_codes: false,
+            no_color: false,
+            screen_reader: false,
         }
     }
 
@@ -1178,6 +1238,28 @@ impl EndOfSeasonUiState {
     #[must_use]
     pub const fn plain_codes(&self) -> bool {
         self.plain_codes
+    }
+
+    /// Returns whether ANSI palette colors are suppressed on End-of-Season screens.
+    #[must_use]
+    pub const fn no_color(&self) -> bool {
+        self.no_color
+    }
+
+    /// Sets whether ANSI palette colors are suppressed on End-of-Season screens.
+    pub fn set_no_color(&mut self, enabled: bool) {
+        self.no_color = enabled;
+    }
+
+    /// Returns whether `--screen-reader` linear plain-text rendering is enabled.
+    #[must_use]
+    pub const fn screen_reader(&self) -> bool {
+        self.screen_reader
+    }
+
+    /// Sets whether `--screen-reader` linear plain-text rendering is enabled.
+    pub fn set_screen_reader(&mut self, enabled: bool) {
+        self.screen_reader = enabled;
     }
 }
 

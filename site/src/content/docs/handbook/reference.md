@@ -34,6 +34,8 @@ league-tui [options]
 | `--turn-clock <180..=300>` | Override whole-turn clock budget in seconds (`75%` Sub-Pass A / `25%` Sub-Pass B across `H` humans; `210` default) |
 | `--untimed` | Disable timed turn auto-locks (overrides Lobby and `.seal` clock settings; conflicts with `--turn-clock`) |
 | `--pins` | Enable 4-digit table-local Curtain PINs entered interactively behind the Curtain (passing `--pin` on CLI fails with `PIN_CLI_FORBIDDEN`) |
+| `--no-color` | Suppress all terminal palette colors across Lobby, Curtain, Turn, Standby, and End-of-Season screens (also honored automatically when the `NO_COLOR` environment variable is non-empty) |
+| `--screen-reader` | Render a linear borderless plain-text turn view without box-drawing grids or multi-column splits (always color-free) |
 | `--error-format <text\|json>` | Error output encoding on `stderr`: `text` (default `error: [CODE] ...; hint: ...`) or compact `StructuredError` JSON |
 | `--log-level <level>` | Diagnostic verbosity: `silent`, `normal` (default), `verbose`, or `debug` (or `LEAGUE_LOG_LEVEL` env var) |
 | `-q`, `--silent` | Shorthand for `--log-level silent` |
@@ -43,7 +45,7 @@ league-tui [options]
 | `-h`, `--help` | Print usage, CLI override precedence, and exit codes (succeeds without a TTY) |
 | `-V`, `--version` | Print `league-tui` version (succeeds without a TTY) |
 
-**CLI precedence:** `--turn-clock`, `--untimed`, and `--pins` override conflicting Lobby UI choices and resumed `.seal` settings; `--log-level`, `-q`, `-v`, and `--debug` override `LEAGUE_LOG_LEVEL`.
+**CLI precedence:** `--turn-clock`, `--untimed`, `--pins`, `--no-color`, and `--screen-reader` override conflicting Lobby UI choices, resumed `.seal` settings, and `NO_COLOR`; `--log-level`, `-q`, `-v`, and `--debug` override `LEAGUE_LOG_LEVEL`.
 
 ### `league-tui` logging and panic safety
 

@@ -151,6 +151,7 @@ pub(crate) fn apply_seat_key(
             SeatKeyCode::Char('q')
             | SeatKeyCode::Esc
             | SeatKeyCode::Char('c')
+            | SeatKeyCode::Char('d')
             | SeatKeyCode::Char('l')
             | SeatKeyCode::Char('L')
             | SeatKeyCode::Char('r')
@@ -159,6 +160,16 @@ pub(crate) fn apply_seat_key(
             | SeatKeyCode::Char('e')
             | SeatKeyCode::Char('n')
             | SeatKeyCode::Char('p') => None,
+            SeatKeyCode::PageUp if state.screen_reader => {
+                let step = usize::from(viewport.height.saturating_sub(4)).max(4);
+                state.screen_reader_scroll = state.screen_reader_scroll.saturating_sub(step);
+                None
+            }
+            SeatKeyCode::PageDown if state.screen_reader => {
+                let step = usize::from(viewport.height.saturating_sub(4)).max(4);
+                state.screen_reader_scroll = state.screen_reader_scroll.saturating_add(step);
+                None
+            }
             _ => dispatch_focused_zone_key(obs, state, viewport, key),
         };
     }
@@ -177,6 +188,24 @@ pub(crate) fn apply_seat_key(
         SeatKeyCode::Char('c') => {
             state.plain_codes = !state.plain_codes;
             None
+        }
+        SeatKeyCode::Char('d') => {
+            state.toggle_resume_digest();
+            None
+        }
+        SeatKeyCode::PageUp if state.screen_reader => {
+            let step = usize::from(viewport.height.saturating_sub(4)).max(4);
+            state.screen_reader_scroll = state.screen_reader_scroll.saturating_sub(step);
+            None
+        }
+        SeatKeyCode::PageDown if state.screen_reader => {
+            let step = usize::from(viewport.height.saturating_sub(4)).max(4);
+            state.screen_reader_scroll = state.screen_reader_scroll.saturating_add(step);
+            None
+        }
+        SeatKeyCode::Home if state.screen_reader => {
+            state.screen_reader_scroll = 0;
+            dispatch_focused_zone_key(obs, state, viewport, key)
         }
         SeatKeyCode::Char('1') => {
             state.active_tab = CenterTab::MarketAndContracts;

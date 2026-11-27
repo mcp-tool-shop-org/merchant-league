@@ -16,12 +16,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use league_core::club::host::{ClubPauseCursor, ClubSessionCheckpoint};
 use league_core::{
     AiPreviewRequest, ClubBot, ClubHost, EngineError, MarketAction, OrderReveal, PrivateMandate,
-    SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, SeatObservation, StructuredError,
-    TableId, ToStructuredError, Turn, TurnPhase, preview_seat_bundle, preview_what_if,
-    scrub_secret_text,
+    PublicSweepReceipt, SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, SeatObservation,
+    StructuredError, TableId, ToStructuredError, Turn, TurnPhase, preview_seat_bundle,
+    preview_what_if, scrub_secret_text,
 };
 #[cfg(test)]
-use league_core::{PublicSweepReceipt, RevealSalt, SealedEvalSeed, SealedMandateDeal, TableSpec};
+use league_core::{RevealSalt, SealedEvalSeed, SealedMandateDeal, TableSpec};
 use league_gen::{
     GenError, GeneratorConfig, RingTable, SeatCount, SeedPool, TablePurpose, TableSetupOptions,
     generate_ring_table_for_setup, is_reserved_test_seed, ring_table_to_table_spec, seed_pool,
@@ -57,6 +57,8 @@ pub(crate) const EXIT_PARTIAL_SUCCESS: u8 = 3;
 
 /// Environment variable selecting default diagnostic log verbosity for `league-tui`.
 pub(crate) const LEAGUE_LOG_LEVEL_ENV: &str = "LEAGUE_LOG_LEVEL";
+/// Standard environment variable (`https://no-color.org/`) disabling terminal colors when non-empty.
+pub(crate) const NO_COLOR_ENV: &str = "NO_COLOR";
 
 /// CLI error output encoding selected via `--error-format` (`SHIP_GATE.md` `:26`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -648,10 +650,14 @@ const fn map_color(color: ViewColor) -> Color {
     }
 }
 
-fn map_style(style: ViewStyle) -> Style {
-    let mut out = Style::default()
-        .fg(map_color(style.fg))
-        .bg(map_color(style.bg));
+fn map_style_with_no_color(style: ViewStyle, no_color: bool) -> Style {
+    let mut out = if no_color {
+        Style::default().fg(Color::Reset).bg(Color::Reset)
+    } else {
+        Style::default()
+            .fg(map_color(style.fg))
+            .bg(map_color(style.bg))
+    };
     if style.bold {
         out = out.add_modifier(Modifier::BOLD);
     }
@@ -668,6 +674,11 @@ fn map_style(style: ViewStyle) -> Style {
         out = out.add_modifier(Modifier::REVERSED);
     }
     out
+}
+
+#[cfg(test)]
+fn map_style(style: ViewStyle) -> Style {
+    map_style_with_no_color(style, false)
 }
 
 const fn map_align(align: ViewAlign) -> Alignment {
@@ -694,7 +705,7 @@ const fn map_axis(axis: ViewAxis) -> Direction {
     }
 }
 
-fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar) -> u16 {
+fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar, no_color: bool) -> u16 {
     if area.width == 0 || area.height == 0 || tab_bar.tabs.is_empty() {
         return 0;
     }
@@ -721,13 +732,17 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar) -> u1
                 current.push(Span::raw(" | "));
                 line_width += 3;
             }
-            let mut st = map_style(item.label.style);
+            let mut st = map_style_with_no_color(item.label.style, no_color);
             if idx == tab_bar.active_index {
-                st = st
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD | Modifier::REVERSED);
+                st = st.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+                if !no_color {
+                    st = st.fg(Color::Cyan);
+                }
             } else if !item.enabled {
-                st = st.fg(Color::DarkGray).add_modifier(Modifier::DIM);
+                st = st.add_modifier(Modifier::DIM);
+                if !no_color {
+                    st = st.fg(Color::DarkGray);
+                }
             }
             let safe_chip = strip_terminal_controls(&chip);
             line_width += safe_chip.chars().count();
@@ -756,6 +771,7 @@ fn render_view_table(
     area: Rect,
     table: &ViewTable,
     skip_rows: usize,
+    no_color: bool,
 ) -> u16 {
     if area.width == 0
         || area.height < 2
@@ -800,7 +816,8 @@ fn render_view_table(
             Cell::from(
                 Line::from(Span::styled(
                     text,
-                    map_style(col.header.style).add_modifier(Modifier::BOLD),
+                    map_style_with_no_color(col.header.style, no_color)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .alignment(map_align(col.alignment)),
             )
@@ -832,7 +849,7 @@ fn render_view_table(
                         cell.spans
                             .iter()
                             .map(|sp| {
-                                let mut st = map_style(sp.style);
+                                let mut st = map_style_with_no_color(sp.style, no_color);
                                 if selected {
                                     st = st.add_modifier(Modifier::REVERSED);
                                 }
@@ -842,10 +859,9 @@ fn render_view_table(
                     } else {
                         let combined: String =
                             cell.spans.iter().map(|sp| sp.text.as_str()).collect();
-                        let mut st = cell
-                            .spans
-                            .first()
-                            .map_or_else(Style::default, |sp| map_style(sp.style));
+                        let mut st = cell.spans.first().map_or_else(Style::default, |sp| {
+                            map_style_with_no_color(sp.style, no_color)
+                        });
                         if selected {
                             st = st.add_modifier(Modifier::REVERSED);
                         }
@@ -856,7 +872,9 @@ fn render_view_table(
                 .collect();
             let mut r = Row::new(cells);
             if selected {
-                r = r.style(map_style(row.style).add_modifier(Modifier::BOLD));
+                r = r.style(
+                    map_style_with_no_color(row.style, no_color).add_modifier(Modifier::BOLD),
+                );
             }
             r
         })
@@ -866,7 +884,7 @@ fn render_view_table(
     allocated
 }
 
-fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
+fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel, no_color: bool) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -878,7 +896,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
         if let Some(title) = &panel.title {
             block = block.title(Span::styled(
                 strip_terminal_controls(&title.text),
-                map_style(title.style),
+                map_style_with_no_color(title.style, no_color),
             ));
         }
         let inner_rect = block.inner(area);
@@ -893,7 +911,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
     }
 
     if let Some(tab_bar) = &panel.tabs {
-        let used = render_tab_bar(frame, inner, tab_bar);
+        let used = render_tab_bar(frame, inner, tab_bar, no_color);
         inner.y = inner.y.saturating_add(used);
         inner.height = inner.height.saturating_sub(used);
     }
@@ -905,7 +923,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
     let row_offset = if let Some(table) = &panel.table {
         let t_len = table.rows.len();
         if offset < t_len {
-            let used = render_view_table(frame, inner, table, offset);
+            let used = render_view_table(frame, inner, table, offset, no_color);
             inner.y = inner.y.saturating_add(used);
             inner.height = inner.height.saturating_sub(used);
             0
@@ -931,7 +949,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
                 .spans
                 .iter()
                 .map(|span| {
-                    let mut st = map_style(span.style);
+                    let mut st = map_style_with_no_color(span.style, no_color);
                     if is_selected {
                         st = st.add_modifier(Modifier::REVERSED);
                     }
@@ -945,7 +963,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
     frame.render_widget(paragraph, inner);
 }
 
-fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView) {
+fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView, no_color: bool) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -956,18 +974,33 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView) 
         alert
             .spans
             .iter()
-            .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
+            .map(|sp| {
+                Span::styled(
+                    strip_terminal_controls(&sp.text),
+                    map_style_with_no_color(sp.style, no_color),
+                )
+            })
             .collect()
     });
     let left_spans: Vec<Span<'_>> = status
         .left
         .iter()
-        .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
+        .map(|sp| {
+            Span::styled(
+                strip_terminal_controls(&sp.text),
+                map_style_with_no_color(sp.style, no_color),
+            )
+        })
         .collect();
     let right_spans: Vec<Span<'_>> = status
         .right
         .iter()
-        .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
+        .map(|sp| {
+            Span::styled(
+                strip_terminal_controls(&sp.text),
+                map_style_with_no_color(sp.style, no_color),
+            )
+        })
         .collect();
 
     let lines = if area.height >= 2 {
@@ -982,14 +1015,20 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView) 
         if let Some(alert) = alert_spans {
             combined.extend(alert);
             if !left_spans.is_empty() {
-                combined.push(Span::styled(" | ", map_style(status.style)));
+                combined.push(Span::styled(
+                    " | ",
+                    map_style_with_no_color(status.style, no_color),
+                ));
                 combined.extend(left_spans);
             }
         } else {
             combined.extend(left_spans);
             if !right_spans.is_empty() {
                 if !combined.is_empty() {
-                    combined.push(Span::styled(" | ", map_style(status.style)));
+                    combined.push(Span::styled(
+                        " | ",
+                        map_style_with_no_color(status.style, no_color),
+                    ));
                 }
                 combined.extend(right_spans);
             }
@@ -998,19 +1037,30 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView) 
     };
 
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(map_style(status.style)),
+        Paragraph::new(Text::from(lines)).style(map_style_with_no_color(status.style, no_color)),
         area,
     );
 }
 
 /// Draws a plain [`SeatScreenView`] view model emitted by `league-seat-ui` using `ratatui`.
+#[cfg(test)]
 pub(crate) fn draw_screen_view(frame: &mut Frame<'_>, view: &SeatScreenView) {
+    draw_screen_view_with_options(frame, view, false);
+}
+
+/// Draws a plain [`SeatScreenView`] with explicit `no_color` suppression across every span and
+/// border (`NO_COLOR` / `--no-color`).
+pub(crate) fn draw_screen_view_with_options(
+    frame: &mut Frame<'_>,
+    view: &SeatScreenView,
+    no_color: bool,
+) {
     let full_area = frame.area();
     frame.render_widget(Clear, full_area);
 
     if view.layout.mode == ViewLayoutMode::TooSmall || view.layout.bands.is_empty() {
         if let Some(zone) = view.zones.first() {
-            render_view_panel(frame, full_area, &zone.panel);
+            render_view_panel(frame, full_area, &zone.panel, no_color);
         }
         return;
     }
@@ -1042,9 +1092,9 @@ pub(crate) fn draw_screen_view(frame: &mut Frame<'_>, view: &SeatScreenView) {
 
         for (zone_rect, spec) in zone_rects.iter().copied().zip(band.zones.iter()) {
             if spec.zone == ViewZoneId::StatusLine {
-                render_status_line(frame, zone_rect, view);
+                render_status_line(frame, zone_rect, view, no_color);
             } else if let Some(panel) = view.zone(spec.zone) {
-                render_view_panel(frame, zone_rect, panel);
+                render_view_panel(frame, zone_rect, panel, no_color);
             }
         }
     }
@@ -1063,7 +1113,7 @@ pub(crate) fn draw_screen_view(frame: &mut Frame<'_>, view: &SeatScreenView) {
             height: h,
         };
         frame.render_widget(Clear, modal_rect);
-        render_view_panel(frame, modal_rect, &modal.panel);
+        render_view_panel(frame, modal_rect, &modal.panel, no_color);
     }
 }
 
@@ -1150,6 +1200,106 @@ fn write_atomic_file_bytes(target: &Path, bytes: &[u8]) -> Result<(), String> {
     write_res
 }
 
+fn compute_project_equity_by_turn(
+    log: &SeasonReplayLog,
+    public_receipts: &[PublicSweepReceipt],
+    scoreboard: &league_core::FinalScoreboard,
+    seat_count: usize,
+) -> Vec<Vec<i64>> {
+    let num_turns = log.turns.len().min(public_receipts.len());
+    let mut cum = vec![0_i64; seat_count];
+    let mut out = vec![Vec::with_capacity(num_turns); seat_count];
+    let mut active_shocks: Vec<league_core::ActiveShock> = Vec::new();
+
+    for (rec, rcpt) in log.turns.iter().zip(public_receipts.iter()) {
+        active_shocks.retain(|s| s.expires_after_turn >= rec.turn);
+        active_shocks.extend(rcpt.newly_activated_shocks.iter().copied());
+        if rcpt.projects_completed > 0 {
+            for (s, cum_slot) in cum.iter_mut().enumerate().take(seat_count) {
+                let s_u8 = u8::try_from(s).unwrap_or(u8::MAX);
+                if let Some(reveal) = rec.reveals.get(&s_u8) {
+                    for order in &reveal.bundle.project_deliveries {
+                        if let Some(recipe) =
+                            log.spec.projects.iter().find(|r| r.id == order.project_id)
+                        {
+                            let batches = i64::from(order.batches);
+                            if batches > 0 {
+                                let surge_bps = active_shocks
+                                    .iter()
+                                    .filter(|sh| {
+                                        sh.kind == league_core::ShockKind::DemandSurge
+                                            && sh.expires_after_turn >= rec.turn
+                                            && recipe
+                                                .inputs
+                                                .iter()
+                                                .any(|&(g, _)| g == sh.target_seat)
+                                    })
+                                    .map(|sh| sh.magnitude_bps)
+                                    .max()
+                                    .unwrap_or(0);
+                                let base = recipe.equity_points.saturating_mul(batches);
+                                let bonus = (base
+                                    .saturating_mul(i64::from(surge_bps))
+                                    .saturating_add(5_000))
+                                    / 10_000;
+                                *cum_slot = cum_slot.saturating_add(base.saturating_add(bonus));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (s, series) in out.iter_mut().enumerate().take(seat_count) {
+            let final_cap = scoreboard
+                .standings
+                .iter()
+                .find(|e| usize::from(e.seat) == s)
+                .map_or(cum[s], |e| e.project_equity);
+            series.push(cum[s].min(final_cap));
+        }
+    }
+    for (s, series) in out.iter_mut().enumerate().take(seat_count) {
+        if let Some(entry) = scoreboard
+            .standings
+            .iter()
+            .find(|e| usize::from(e.seat) == s)
+            && let Some(last) = series.last_mut()
+            && *last != entry.project_equity
+        {
+            *last = entry.project_equity;
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_end_of_season_data_with_provenance(
+    table_id: TableId,
+    scoreboard: league_core::FinalScoreboard,
+    revealed_mandates: Vec<PrivateMandate>,
+    close_predicates: Vec<league_core::SeatStatePredicates>,
+    season_metrics: Vec<league_core::SeatSeasonMetrics>,
+    public_receipts: Vec<PublicSweepReceipt>,
+    replay_log: &SeasonReplayLog,
+    predicate_turns: Vec<league_core::TurnPredicateRecord>,
+    seat_count: usize,
+) -> EndOfSeasonData {
+    let project_equity_by_turn =
+        compute_project_equity_by_turn(replay_log, &public_receipts, &scoreboard, seat_count);
+    EndOfSeasonData {
+        table_id,
+        closed_turn: Turn(scoreboard.closed_turn),
+        scoreboard,
+        revealed_mandates,
+        close_predicates,
+        season_metrics,
+        export_state: ReplayExportState::Ready,
+        public_receipts,
+        predicate_turns,
+        project_equity_by_turn,
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct EndOfSeasonSessionState {
     data: EndOfSeasonData,
@@ -1184,6 +1334,9 @@ pub struct TuiHostSession {
     post_season_error: Option<StructuredError>,
     turn_clock_budget_secs: Option<u16>,
     clock_explicitly_untimed: bool,
+    no_color: bool,
+    screen_reader: bool,
+    pending_resume_digest: Vec<bool>,
     active_pass_started_at: Option<Duration>,
     now: Duration,
     curtain_dead_until: Option<Duration>,
@@ -1291,6 +1444,9 @@ impl TuiHostSession {
             post_season_error: None,
             turn_clock_budget_secs: ckpt.turn_clock_secs,
             clock_explicitly_untimed: ckpt.untimed,
+            no_color: false,
+            screen_reader: false,
+            pending_resume_digest: vec![false; n],
             active_pass_started_at: None,
             now: Duration::ZERO,
             curtain_dead_until: None,
@@ -1308,16 +1464,19 @@ impl TuiHostSession {
                 ClubSessionCheckpoint::load_completed_season_artifacts(&session.host)
                     .map_err(|err| scrub_engine_error(&err))?;
             let revealed_mandates = extract_revealed_mandates(&replay_log, n)?;
+            let eos_data = build_end_of_season_data_with_provenance(
+                session.host.table_id(),
+                scoreboard,
+                revealed_mandates,
+                section.at_close,
+                season_metrics,
+                session.host.public_receipts().to_vec(),
+                &replay_log,
+                section.turns,
+                n,
+            );
             session.end_of_season = Some(EndOfSeasonSessionState {
-                data: EndOfSeasonData {
-                    table_id: session.host.table_id(),
-                    closed_turn: Turn(scoreboard.closed_turn),
-                    scoreboard,
-                    revealed_mandates,
-                    close_predicates: section.at_close,
-                    season_metrics,
-                    export_state: ReplayExportState::Ready,
-                },
+                data: eos_data,
                 ui_state: EndOfSeasonUiState::new(),
                 replay_log,
                 export_error: None,
@@ -1489,6 +1648,12 @@ impl TuiHostSession {
     fn restore_seat_ui_from_host(&mut self, seat: Seat) {
         let idx = usize::from(seat.0);
         self.seat_states[idx].clear_for_hand_off();
+        if let Some(pending) = self.pending_resume_digest.get_mut(idx)
+            && *pending
+        {
+            *pending = false;
+            self.seat_states[idx].set_resume_digest_open(true);
+        }
         let synced = self.pending_bundles[idx].clone();
         self.seat_states[idx].set_staged_bundle(synced);
         let note = self.seat_notes[idx].clone();
@@ -1874,6 +2039,39 @@ impl TuiHostSession {
         Ok(session)
     }
 
+    /// Applies CLI/env accessibility options (`NO_COLOR` / `--no-color` and `--screen-reader`)
+    /// consistently across the host session and all seat/end-of-season UI state holders.
+    pub(crate) fn configure_accessibility(&mut self, no_color: bool, screen_reader: bool) {
+        self.no_color = no_color;
+        self.screen_reader = screen_reader;
+        for state in &mut self.seat_states {
+            state.set_no_color(no_color);
+            state.set_screen_reader(screen_reader);
+        }
+        if let Some(eos) = &mut self.end_of_season {
+            eos.ui_state.set_no_color(no_color);
+            eos.ui_state.set_screen_reader(screen_reader);
+        }
+    }
+
+    /// Expands the `"Previously This Season"` resume digest for human seats when resuming a
+    /// season that already has swept [`PublicSweepReceipt`] turns.
+    pub(crate) fn activate_resume_digest_if_swept(&mut self) {
+        if self.host.public_receipts().is_empty() {
+            return;
+        }
+        for (idx, is_human) in self.human_seats.iter().copied().enumerate() {
+            if is_human {
+                if let Some(pending) = self.pending_resume_digest.get_mut(idx) {
+                    *pending = true;
+                }
+                if let Some(state) = self.seat_states.get_mut(idx) {
+                    state.set_resume_digest_open(true);
+                }
+            }
+        }
+    }
+
     /// Opens the Privacy Curtain for the currently active human seat using `open_curtain_for_seat`.
     pub(crate) fn open_initial_curtain_for_active_human(&mut self) {
         if self.curtain.is_none()
@@ -1987,39 +2185,56 @@ impl TuiHostSession {
         &self,
         viewport: ViewportSize,
     ) -> Result<SeatScreenView, EngineError> {
+        let alert_style = |view_style: ViewStyle| -> ViewStyle {
+            if self.no_color || self.screen_reader {
+                ViewStyle::plain().bold()
+            } else {
+                view_style
+            }
+        };
         if let Some(curtain) = &self.curtain {
-            return Ok(league_seat_ui::curtain_view(
-                self.host.table_id(),
-                Turn(self.host.turn()),
-                self.pass,
-                curtain.next_seat,
-                viewport,
-                curtain.space_armed,
-                Self::curtain_pin_prompt(curtain),
+            return Ok(league_seat_ui::apply_accessibility(
+                league_seat_ui::curtain_view(
+                    self.host.table_id(),
+                    Turn(self.host.turn()),
+                    self.pass,
+                    curtain.next_seat,
+                    viewport,
+                    curtain.space_armed,
+                    Self::curtain_pin_prompt(curtain),
+                ),
+                self.no_color,
+                self.screen_reader,
             ));
         }
         let Some(target_seat) = self.active_human_seat() else {
             if !self.quit_requested && !self.is_wedged() {
                 if self.host.phase() == TurnPhase::AwaitingMandateReveal {
-                    let mut view = league_seat_ui::render_awaiting_reveal_screen(
-                        self.host.table_id(),
-                        Turn(self.host.turn()),
-                        AwaitingRevealProgress {
-                            revealed_count: ClubSessionCheckpoint::revealed_mandate_count(
-                                &self.host,
-                            ),
-                            seat_count: self.host.seat_count(),
-                        },
-                        viewport,
+                    let mut view = league_seat_ui::apply_accessibility(
+                        league_seat_ui::render_awaiting_reveal_screen(
+                            self.host.table_id(),
+                            Turn(self.host.turn()),
+                            AwaitingRevealProgress {
+                                revealed_count: ClubSessionCheckpoint::revealed_mandate_count(
+                                    &self.host,
+                                ),
+                                seat_count: self.host.seat_count(),
+                            },
+                            viewport,
+                        ),
+                        self.no_color,
+                        self.screen_reader,
                     );
                     if let Some(err) = &self.post_season_error
                         && let Some(status) = &mut view.status_line
                     {
-                        let banner =
-                            scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                        let banner = scrub_secret_text(&format!(
+                            "▼ REFUSED [{}]: {}",
+                            err.code, err.message
+                        ));
                         status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                             banner,
-                            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                            alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
                         )]));
                     }
                     return Ok(view);
@@ -2066,24 +2281,30 @@ impl TuiHostSession {
                     if let Some(err) = &eos.export_error
                         && let Some(status) = &mut view.status_line
                     {
-                        let banner =
-                            scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                        let banner = scrub_secret_text(&format!(
+                            "▼ REFUSED [{}]: {}",
+                            err.code, err.message
+                        ));
                         status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                             banner,
-                            ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                            alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
                         )]));
                     }
                     return Ok(view);
                 }
             }
-            let mut view = league_seat_ui::neutral_session_view(
-                self.host.table_id(),
-                Turn(self.host.turn()),
-                self.host.phase(),
-                self.pass,
-                self.quit_requested,
-                self.is_wedged(),
-                viewport,
+            let mut view = league_seat_ui::apply_accessibility(
+                league_seat_ui::neutral_session_view(
+                    self.host.table_id(),
+                    Turn(self.host.turn()),
+                    self.host.phase(),
+                    self.pass,
+                    self.quit_requested,
+                    self.is_wedged(),
+                    viewport,
+                ),
+                self.no_color,
+                self.screen_reader,
             );
             if let Some((save_path, save_err)) = &self.autosave_halted_info
                 && let Some(panel) = view.zones.first_mut().map(|z| &mut z.panel)
@@ -2113,10 +2334,11 @@ impl TuiHostSession {
             if let Some(err) = &self.advance_halted_error
                 && let Some(status) = &mut view.status_line
             {
-                let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                let banner =
+                    scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
                 status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                     banner,
-                    ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                    alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
                 )]));
             }
             return Ok(view);
@@ -2133,10 +2355,10 @@ impl TuiHostSession {
         if let Some(err) = &self.last_errors[idx]
             && let Some(status) = &mut view.status_line
         {
-            let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+            let banner = scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
             status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                 banner,
-                ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                alert_style(ViewStyle::plain().with_fg(ViewColor::Red).bold()),
             )]));
         }
         Ok(view)
@@ -2146,7 +2368,7 @@ impl TuiHostSession {
     pub fn render_current_frame(&self, frame: &mut Frame<'_>) -> Result<(), EngineError> {
         let viewport = ViewportSize::new(frame.area().width, frame.area().height);
         let view = self.build_current_view(viewport)?;
-        draw_screen_view(frame, &view);
+        draw_screen_view_with_options(frame, &view, self.no_color || self.screen_reader);
         Ok(())
     }
 
@@ -2610,17 +2832,23 @@ impl TuiHostSession {
                         &replay_log,
                         usize::from(self.host.seat_count()),
                     )?;
+                    let eos_data = build_end_of_season_data_with_provenance(
+                        self.host.table_id(),
+                        scoreboard,
+                        revealed_mandates,
+                        section.at_close,
+                        season_metrics,
+                        self.host.public_receipts().to_vec(),
+                        &replay_log,
+                        section.turns,
+                        usize::from(self.host.seat_count()),
+                    );
+                    let mut eos_ui_state = EndOfSeasonUiState::new();
+                    eos_ui_state.set_no_color(self.no_color);
+                    eos_ui_state.set_screen_reader(self.screen_reader);
                     self.end_of_season = Some(EndOfSeasonSessionState {
-                        data: EndOfSeasonData {
-                            table_id: self.host.table_id(),
-                            closed_turn: Turn(scoreboard.closed_turn),
-                            scoreboard,
-                            revealed_mandates,
-                            close_predicates: section.at_close,
-                            season_metrics,
-                            export_state: ReplayExportState::Ready,
-                        },
-                        ui_state: EndOfSeasonUiState::new(),
+                        data: eos_data,
+                        ui_state: eos_ui_state,
                         replay_log,
                         export_error: None,
                     });
@@ -3174,10 +3402,15 @@ impl LobbyHostSession {
         if let Some(err) = &self.last_error
             && let Some(status) = &mut view.status_line
         {
-            let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+            let banner = scrub_secret_text(&format!("▼ REFUSED [{}]: {}", err.code, err.message));
+            let banner_style = if self.overrides.no_color || self.overrides.screen_reader {
+                ViewStyle::plain().bold()
+            } else {
+                ViewStyle::plain().with_fg(ViewColor::Red).bold()
+            };
             status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
                 banner,
-                ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                banner_style,
             )]));
         }
         view
@@ -3187,7 +3420,11 @@ impl LobbyHostSession {
     pub fn render_frame(&self, frame: &mut Frame<'_>) {
         let vp = ViewportSize::new(frame.area().width, frame.area().height);
         let view = self.build_view(vp);
-        draw_screen_view(frame, &view);
+        draw_screen_view_with_options(
+            frame,
+            &view,
+            self.overrides.no_color || self.overrides.screen_reader,
+        );
     }
 
     /// Processes one key event inside the Lobby and returns the resulting [`LobbyAction`].
@@ -3411,6 +3648,7 @@ impl LobbyHostSession {
 
         let mut session = TuiHostSession::from_ring_table(&ring, table_id, humans, bot_tie_seed)
             .map_err(|err| self.record_refusal(err.to_structured_error()))?;
+        session.configure_accessibility(self.overrides.no_color, self.overrides.screen_reader);
         session.configure_turn_clock(effective_clock);
         if self.overrides.pins_enabled || lobby_pins {
             session.enable_seat_pins();
@@ -8353,6 +8591,7 @@ mod tests {
             turn_clock_secs: Some(180),
             untimed: false,
             pins_enabled: true,
+            ..LobbyCliOverrides::default()
         });
         cli_wins.state_mut().set_untimed(true);
         cli_wins.state_mut().set_pins_enabled(false);
@@ -8368,6 +8607,7 @@ mod tests {
             turn_clock_secs: None,
             untimed: true,
             pins_enabled: false,
+            ..LobbyCliOverrides::default()
         });
         for _ in 0..6 {
             cli_untimed.handle_key_event(key_code(SeatKeyCode::Down), vp);
@@ -8744,5 +8984,190 @@ mod tests {
         );
         assert_eq!(exported.turns.len(), log.turns.len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn assert_buffer_no_color(terminal: &Terminal<TestBackend>, label: &str) {
+        let buf = terminal.backend().buffer();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                assert_eq!(
+                    cell.fg,
+                    Color::Reset,
+                    "{label}: cell ({x},{y}) `{}` leaked fg={:?}",
+                    cell.symbol(),
+                    cell.fg
+                );
+                assert_eq!(
+                    cell.bg,
+                    Color::Reset,
+                    "{label}: cell ({x},{y}) `{}` leaked bg={:?}",
+                    cell.symbol(),
+                    cell.bg
+                );
+            }
+        }
+    }
+
+    fn assert_no_box_chars(text: &str, label: &str) {
+        for ch in ['┌', '─', '┐', '│', '└', '┘', '├', '┤', '┬', '┴', '┼'] {
+            assert!(
+                !text.contains(ch),
+                "{label}: unexpected box-drawing char `{ch}` in linear screen-reader frame:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_color_suppresses_every_ratatui_cell_color_with_glyph_pairings_snapshot() {
+        let vp = ViewportSize::new(100, 30);
+        let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "test backend");
+
+        // 1. Lobby with NO_COLOR + refusal alert banner.
+        let mut lobby = LobbyHostSession::new(LobbyCliOverrides {
+            no_color: true,
+            ..LobbyCliOverrides::default()
+        });
+        lobby.state_mut().set_untimed(true);
+        let _ = lobby.validate_and_start(TableId(81_991), 7, None);
+        lobby.handle_key_event(key_code(SeatKeyCode::Down), vp);
+        lobby.handle_key_event(key(' '), vp); // toggle S0 to ClubBot -> NO_HUMAN_SEATS refusal
+        let _ = lobby.validate_and_start(TableId(81_991), 7, None);
+        must_ok(
+            terminal.draw(|f| lobby.render_frame(f)),
+            "draw no-color lobby",
+        );
+        assert_buffer_no_color(&terminal, "Lobby");
+        let lobby_screen = screen_text(&terminal);
+        assert!(lobby_screen.contains("▼ REFUSED [NO_HUMAN_SEATS]"));
+        assert!(lobby_screen.contains("--no-color / NO_COLOR"));
+
+        // Fix seat 0 back to Human and start.
+        lobby.handle_key_event(key(' '), vp);
+        let mut session = must_ok(
+            lobby.validate_and_start(TableId(81_991), 7, None),
+            "start no-color table",
+        );
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw curtain")),
+            "draw curtain",
+        );
+        assert_buffer_no_color(&terminal, "Curtain");
+        assert!(screen_text(&terminal).contains("= PRIVACY CURTAIN"));
+
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+        must_ok(session.handle_key_event(key(' '), vp), "curtain space");
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw armed curtain")),
+            "draw armed curtain",
+        );
+        assert_buffer_no_color(&terminal, "Armed Curtain");
+        assert!(screen_text(&terminal).contains("▲ HAND-OFF ARMED"));
+
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "curtain enter",
+        );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+        must_ok(session.handle_key_event(key('p'), vp), "run what-if");
+        session.record_scrubbed_host_error("CANCEL_LOCKED", "Phase-1 cancel lock is active");
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw turn no_color")),
+            "draw turn no_color",
+        );
+        assert_buffer_no_color(&terminal, "Turn");
+        let turn_buf = screen_text(&terminal);
+        assert!(turn_buf.contains("= [OPEN BOOK]"));
+        assert!(turn_buf.contains("▼ REFUSED [CANCEL_LOCKED]"));
+        assert!(turn_buf.contains("Preview T1 S0:"));
+    }
+
+    #[test]
+    fn screen_reader_end_to_end_multi_seat_handoffs_keep_linear_no_box_chars_and_zero_leaks() {
+        let ring = dev_ring_table(1);
+        let deal_seed = distinct_mandate_deal_seed(&ring, &[0, 1]);
+        let (mut session, _headless, _dmap) =
+            build_explicit_sessions(&ring, TableId(81_992), &[0, 1], deal_seed, [0x77; 32], 53);
+        session.configure_accessibility(true, true);
+
+        let vp = ViewportSize::new(100, 30);
+        let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "test backend");
+
+        let obs0 = must_ok(session.build_seat_observation(Seat(0)), "obs0");
+        let obs1 = must_ok(session.build_seat_observation(Seat(1)), "obs1");
+        let s0_mandate = mandate_short_marker(must_some(obs0.own_mandate(), "m0").kind);
+        let s1_mandate = mandate_short_marker(must_some(obs1.own_mandate(), "m1").kind);
+
+        // Curtain -> Unlock S0 -> Complete Turn 1 -> Turn 2 with digest -> Finalize EndOfSeason.
+        while session.phase() == TurnPhase::TalkAndMarket {
+            if session.turn() >= 2 && session.active_human_seat() == Some(Seat(0)) {
+                session.activate_resume_digest_if_swept();
+                must_ok(
+                    terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr turn 2")),
+                    "draw sr turn 2",
+                );
+                let txt = screen_text(&terminal);
+                assert_buffer_no_color(&terminal, "ScreenReader Turn 2");
+                assert_no_box_chars(&txt, "ScreenReader Turn 2");
+                assert!(txt.contains("Previously This Season"));
+                assert!(!txt.contains(&s1_mandate));
+            }
+            if session.is_curtain_open() {
+                must_ok(
+                    terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr curtain")),
+                    "draw sr curtain",
+                );
+                let c_txt = screen_text(&terminal);
+                assert_buffer_no_color(&terminal, "ScreenReader Curtain");
+                assert_no_box_chars(&c_txt, "ScreenReader Curtain");
+                assert!(!c_txt.contains(&s0_mandate));
+                assert!(!c_txt.contains(&s1_mandate));
+                session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+                must_ok(session.handle_key_event(key(' '), vp), "space");
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                    "enter",
+                );
+                session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+            } else {
+                must_ok(session.handle_key_event(ctrl_key('l'), vp), "handoff");
+            }
+        }
+
+        // AwaitingMandateReveal standby frames in screen-reader mode.
+        assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
+        for reveal_idx in 0..4_usize {
+            must_ok(
+                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr reveal")),
+                "draw sr reveal",
+            );
+            let r_txt = screen_text(&terminal);
+            assert_buffer_no_color(&terminal, "ScreenReader Reveal");
+            assert_no_box_chars(&r_txt, "ScreenReader Reveal");
+            assert!(r_txt.contains("=== MERCHANT LEAGUE — SESSION STANDBY ==="));
+            assert!(r_txt.contains("AwaitingMandateReveal"));
+            assert!(!r_txt.contains(&s0_mandate));
+            assert!(!r_txt.contains(&s1_mandate));
+            if reveal_idx < 4 {
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                    "submit reveal",
+                );
+            }
+        }
+
+        assert_eq!(session.phase(), TurnPhase::Completed);
+        must_ok(session.handle_key_event(key('2'), vp), "eos tab 2");
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw sr eos mandates")),
+            "draw sr eos mandates",
+        );
+        let eos_txt = screen_text(&terminal);
+        assert_buffer_no_color(&terminal, "ScreenReader EOS Mandates");
+        assert_no_box_chars(&eos_txt, "ScreenReader EOS Mandates");
+        assert!(eos_txt.contains("=== END OF SEASON: 2: Mandates ==="));
+        assert!(eos_txt.contains(&s0_mandate));
+        assert!(eos_txt.contains(&s1_mandate));
+        assert!(eos_txt.contains("Provenance:"));
     }
 }

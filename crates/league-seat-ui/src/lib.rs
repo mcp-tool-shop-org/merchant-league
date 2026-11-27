@@ -117,6 +117,17 @@ pub fn handle_seat_key(
     }
 }
 
+/// Applies `NO_COLOR` / `--no-color` palette stripping and `--screen-reader` linear
+/// borderless formatting to a rendered [`SeatScreenView`].
+#[must_use]
+pub fn apply_accessibility(
+    view: SeatScreenView,
+    no_color: bool,
+    screen_reader: bool,
+) -> SeatScreenView {
+    render::apply_view_accessibility(view, no_color, screen_reader)
+}
+
 /// Renders the hot-seat Privacy Curtain holding strictly `table_id`, `turn`, `pass`,
 /// `next_seat`'s guild name, and any masked PIN prompt until confirmation completes.
 #[must_use]
@@ -1977,6 +1988,7 @@ mod tests {
             turn_clock_secs: Some(240),
             untimed: false,
             pins_enabled: true,
+            ..LobbyCliOverrides::default()
         };
         let lobby = LobbyState::new();
         assert_eq!(lobby.seat_count(), 4);
@@ -2104,6 +2116,9 @@ mod tests {
                 stranded_value_at_close: 500,
             }],
             export_state: ReplayExportState::Ready,
+            public_receipts: Vec::new(),
+            predicate_turns: Vec::new(),
+            project_equity_by_turn: Vec::new(),
         };
         let ui = EndOfSeasonUiState::new();
         let tab1_txt = render_end_of_season_screen(&eos_data, &ui, None, vp).plain_text();
@@ -2148,5 +2163,560 @@ mod tests {
             export_step.intent.map(|i| i.kind),
             Some(SeatIntentKind::ExportReplay)
         );
+    }
+
+    #[test]
+    fn snapshot_accessibility_glyphs_no_color_screen_reader_and_resume_digest() {
+        use league_seat_types::{
+            ActiveShock, CredOffer, FillKind, FillRecord, OfferSide, PublicSweepReceipt,
+            ShockForecastEvent, ShockKind, TurnPhase, ViewColor,
+        };
+
+        let make_rcpt = |turn: u8| PublicSweepReceipt {
+            turn,
+            non_reveal_seats: Vec::new(),
+            regent_acted_seats: Vec::new(),
+            converted_to_ai: Vec::new(),
+            escrows_finished: Vec::new(),
+            escrows_cancelled_or_forfeited: Vec::new(),
+            atomic_swaps_settled: 0,
+            converter_batches_run: 0,
+            converter_orders_clamped: 0,
+            checks_cashed: Vec::new(),
+            checks_bounced: Vec::new(),
+            cartel_evictions: Vec::new(),
+            projects_completed: 0,
+            project_orders_clamped: 0,
+            total_upkeep_shortfall_debt: 0,
+            total_spoilage_clawed_back: 0,
+            broken_promises: Vec::new(),
+            elected_officers: None,
+            charters_awarded: Vec::new(),
+            public_forecasts: Vec::new(),
+            newly_activated_shocks: Vec::new(),
+            cred_debt_repaid: 0,
+            charter_cred_burned: 0,
+            town_import_cred_spent: 0,
+            works_stipend_cred_minted: 0,
+            batch_trades_cleared: 0,
+            fills: Vec::new(),
+            wash_freeze_settlements: Vec::new(),
+            season_closed: false,
+            pbrs_deltas: vec![0; 4],
+        };
+
+        let vp = ViewportSize::new(100, 30);
+        let mut obs = sample_seat_observation();
+        obs.active_shocks.push(ActiveShock {
+            target_seat: 0,
+            kind: ShockKind::DemandSurge,
+            magnitude_bps: 1_500,
+            expires_after_turn: 26,
+        });
+        obs.public_forecasts.push(ShockForecastEvent {
+            target_seat: 1,
+            kind: ShockKind::SupplyFreeze,
+            realize_turn: 25,
+        });
+        obs.offers.insert(
+            77,
+            CredOffer {
+                offer_id: 77,
+                maker: 1,
+                side: OfferSide::Sell,
+                good: AssetId::Raw(0),
+                remaining_units: 500,
+                price_per_unit_cred: 1_650,
+                locked_cred: 0,
+                domain_id: None,
+                is_hybrid: false,
+                created_turn: 23,
+            },
+        );
+        obs.offers.insert(
+            78,
+            CredOffer {
+                offer_id: 78,
+                maker: 2,
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                remaining_units: 400,
+                price_per_unit_cred: 1_900,
+                locked_cred: 760,
+                domain_id: None,
+                is_hybrid: false,
+                created_turn: 23,
+            },
+        );
+        let mut r22 = make_rcpt(22);
+        r22.batch_trades_cleared = 2;
+        r22.atomic_swaps_settled = 1;
+        r22.converter_batches_run = 3;
+        r22.projects_completed = 1;
+        r22.total_upkeep_shortfall_debt = 400;
+        r22.total_spoilage_clawed_back = 150;
+        r22.elected_officers = Some((1, Some(2)));
+        r22.regent_acted_seats = vec![2];
+        r22.checks_cashed = vec![5];
+        r22.checks_bounced = vec![6];
+        r22.newly_activated_shocks = vec![ActiveShock {
+            target_seat: 0,
+            kind: ShockKind::DemandSurge,
+            magnitude_bps: 1_500,
+            expires_after_turn: 26,
+        }];
+        r22.fills = vec![FillRecord {
+            turn: 22,
+            kind: FillKind::BatchFill,
+            good: Some(AssetId::Raw(0)),
+            from: Some(1),
+            to: 0,
+            units: 500,
+            net_units: 460,
+            cred_amount: 500,
+            unit_price_cred: Some(1_000),
+        }];
+        r22.pbrs_deltas = vec![320, -140, 0, 50];
+        let r23 = make_rcpt(23);
+        obs.public_receipts = vec![r22, r23];
+
+        // 1. Standard view with `no_color = true`, `resume_digest_open = true`, and What-If + glyphs.
+        let mut st = SeatUiState::new();
+        st.set_no_color(true);
+        st.set_resume_digest_open(true);
+        assert!(st.no_color() && st.resume_digest_open());
+        let turn_no_color = render_turn_screen(&obs, &st, PassKind::SubPassA, None, vp);
+        for z in &turn_no_color.zones {
+            if let Some(title) = &z.panel.title {
+                assert_eq!(title.style.fg, ViewColor::Reset);
+                assert_eq!(title.style.bg, ViewColor::Reset);
+            }
+            for row in &z.panel.rows {
+                for sp in &row.spans {
+                    assert_eq!(sp.style.fg, ViewColor::Reset);
+                    assert_eq!(sp.style.bg, ViewColor::Reset);
+                }
+            }
+        }
+        let no_color_txt = turn_no_color.plain_text();
+        assert!(no_color_txt.contains("= [OPEN BOOK]"));
+        assert!(no_color_txt.contains("▲ S0 DemandSurge 1500bps"));
+        assert!(no_color_txt.contains("▼ S1 SupplyFreeze at T25"));
+        assert!(no_color_txt.contains("▲ Buy"));
+        assert!(no_color_txt.contains("▼ Sell"));
+        assert!(no_color_txt.contains("vs parity"));
+        assert!(
+            no_color_txt.contains("Previously This Season (Turns T22..=T23, 2 swept) [d: toggle]")
+        );
+        assert!(no_color_txt.contains("Seat S0: PBRS cum ▲+320 (last T23: =0)"));
+        assert!(no_color_txt.contains("fills in:1 out:0 partners:1"));
+        assert!(
+            no_color_txt
+                .contains("Table Totals: trades=2 swaps=1 conv=3 proj=1 debt=▼400 spoil=▼150")
+        );
+        assert!(
+            no_color_txt
+                .contains("Credit/Gov: checks(▲1/▼1) esc(0/0) promises(=0) officers(TM=S1, CC=S2)")
+        );
+        assert!(no_color_txt.contains("d:HideDigest"));
+
+        // Determinism + `[d]` toggle snapshot.
+        let again = render_turn_screen(&obs, &st, PassKind::SubPassA, None, vp).plain_text();
+        assert_eq!(no_color_txt, again);
+        let toggled = handle_seat_key(
+            &obs,
+            st.clone(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('d'), SeatKeyModifiers::NONE),
+        );
+        assert!(!toggled.state.resume_digest_open());
+        assert!(!toggled.view.plain_text().contains("Previously This Season"));
+
+        // Turn-1 empty-receipt fallback.
+        let mut obs_t1 = obs.clone();
+        obs_t1.public_receipts.clear();
+        let mut st_t1 = st.clone();
+        st_t1.set_resume_digest_open(true);
+        let t1_txt = render_turn_screen(&obs_t1, &st_t1, PassKind::SubPassA, None, vp).plain_text();
+        assert!(t1_txt.contains("Previously This Season (= T1 opening — 0 prior turns swept)"));
+
+        // 2. `--screen-reader` linear plain-text Turn view snapshot + scrolling + inline modal.
+        let mut sr_state = st.clone();
+        sr_state.set_screen_reader(true);
+        let sr_view = render_turn_screen(&obs, &sr_state, PassKind::SubPassA, None, vp);
+        assert_eq!(sr_view.zones.len(), 1);
+        assert!(!sr_view.zones[0].panel.bordered);
+        assert!(sr_view.zones[0].panel.table.is_none());
+        assert!(sr_view.zones[0].panel.tabs.is_none());
+        let sr_txt = sr_view.plain_text();
+        for box_ch in ['┌', '─', '┐', '│', '└', '┘', '├', '┤', '┬', '┴', '┼']
+        {
+            assert!(
+                !sr_txt.contains(box_ch),
+                "found box char {box_ch} in screen-reader output"
+            );
+        }
+        for heading in [
+            "=== MERCHANT LEAGUE: SCREEN READER TURN VIEW ===",
+            "=== PREVIOUSLY THIS SEASON ===",
+            "=== PUBLIC TABLE & LEDGER MIRROR ===",
+            "=== ACTIVE WORKSPACE: 1: Market & Contracts ===",
+            "=== PRIVATE VAULT (SEAT S0 ONLY) ===",
+            "[SELECTED] Side: Buy",
+        ] {
+            assert!(
+                sr_txt.contains(heading),
+                "missing heading `{heading}`:\n{sr_txt}"
+            );
+        }
+
+        // Scroll in screen-reader mode via PageDown/PageUp/Home and inline Chronicle modal.
+        let sr_paged = handle_seat_key(
+            &obs,
+            sr_state.clone(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::PageDown, SeatKeyModifiers::NONE),
+        );
+        assert!(sr_paged.state.screen_reader_scroll() > 0);
+        let sr_chron = handle_seat_key(
+            &obs,
+            sr_paged.state,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('r'), SeatKeyModifiers::NONE),
+        );
+        assert!(
+            sr_chron
+                .view
+                .plain_text()
+                .contains("=== ACTIVE MODAL: SWEEP CHRONICLE")
+        );
+
+        // 3. Curtain / Neutral / AwaitingReveal / Lobby via `apply_accessibility` + overrides.
+        let curtain_sr = crate::apply_accessibility(
+            curtain_view(
+                TableId(9),
+                Turn(2),
+                PassKind::SubPassA,
+                Seat(0),
+                vp,
+                true,
+                CurtainPinPrompt::default(),
+            ),
+            true,
+            true,
+        );
+        assert!(!curtain_sr.zones[0].panel.bordered);
+        assert!(
+            curtain_sr
+                .plain_text()
+                .contains("=== HOT-SEAT PRIVACY CURTAIN ===")
+        );
+        assert!(curtain_sr.plain_text().contains("▲ HAND-OFF ARMED"));
+
+        let standby_sr = crate::apply_accessibility(
+            neutral_session_view(
+                TableId(9),
+                Turn(2),
+                TurnPhase::Reveal,
+                PassKind::SubPassB,
+                false,
+                true,
+                vp,
+            ),
+            true,
+            true,
+        );
+        assert!(standby_sr.plain_text().contains("▼ Pass advance failed"));
+
+        let lobby_sr = render_lobby_screen(
+            &LobbyState::new(),
+            league_seat_types::LobbyCliOverrides {
+                turn_clock_secs: None,
+                untimed: false,
+                pins_enabled: false,
+                no_color: true,
+                screen_reader: true,
+            },
+            vp,
+        );
+        assert!(!lobby_sr.zones[0].panel.bordered);
+        assert!(
+            lobby_sr
+                .plain_text()
+                .contains("--no-color / NO_COLOR, --screen-reader")
+        );
+        assert!(lobby_sr.plain_text().contains("[SELECTED] Seat Count: 4"));
+    }
+
+    #[test]
+    fn snapshot_mandate_turn_number_provenance_across_all_four_mandate_kinds() {
+        use league_seat_types::{
+            EndOfSeasonData, FillKind, FillRecord, FinalScoreboard, GoodScarcity, HoldingMark,
+            LobbyCliOverrides, PublicSweepReceipt, ReplayExportState, SeatScoreEntry,
+            SeatSeasonMetrics, TurnPredicateRecord,
+        };
+
+        let vp = ViewportSize::new(110, 34);
+        let mut pred_base = sample_seat_observation().baseline_predicates;
+        pred_base.season_end.holdings = vec![
+            HoldingMark {
+                good: AssetId::Refined(0),
+                units: 2_000,
+                marked_value: 4_000,
+                units_marked_by_bids: 1_500,
+                units_at_floor: 500,
+                value_at_floor: 500,
+            },
+            HoldingMark {
+                good: AssetId::Raw(1),
+                units: 800,
+                marked_value: 700,
+                units_marked_by_bids: 0,
+                units_at_floor: 800,
+                value_at_floor: 700,
+            },
+        ];
+
+        let make_scarcity = |good: AssetId, own_units: i64| GoodScarcity {
+            good,
+            producer_seat: 0,
+            own_units,
+            table_units_held: 2_000,
+            open_book_units_offered: 0,
+            open_book_units_bid: 0,
+            domain_book_units_offered: 0,
+            domain_book_units_bid: 0,
+            seats_needing: 1,
+            open_book_tariff_bps: 600,
+        };
+
+        let mut close_preds = vec![pred_base.clone(); 4];
+        // Seat 2 satisfies MinRefinedVariety (2 distinct refined >= 1500) continuously from T4 / T9.
+        close_preds[2].scarcity = vec![
+            make_scarcity(AssetId::Refined(0), 1_800),
+            make_scarcity(AssetId::Refined(2), 1_600),
+        ];
+
+        let mut tp_t4 = TurnPredicateRecord {
+            turn: 4,
+            at_turn_start: vec![pred_base.clone(); 4],
+            sweep: Vec::new(),
+        };
+        tp_t4.at_turn_start[2].scarcity = vec![make_scarcity(AssetId::Refined(0), 1_500)];
+        tp_t4.at_turn_start[3].upkeep.interest_bps = 1_800; // B rating (below Aaa)
+
+        let mut tp_t9 = TurnPredicateRecord {
+            turn: 9,
+            at_turn_start: vec![pred_base.clone(); 4],
+            sweep: Vec::new(),
+        };
+        tp_t9.at_turn_start[2].scarcity = vec![
+            make_scarcity(AssetId::Refined(0), 1_800),
+            make_scarcity(AssetId::Refined(2), 1_600),
+        ];
+        tp_t9.at_turn_start[3].upkeep.interest_bps = 1_800;
+
+        let empty_rcpt = |turn: u8, fills: Vec<FillRecord>| PublicSweepReceipt {
+            turn,
+            non_reveal_seats: Vec::new(),
+            regent_acted_seats: Vec::new(),
+            converted_to_ai: Vec::new(),
+            escrows_finished: Vec::new(),
+            escrows_cancelled_or_forfeited: Vec::new(),
+            atomic_swaps_settled: 0,
+            converter_batches_run: 0,
+            converter_orders_clamped: 0,
+            checks_cashed: Vec::new(),
+            checks_bounced: Vec::new(),
+            cartel_evictions: Vec::new(),
+            projects_completed: 0,
+            project_orders_clamped: 0,
+            total_upkeep_shortfall_debt: 0,
+            total_spoilage_clawed_back: 0,
+            broken_promises: Vec::new(),
+            elected_officers: None,
+            charters_awarded: Vec::new(),
+            public_forecasts: Vec::new(),
+            newly_activated_shocks: Vec::new(),
+            cred_debt_repaid: 0,
+            charter_cred_burned: 0,
+            town_import_cred_spent: 0,
+            works_stipend_cred_minted: 0,
+            batch_trades_cleared: 0,
+            fills,
+            wash_freeze_settlements: Vec::new(),
+            season_closed: false,
+            pbrs_deltas: vec![0; 4],
+        };
+
+        let r3 = empty_rcpt(
+            3,
+            vec![FillRecord {
+                turn: 3,
+                kind: FillKind::BatchFill,
+                good: Some(AssetId::Raw(0)),
+                from: Some(1),
+                to: 0,
+                units: 500,
+                net_units: 460,
+                cred_amount: 800,
+                unit_price_cred: Some(1_600),
+            }],
+        );
+        let r8 = empty_rcpt(
+            8,
+            vec![FillRecord {
+                turn: 8,
+                kind: FillKind::AtomicSwap,
+                good: Some(AssetId::Refined(1)),
+                from: Some(2),
+                to: 1,
+                units: 400,
+                net_units: 400,
+                cred_amount: 0,
+                unit_price_cred: None,
+            }],
+        );
+
+        let eos = EndOfSeasonData {
+            table_id: TableId(404),
+            closed_turn: Turn(10),
+            scoreboard: FinalScoreboard {
+                table_id: TableId(404),
+                closed_turn: 10,
+                standings: vec![
+                    SeatScoreEntry {
+                        seat: 0,
+                        project_equity: 20_000,
+                        net_asset_equity: 5_000,
+                        mandate_bonus: 5_000,
+                        total_equity: 30_000,
+                        credit_tier: CreditTier::Aaa,
+                        hard_credit_defaults: 0,
+                        bond_breaches: 0,
+                        broken_promises: 0,
+                        honor_penalties: 0,
+                    },
+                    SeatScoreEntry {
+                        seat: 1,
+                        project_equity: 12_000,
+                        net_asset_equity: 5_000,
+                        mandate_bonus: 4_000,
+                        total_equity: 21_000,
+                        credit_tier: CreditTier::Aaa,
+                        hard_credit_defaults: 0,
+                        bond_breaches: 0,
+                        broken_promises: 0,
+                        honor_penalties: 0,
+                    },
+                    SeatScoreEntry {
+                        seat: 2,
+                        project_equity: 0,
+                        net_asset_equity: 9_000,
+                        mandate_bonus: 4_500,
+                        total_equity: 13_500,
+                        credit_tier: CreditTier::Bbb,
+                        hard_credit_defaults: 0,
+                        bond_breaches: 0,
+                        broken_promises: 0,
+                        honor_penalties: 0,
+                    },
+                    SeatScoreEntry {
+                        seat: 3,
+                        project_equity: 0,
+                        net_asset_equity: -2_000,
+                        mandate_bonus: 0,
+                        total_equity: -2_000,
+                        credit_tier: CreditTier::B,
+                        hard_credit_defaults: 1,
+                        bond_breaches: 0,
+                        broken_promises: 0,
+                        honor_penalties: 0,
+                    },
+                ],
+            },
+            revealed_mandates: vec![
+                PrivateMandate {
+                    kind: MandateKind::MinProjectEquity { target: 18_000 },
+                    bonus_equity: 5_000,
+                },
+                PrivateMandate {
+                    kind: MandateKind::MinActivePartners { min_partners: 2 },
+                    bonus_equity: 4_000,
+                },
+                PrivateMandate {
+                    kind: MandateKind::MinRefinedVariety {
+                        distinct_goods: 2,
+                        min_each: 1_500,
+                    },
+                    bonus_equity: 4_500,
+                },
+                PrivateMandate {
+                    kind: MandateKind::MaintainCleanCredit {
+                        min_tier: CreditTier::Aaa,
+                    },
+                    bonus_equity: 3_500,
+                },
+            ],
+            close_predicates: close_preds,
+            season_metrics: vec![SeatSeasonMetrics {
+                seat: 0,
+                held_enough_but_short_turns: vec![],
+                covered_with_own_offers_but_short_turns: vec![],
+                spoiled_units: 0,
+                stranded_units_at_close: 500,
+                stranded_value_at_close: 500,
+            }],
+            export_state: ReplayExportState::Ready,
+            public_receipts: vec![r3, r8],
+            predicate_turns: vec![tp_t4, tp_t9],
+            project_equity_by_turn: vec![
+                vec![0, 0, 0, 8_000, 8_000, 8_000, 20_000, 20_000, 20_000, 20_000],
+                vec![0; 10],
+                vec![0; 10],
+                vec![0; 10],
+            ],
+        };
+
+        let mut ui = EndOfSeasonUiState::new();
+        ui.set_no_color(true);
+        let tab2 = handle_end_of_season_key(
+            &eos,
+            ui,
+            None,
+            vp,
+            key(SeatKeyCode::Char('2'), SeatKeyModifiers::NONE),
+        );
+        let txt = tab2.view.plain_text();
+        assert!(txt.contains("▲ AWARDED +5000"));
+        assert!(txt.contains("▼ Unmet (+0)"));
+        assert!(
+            txt.contains("Provenance: project equity 20000/18000 [deliveries: T4(+8000), T7(+12000); target reached T7]"),
+            "missing project equity provenance:\n{txt}"
+        );
+        assert!(
+            txt.contains("Provenance: active partners 2/2 [S0@T3, S2@T8; target met T8]"),
+            "missing active partners provenance:\n{txt}"
+        );
+        assert!(
+            txt.contains("since T4"),
+            "missing MinRefinedVariety earliest turn T4:\n{txt}"
+        );
+        assert!(
+            txt.contains("since T9"),
+            "missing MinRefinedVariety earliest turn T9:\n{txt}"
+        );
+        assert!(
+            txt.contains("Provenance: credit below Aaa at T4..=T9 (terminal B)"),
+            "missing MaintainCleanCredit breach turn span:\n{txt}"
+        );
+
+        let _ = LobbyCliOverrides::default();
     }
 }
