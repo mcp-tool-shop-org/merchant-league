@@ -426,12 +426,12 @@
       },
       {
         "commits": 87,
-        "lines": 25011,
+        "lines": 25071,
         "path": "atlas/statistics.json"
       },
       {
         "commits": 87,
-        "lines": 96843,
+        "lines": 96827,
         "path": "atlas/structure.json"
       },
       {
@@ -1376,7 +1376,7 @@
       },
       {
         "commits": 5,
-        "lines": 1262,
+        "lines": 1259,
         "path": "crates/league-seat-types/src/view.rs"
       },
       {
@@ -1391,17 +1391,17 @@
       },
       {
         "commits": 4,
-        "lines": 1547,
+        "lines": 1595,
         "path": "crates/league-seat-ui/src/composer.rs"
       },
       {
         "commits": 5,
-        "lines": 2786,
+        "lines": 3032,
         "path": "crates/league-seat-ui/src/lib.rs"
       },
       {
         "commits": 4,
-        "lines": 3921,
+        "lines": 3902,
         "path": "crates/league-seat-ui/src/render.rs"
       },
       {
@@ -1446,7 +1446,7 @@
       },
       {
         "commits": 7,
-        "lines": 10109,
+        "lines": 10087,
         "path": "crates/league-tui/src/host.rs"
       },
       {
@@ -3785,9 +3785,9 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-27T15:49:22.190Z",
+  "generatedAt": "2026-11-27T16:53:16.604Z",
   "generatedFrom": {
-    "commit": "7ec3a142b12ae7c7509890addf1276f4dd27dd55"
+    "commit": "4b1d3d940e7aa613e84d2c5b8d441e6d7fcdf9fc"
   },
   "pairs": [
     {
@@ -4592,8 +4592,8 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-27T09:20:04-05:00",
-    "inScopeFiles": 690,
+    "headDate": "2026-11-27T11:40:49-05:00",
+    "inScopeFiles": 691,
     "pinnedStart": null,
     "priorFloor": "fallen",
     "qualifyingCommits": 107,
@@ -4601,7 +4601,7 @@
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-31T14:20:04.000Z",
+    "since": "2026-05-31T16:40:49.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

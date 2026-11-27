@@ -13,7 +13,7 @@
           "path": ".github/audit-allowlist.json"
         },
         {
-          "hash": "8dead2187d3e822b885ef545d8c5660d99eb6bcf968064436a0782e5e8764ded",
+          "hash": "717b855a215c4022761a77672ea303ad9afea1d6d2f09c416edcb30091d400db",
           "path": ".github/workflows/ci.yml"
         },
         {
@@ -17820,7 +17820,7 @@
           "path": ".gitattributes"
         },
         {
-          "hash": "c04f6bb58c4f3ef967efc19e001a90008bfb69eaf044552192d8dee0aedd4861",
+          "hash": "24f3e83a2d288009764b48f943ebc00f0bcdf0d1392e0e3a6d53989b34ced852",
           "path": ".gitignore"
         },
         {
@@ -17890,6 +17890,10 @@
         {
           "hash": "45822188a7ce67702b4877b87d3e04c6f59c71f258ce19308c984d8ac3ed14f7",
           "path": "SHIP_GATE.md"
+        },
+        {
+          "hash": "ae6229a31b9b17c3f3b46e225052d0c28fa70f213f395b479891027f5f017086",
+          "path": "codecov.yml"
         },
         {
           "hash": "2048caac098def2f2147966e69ca934a9c1f6ea17e62a5fcb506254161bed5c5",
@@ -18276,7 +18280,8 @@
       ],
       "name": "CI",
       "permissions": [
-        "contents:read"
+        "contents:read",
+        "id-token:write"
       ],
       "pushes": false,
       "reach": [
@@ -18955,6 +18960,7 @@
             "README.md",
             "SECURITY.md",
             "atlas/**",
+            "codecov.yml",
             "crates/**",
             "docs/**",
             "rust-toolchain.toml",
@@ -18973,7 +18979,8 @@
       "uses": [
         "actions/cache",
         "actions/checkout",
-        "actions/setup-node"
+        "actions/setup-node",
+        "codecov/codecov-action"
       ],
       "usesWorkflowToken": false
     },
@@ -19750,8 +19757,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "7ec3a142b12ae7c7509890addf1276f4dd27dd55",
-    "tracked": 685
+    "commit": "4b1d3d940e7aa613e84d2c5b8d441e6d7fcdf9fc",
+    "tracked": 686
   },
   "landings": [
     {
