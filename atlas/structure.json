@@ -60,7 +60,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "ccab318a841f70f092f011ec933af595fa6e393eda122ed066cb7f4a8e7e5524",
+          "hash": "d4de63637f21ce2337cf4a40ef5ac021234310f40af75418e6e4b3ed003bf1d7",
           "path": "docs/eval-harness.md"
         },
         {
@@ -2757,7 +2757,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 33,
+      "testedBy": 34,
       "unresolvedSites": 0
     },
     {
@@ -2819,10 +2819,10 @@
       "unresolvedSites": 0
     },
     {
-      "dynamicReads": 43,
+      "dynamicReads": 45,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
-      "dynamicWrites": 16,
+      "dynamicWrites": 20,
       "entryPoints": [
         "crates/league-eval/src/lib.rs",
         "crates/league-eval/src/main.rs"
@@ -2834,7 +2834,7 @@
           "path": "crates/league-eval/Cargo.toml"
         },
         {
-          "hash": "702b4bfadb24427961f6209add5b123a90c1ad55c39f04006f5af612d56cdb81",
+          "hash": "3349d550de622b4959e2355e90594b0c2a4afd89c860b2673cac147421edd7d1",
           "path": "crates/league-eval/README.md"
         },
         {
@@ -2992,70 +2992,80 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 59
+              "line": 66
             },
             {
               "in": "execute_cli_with_git_sha",
               "kind": "match-err",
-              "line": 129
+              "line": 136
             },
             {
               "in": "run_cli_args",
               "kind": "err",
-              "line": 198
+              "line": 205
             },
             {
               "in": "run_cli_args",
               "kind": "err",
-              "line": 223
+              "line": 232
             },
             {
               "in": "cmd_play",
               "kind": "err",
-              "line": 321
+              "line": 330
             },
             {
               "in": "cmd_branch",
               "kind": "err",
-              "line": 462
+              "line": 471
             },
             {
               "in": "cmd_select",
               "kind": "err",
-              "line": 558
+              "line": 567
             },
             {
               "in": "cmd_select",
               "kind": "err",
-              "line": 579
+              "line": 588
             },
             {
               "in": "cmd_build_blind_inputs",
               "kind": "err",
-              "line": 655
+              "line": 664
             },
             {
               "in": "cmd_verify_checkpoints",
               "kind": "err",
-              "line": 717
+              "line": 726
             },
             {
               "in": "cmd_freeze",
               "kind": "err",
-              "line": 786
+              "line": 795
             },
             {
               "in": "cmd_join",
               "kind": "err",
-              "line": 855
+              "line": 864
+            },
+            {
+              "in": "cmd_report",
+              "kind": "err",
+              "line": 953
+            },
+            {
+              "in": "cmd_seed_block",
+              "kind": "err",
+              "line": 1042
             },
             {
               "in": "parse_memory_mode",
               "kind": "err",
-              "line": 888
+              "line": 1086
             }
           ],
-          "hash": "4b006be4a31e87709c7fe0e978b236af94ab3f7526541845c18bd763074ab925",
+          "hash": "5623c6b248cb1c43da61c3cb6f502389674119870384c9e4b662da193abc5437",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
@@ -3063,6 +3073,8 @@
             "crates/league-eval/src/freeze_gate.rs",
             "crates/league-eval/src/lib.rs",
             "crates/league-eval/src/records.rs",
+            "crates/league-eval/src/report.rs",
+            "crates/league-eval/src/seed_block.rs",
             "crates/league-eval/src/select.rs",
             "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/verify_checkpoints.rs",
@@ -3073,7 +3085,7 @@
             {
               "calls": [
                 {
-                  "line": 72,
+                  "line": 79,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3089,7 +3101,7 @@
             {
               "calls": [
                 {
-                  "line": 126,
+                  "line": 133,
                   "name": "collect_env_redaction_keys",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3098,7 +3110,7 @@
                 },
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 175,
+                  "line": 182,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3108,7 +3120,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 180,
+                  "line": 187,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3117,7 +3129,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 72,
+                  "line": 79,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3127,7 +3139,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--help\" || a == \"-h\")",
-                  "line": 206,
+                  "line": 213,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3137,7 +3149,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--version\" || a == \"-V\")",
-                  "line": 211,
+                  "line": 218,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3146,7 +3158,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 256,
+                  "line": 265,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3155,7 +3167,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 274,
+                  "line": 283,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -3164,7 +3176,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 278,
+                  "line": 287,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3173,7 +3185,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 284,
+                  "line": 293,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3182,7 +3194,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 914,
+                  "line": 1112,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3191,7 +3203,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 920,
+                  "line": 1118,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3199,7 +3211,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 1121,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3208,7 +3220,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 924,
+                  "line": 1122,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3216,7 +3228,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 927,
+                  "line": 1125,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3225,7 +3237,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 930,
+                  "line": 1128,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3234,7 +3246,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 937,
+                  "line": 1135,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3243,7 +3255,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 940,
+                  "line": 1138,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3252,7 +3264,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 947,
+                  "line": 1145,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3261,7 +3273,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 949,
+                  "line": 1147,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3270,7 +3282,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3278,7 +3290,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 382,
+                  "line": 391,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3287,7 +3299,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 412,
+                  "line": 421,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3296,7 +3308,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 431,
+                  "line": 440,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -3314,7 +3326,7 @@
             {
               "calls": [
                 {
-                  "line": 126,
+                  "line": 133,
                   "name": "collect_env_redaction_keys",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3323,7 +3335,7 @@
                 },
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 175,
+                  "line": 182,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3333,7 +3345,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 180,
+                  "line": 187,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3342,7 +3354,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 72,
+                  "line": 79,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3352,7 +3364,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--help\" || a == \"-h\")",
-                  "line": 206,
+                  "line": 213,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3362,7 +3374,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--version\" || a == \"-V\")",
-                  "line": 211,
+                  "line": 218,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3371,7 +3383,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 256,
+                  "line": 265,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3380,7 +3392,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 274,
+                  "line": 283,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -3389,7 +3401,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 278,
+                  "line": 287,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3398,7 +3410,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 284,
+                  "line": 293,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3407,7 +3419,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 914,
+                  "line": 1112,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3416,7 +3428,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 920,
+                  "line": 1118,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3424,7 +3436,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 1121,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3433,7 +3445,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 924,
+                  "line": 1122,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3441,7 +3453,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 927,
+                  "line": 1125,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3450,7 +3462,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 930,
+                  "line": 1128,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3459,7 +3471,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 937,
+                  "line": 1135,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3468,7 +3480,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 940,
+                  "line": 1138,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3477,7 +3489,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 947,
+                  "line": 1145,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3486,7 +3498,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 949,
+                  "line": 1147,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3495,7 +3507,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3503,7 +3515,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 382,
+                  "line": 391,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3512,7 +3524,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 412,
+                  "line": 421,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3521,7 +3533,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 431,
+                  "line": 440,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -3539,7 +3551,7 @@
             {
               "calls": [
                 {
-                  "line": 126,
+                  "line": 133,
                   "name": "collect_env_redaction_keys",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3547,7 +3559,7 @@
                 },
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 175,
+                  "line": 182,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3557,7 +3569,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 180,
+                  "line": 187,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3566,7 +3578,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 72,
+                  "line": 79,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3576,7 +3588,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--help\" || a == \"-h\")",
-                  "line": 206,
+                  "line": 213,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3586,7 +3598,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--version\" || a == \"-V\")",
-                  "line": 211,
+                  "line": 218,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3595,7 +3607,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 256,
+                  "line": 265,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3604,7 +3616,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 274,
+                  "line": 283,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -3613,7 +3625,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 278,
+                  "line": 287,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3622,7 +3634,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 284,
+                  "line": 293,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3631,7 +3643,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 914,
+                  "line": 1112,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3640,7 +3652,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 920,
+                  "line": 1118,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3648,7 +3660,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 1121,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3657,7 +3669,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 924,
+                  "line": 1122,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3665,7 +3677,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 927,
+                  "line": 1125,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3674,7 +3686,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 930,
+                  "line": 1128,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3683,7 +3695,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 937,
+                  "line": 1135,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3692,7 +3704,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 940,
+                  "line": 1138,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3701,7 +3713,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 947,
+                  "line": 1145,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3710,7 +3722,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 949,
+                  "line": 1147,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3719,7 +3731,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3727,7 +3739,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 382,
+                  "line": 391,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3736,7 +3748,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 412,
+                  "line": 421,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3745,7 +3757,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 431,
+                  "line": 440,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -3763,21 +3775,7 @@
             {
               "calls": [
                 {
-                  "line": 144,
-                  "name": "scrub_secret_text",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
-                  }
-                },
-                {
-                  "line": 143,
-                  "name": "redact_secrets_multi_with_limit",
-                  "target": {
-                    "file": "crates/league-relay/src/lib.rs"
-                  }
-                },
-                {
-                  "line": 150,
+                  "line": 151,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -3791,7 +3789,21 @@
                   }
                 },
                 {
-                  "line": 155,
+                  "line": 157,
+                  "name": "scrub_secret_text",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 157,
+                  "name": "redact_secrets_multi_with_limit",
+                  "target": {
+                    "file": "crates/league-relay/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 162,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -3808,7 +3820,7 @@
               "calls": [
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 175,
+                  "line": 182,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3817,7 +3829,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 180,
+                  "line": 187,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3825,7 +3837,7 @@
                   }
                 },
                 {
-                  "line": 72,
+                  "line": 79,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3835,7 +3847,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--help\" || a == \"-h\")",
-                  "line": 206,
+                  "line": 213,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3844,7 +3856,7 @@
                 },
                 {
                   "branch": "rest.iter().any(|a| a == \"--version\" || a == \"-V\")",
-                  "line": 211,
+                  "line": 218,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3852,7 +3864,7 @@
                   }
                 },
                 {
-                  "line": 256,
+                  "line": 265,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3861,7 +3873,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 274,
+                  "line": 283,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -3870,7 +3882,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 278,
+                  "line": 287,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3879,7 +3891,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 284,
+                  "line": 293,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3888,7 +3900,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 914,
+                  "line": 1112,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3897,7 +3909,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 920,
+                  "line": 1118,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3905,7 +3917,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 1121,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3914,7 +3926,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 924,
+                  "line": 1122,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3922,7 +3934,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 927,
+                  "line": 1125,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3931,7 +3943,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 930,
+                  "line": 1128,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3940,7 +3952,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 937,
+                  "line": 1135,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3949,7 +3961,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 940,
+                  "line": 1138,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3958,7 +3970,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 947,
+                  "line": 1145,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3967,7 +3979,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 949,
+                  "line": 1147,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3976,7 +3988,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3984,7 +3996,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 382,
+                  "line": 391,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3993,7 +4005,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 412,
+                  "line": 421,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4002,7 +4014,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 431,
+                  "line": 440,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -4011,7 +4023,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 436,
+                  "line": 445,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -4029,7 +4041,7 @@
             {
               "calls": [
                 {
-                  "line": 256,
+                  "line": 265,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4037,7 +4049,7 @@
                   }
                 },
                 {
-                  "line": 274,
+                  "line": 283,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -4045,7 +4057,7 @@
                   }
                 },
                 {
-                  "line": 278,
+                  "line": 287,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -4053,7 +4065,7 @@
                   }
                 },
                 {
-                  "line": 284,
+                  "line": 293,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4061,7 +4073,7 @@
                   }
                 },
                 {
-                  "line": 914,
+                  "line": 1112,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -4070,7 +4082,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 920,
+                  "line": 1118,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -4078,7 +4090,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 1121,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -4087,7 +4099,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 924,
+                  "line": 1122,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -4095,7 +4107,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 927,
+                  "line": 1125,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -4104,7 +4116,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 930,
+                  "line": 1128,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -4113,7 +4125,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 937,
+                  "line": 1135,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -4122,7 +4134,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 940,
+                  "line": 1138,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -4131,7 +4143,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 947,
+                  "line": 1145,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -4140,7 +4152,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 949,
+                  "line": 1147,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -4149,14 +4161,14 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "run_play_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 382,
+                  "line": 391,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4172,7 +4184,7 @@
             {
               "calls": [
                 {
-                  "line": 412,
+                  "line": 421,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4180,7 +4192,7 @@
                   }
                 },
                 {
-                  "line": 431,
+                  "line": 440,
                   "name": "parse",
                   "receiver": "CommunicationMode",
                   "target": {
@@ -4188,7 +4200,7 @@
                   }
                 },
                 {
-                  "line": 436,
+                  "line": 445,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -4196,7 +4208,7 @@
                   }
                 },
                 {
-                  "line": 888,
+                  "line": 1086,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4205,7 +4217,7 @@
                   "via": "parse_memory_mode"
                 },
                 {
-                  "line": 914,
+                  "line": 1112,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -4214,7 +4226,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 920,
+                  "line": 1118,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -4222,7 +4234,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 923,
+                  "line": 1121,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -4231,7 +4243,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 924,
+                  "line": 1122,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -4239,7 +4251,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 927,
+                  "line": 1125,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -4248,7 +4260,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 930,
+                  "line": 1128,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -4257,7 +4269,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 937,
+                  "line": 1135,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -4266,7 +4278,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 940,
+                  "line": 1138,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -4275,7 +4287,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 947,
+                  "line": 1145,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -4284,7 +4296,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 949,
+                  "line": 1147,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -4293,21 +4305,21 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 502,
+                  "line": 511,
                   "name": "run_branch_with_communication_and_git_sha",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 512,
+                  "line": 521,
                   "name": "summarize_branch_outcomes",
                   "target": {
                     "file": "crates/league-eval/src/records.rs"
                   }
                 },
                 {
-                  "line": 521,
+                  "line": 530,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4323,7 +4335,7 @@
             {
               "calls": [
                 {
-                  "line": 536,
+                  "line": 545,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4332,7 +4344,7 @@
                 },
                 {
                   "branch": "parts.len() != 3",
-                  "line": 558,
+                  "line": 567,
                   "name": "InvalidStrata",
                   "receiver": "EvalError",
                   "target": {
@@ -4340,7 +4352,7 @@
                   }
                 },
                 {
-                  "line": 564,
+                  "line": 573,
                   "name": "InvalidStrata",
                   "receiver": "EvalError",
                   "target": {
@@ -4348,7 +4360,7 @@
                   }
                 },
                 {
-                  "line": 574,
+                  "line": 583,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4356,14 +4368,14 @@
                   }
                 },
                 {
-                  "line": 594,
+                  "line": 603,
                   "name": "run_select",
                   "target": {
                     "file": "crates/league-eval/src/select.rs"
                   }
                 },
                 {
-                  "line": 601,
+                  "line": 610,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4379,7 +4391,7 @@
             {
               "calls": [
                 {
-                  "line": 617,
+                  "line": 626,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4387,14 +4399,14 @@
                   }
                 },
                 {
-                  "line": 678,
+                  "line": 687,
                   "name": "run_build_blind_inputs",
                   "target": {
                     "file": "crates/league-eval/src/blind_builder.rs"
                   }
                 },
                 {
-                  "line": 684,
+                  "line": 693,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4410,7 +4422,7 @@
             {
               "calls": [
                 {
-                  "line": 701,
+                  "line": 710,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4418,14 +4430,14 @@
                   }
                 },
                 {
-                  "line": 733,
+                  "line": 742,
                   "name": "run_verify_checkpoints",
                   "target": {
                     "file": "crates/league-eval/src/verify_checkpoints.rs"
                   }
                 },
                 {
-                  "line": 739,
+                  "line": 748,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4441,7 +4453,7 @@
             {
               "calls": [
                 {
-                  "line": 761,
+                  "line": 770,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4449,7 +4461,7 @@
                   }
                 },
                 {
-                  "line": 802,
+                  "line": 811,
                   "name": "MissingVerifiedCheckpoints",
                   "receiver": "EvalError",
                   "target": {
@@ -4457,14 +4469,14 @@
                   }
                 },
                 {
-                  "line": 808,
+                  "line": 817,
                   "name": "run_freeze_with_provenance",
                   "target": {
                     "file": "crates/league-eval/src/freeze_gate.rs"
                   }
                 },
                 {
-                  "line": 817,
+                  "line": 826,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4480,7 +4492,7 @@
             {
               "calls": [
                 {
-                  "line": 834,
+                  "line": 843,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4488,14 +4500,14 @@
                   }
                 },
                 {
-                  "line": 873,
+                  "line": 882,
                   "name": "run_join",
                   "target": {
                     "file": "crates/league-eval/src/freeze_gate.rs"
                   }
                 },
                 {
-                  "line": 879,
+                  "line": 888,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4511,7 +4523,132 @@
             {
               "calls": [
                 {
-                  "line": 888,
+                  "line": 906,
+                  "name": "Usage",
+                  "receiver": "EvalError",
+                  "target": {
+                    "file": "crates/league-eval/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 943,
+                  "name": "parse",
+                  "receiver": "ReportOutputFormat",
+                  "target": {
+                    "file": "crates/league-eval/src/report.rs"
+                  }
+                },
+                {
+                  "line": 953,
+                  "name": "Usage",
+                  "receiver": "EvalError",
+                  "target": {
+                    "file": "crates/league-eval/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 967,
+                  "name": "run_report",
+                  "target": {
+                    "file": "crates/league-eval/src/report.rs"
+                  }
+                },
+                {
+                  "line": 974,
+                  "name": "Io",
+                  "receiver": "EvalError",
+                  "target": {
+                    "file": "crates/league-eval/src/lib.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "cmd_report"
+            },
+            {
+              "calls": [
+                {
+                  "line": 997,
+                  "name": "Usage",
+                  "receiver": "EvalError",
+                  "target": {
+                    "file": "crates/league-eval/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 1015,
+                  "name": "parse",
+                  "receiver": "EvalArm",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  }
+                },
+                {
+                  "line": 1019,
+                  "name": "parse",
+                  "receiver": "CommunicationMode",
+                  "target": {
+                    "file": "crates/league-eval/src/records.rs"
+                  }
+                },
+                {
+                  "line": 1025,
+                  "name": "Usage",
+                  "receiver": "EvalError",
+                  "target": {
+                    "file": "crates/league-eval/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 1049,
+                  "name": "from_env",
+                  "receiver": "ApiKey",
+                  "target": {
+                    "file": "crates/league-relay/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 1052,
+                  "name": "validate_vm_host_allowance",
+                  "target": {
+                    "file": "crates/league-relay/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 1058,
+                  "name": "Usage",
+                  "receiver": "EvalError",
+                  "target": {
+                    "file": "crates/league-eval/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 1068,
+                  "name": "run_seed_block",
+                  "target": {
+                    "file": "crates/league-eval/src/seed_block.rs"
+                  }
+                },
+                {
+                  "line": 1077,
+                  "name": "Io",
+                  "receiver": "EvalError",
+                  "target": {
+                    "file": "crates/league-eval/src/lib.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "cmd_seed_block"
+            },
+            {
+              "calls": [
+                {
+                  "line": 1086,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4527,7 +4664,7 @@
             {
               "calls": [
                 {
-                  "line": 914,
+                  "line": 1112,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -4535,14 +4672,14 @@
                   }
                 },
                 {
-                  "line": 920,
+                  "line": 1118,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
                   }
                 },
                 {
-                  "line": 923,
+                  "line": 1121,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -4550,14 +4687,14 @@
                   }
                 },
                 {
-                  "line": 924,
+                  "line": 1122,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 927,
+                  "line": 1125,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -4565,7 +4702,7 @@
                   }
                 },
                 {
-                  "line": 930,
+                  "line": 1128,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -4573,7 +4710,7 @@
                   }
                 },
                 {
-                  "line": 937,
+                  "line": 1135,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -4581,7 +4718,7 @@
                   }
                 },
                 {
-                  "line": 940,
+                  "line": 1138,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -4589,7 +4726,7 @@
                   }
                 },
                 {
-                  "line": 947,
+                  "line": 1145,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -4597,7 +4734,7 @@
                   }
                 },
                 {
-                  "line": 949,
+                  "line": 1147,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -5247,7 +5384,7 @@
           "testsInside": true
         },
         {
-          "hash": "a20236c7d7fc9e64666cab2a142bb78cb05d7af25e6632cb7c2f89c936108cb9",
+          "hash": "b540152a3e64b687c6911d99e2b6b6ca5d5c4016b1cce72d8cf95e9bb5d12c4f",
           "importsFiles": [
             "crates/league-eval/src/baselines.rs",
             "crates/league-eval/src/blind_builder.rs",
@@ -5258,7 +5395,9 @@
             "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/reply.rs",
+            "crates/league-eval/src/report.rs",
             "crates/league-eval/src/schema.rs",
+            "crates/league-eval/src/seed_block.rs",
             "crates/league-eval/src/select.rs",
             "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/talk_extract.rs",
@@ -5299,7 +5438,7 @@
                 {
                   "inner": [
                     {
-                      "line": 126,
+                      "line": 133,
                       "name": "collect_env_redaction_keys",
                       "target": {
                         "file": "crates/league-relay/src/lib.rs"
@@ -5308,7 +5447,7 @@
                     },
                     {
                       "branch": "s == \"--help\" || s == \"-h\"",
-                      "line": 175,
+                      "line": 182,
                       "name": "Io",
                       "receiver": "EvalError",
                       "target": {
@@ -5318,7 +5457,7 @@
                     },
                     {
                       "branch": "s == \"--version\" || s == \"-V\"",
-                      "line": 180,
+                      "line": 187,
                       "name": "Io",
                       "receiver": "EvalError",
                       "target": {
@@ -5327,7 +5466,7 @@
                       "via": "run_cli_args"
                     },
                     {
-                      "line": 72,
+                      "line": 79,
                       "name": "Usage",
                       "receiver": "EvalError",
                       "target": {
@@ -5337,7 +5476,7 @@
                     },
                     {
                       "branch": "rest.iter().any(|a| a == \"--help\" || a == \"-h\")",
-                      "line": 206,
+                      "line": 213,
                       "name": "Io",
                       "receiver": "EvalError",
                       "target": {
@@ -5347,7 +5486,7 @@
                     },
                     {
                       "branch": "rest.iter().any(|a| a == \"--version\" || a == \"-V\")",
-                      "line": 211,
+                      "line": 218,
                       "name": "Io",
                       "receiver": "EvalError",
                       "target": {
@@ -5356,7 +5495,7 @@
                       "via": "run_cli_args"
                     },
                     {
-                      "line": 256,
+                      "line": 265,
                       "name": "Usage",
                       "receiver": "EvalError",
                       "target": {
@@ -5365,7 +5504,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 274,
+                      "line": 283,
                       "name": "parse",
                       "receiver": "CommunicationMode",
                       "target": {
@@ -5374,7 +5513,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 278,
+                      "line": 287,
                       "name": "parse",
                       "receiver": "EvalArm",
                       "target": {
@@ -5383,7 +5522,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 284,
+                      "line": 293,
                       "name": "Usage",
                       "receiver": "EvalError",
                       "target": {
@@ -5392,7 +5531,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 914,
+                      "line": 1112,
                       "name": "from_env",
                       "receiver": "ApiKey",
                       "target": {
@@ -5401,7 +5540,7 @@
                       "via": "execute_with_transport"
                     },
                     {
-                      "line": 920,
+                      "line": 1118,
                       "name": "validate_vm_host_allowance",
                       "target": {
                         "file": "crates/league-relay/src/lib.rs"
@@ -5600,6 +5739,95 @@
         },
         {
           "exports": [
+            "compute_pairwise_contrast_from_seed_diffs",
+            "render_report_text",
+            "run_report"
+          ],
+          "failurePaths": [
+            {
+              "in": "parse",
+              "kind": "err",
+              "line": 65
+            },
+            {
+              "in": "resolve_output_targets",
+              "kind": "err",
+              "line": 262
+            },
+            {
+              "in": "scan_branch_dir_recursive",
+              "kind": "err",
+              "line": 282
+            },
+            {
+              "in": "scan_branch_dir_recursive",
+              "kind": "err",
+              "line": 302
+            },
+            {
+              "in": "scan_branch_dir_recursive",
+              "kind": "err",
+              "line": 309
+            },
+            {
+              "in": "scan_branch_dir_recursive",
+              "kind": "err",
+              "line": 318
+            },
+            {
+              "in": "run_report",
+              "kind": "err",
+              "line": 785
+            },
+            {
+              "in": "run_report",
+              "kind": "err",
+              "line": 790
+            },
+            {
+              "in": "run_report",
+              "kind": "err",
+              "line": 799
+            },
+            {
+              "in": "run_report",
+              "kind": "err",
+              "line": 808
+            },
+            {
+              "in": "run_report",
+              "kind": "err",
+              "line": 813
+            },
+            {
+              "in": "run_report",
+              "kind": "err",
+              "line": 875
+            }
+          ],
+          "hash": "c8dd1d6555027bf988cdd3bec43c128b1e247e5822c49241a0ea375554f5a9d8",
+          "importOrder": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-eval/src/driver.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/freeze_gate.rs",
+            "crates/league-eval/src/mechanisms.rs",
+            "crates/league-eval/src/records.rs"
+          ],
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/driver.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/freeze_gate.rs",
+            "crates/league-eval/src/mechanisms.rs",
+            "crates/league-eval/src/records.rs",
+            "crates/league-scorer/src/lib.rs"
+          ],
+          "path": "crates/league-eval/src/report.rs"
+        },
+        {
+          "exports": [
             "build_eval_response_format_config",
             "build_eval_response_format_value",
             "build_eval_silent_response_format_config",
@@ -5625,6 +5853,80 @@
           ],
           "path": "crates/league-eval/src/schema.rs",
           "testsInside": true
+        },
+        {
+          "exports": [
+            "build_seed_latin_square",
+            "run_seed_block",
+            "verify_latin_square_4x4"
+          ],
+          "failurePaths": [
+            {
+              "in": "parse_raw_seats_array",
+              "kind": "err",
+              "line": 195
+            },
+            {
+              "in": "parse_raw_seats_array",
+              "kind": "err",
+              "line": 202
+            },
+            {
+              "in": "run_seed_block",
+              "kind": "err",
+              "line": 215
+            },
+            {
+              "in": "run_seed_block",
+              "kind": "err",
+              "line": 220
+            },
+            {
+              "in": "run_seed_block",
+              "kind": "err",
+              "line": 228
+            },
+            {
+              "in": "run_seed_block",
+              "kind": "err",
+              "line": 238
+            },
+            {
+              "in": "run_seed_block",
+              "kind": "err",
+              "line": 245
+            },
+            {
+              "in": "run_seed_block",
+              "kind": "err",
+              "line": 261
+            },
+            {
+              "in": "run_seed_block",
+              "kind": "err",
+              "line": 311
+            }
+          ],
+          "hash": "8f4f13c2fef2411c62ece00a6af99865a5326284b7c61f739b6bd8fa209beb0e",
+          "importOrder": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-eval/src/driver.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/mechanisms.rs",
+            "crates/league-eval/src/records.rs"
+          ],
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/driver.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/mechanisms.rs",
+            "crates/league-eval/src/records.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs"
+          ],
+          "path": "crates/league-eval/src/seed_block.rs"
         },
         {
           "exports": [
@@ -6209,6 +6511,24 @@
           "testsInside": true
         },
         {
+          "hash": "1379833a4cf9b126a16b163335bba653cccbe34bfa87c82de7c04ab44ac7618a",
+          "importOrder": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-scorer/src/cli.rs"
+          ],
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/lib.rs",
+            "crates/league-scorer/src/cli.rs",
+            "crates/league-scorer/src/lib.rs"
+          ],
+          "library": "crates/league-eval/src/lib.rs",
+          "path": "crates/league-eval/tests/report_and_seed_block.rs",
+          "testsInside": true
+        },
+        {
           "hash": "148037a2455cea4723ac1568b5c324a603d0bc974331d97ec0fafaf63a46b405",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
@@ -6236,7 +6556,7 @@
           "testsInside": true
         },
         {
-          "hash": "0c353b824fdfd79d230af90b6b65dff6de0059dcb7fb8062a525ff91483d8e1d",
+          "hash": "d731a4f64485dbdb2db61669d27da7333f0426591992a8c4d566227b24101b6a",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -6278,20 +6598,20 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 49,
+          "reads": 54,
           "where": [
             "caller"
           ],
           "writes": 4
         }
       ],
-      "outsideReads": 49,
+      "outsideReads": 54,
       "outsideWrites": 4,
       "role": "code",
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 16,
+      "testedBy": 17,
       "unresolvedSites": 0
     },
     {
@@ -14275,7 +14595,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 7,
+      "testedBy": 8,
       "unresolvedSites": 0
     },
     {
@@ -17828,7 +18148,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "d5bd697183d14ced9778e78f20928144275ada8aaa7ba17ab79e2c605302946a",
+          "hash": "b0aa833193bcc72e997fbab362f2eba922416df5502599e9c329cf89327ad50e",
           "path": "CHANGELOG.md"
         },
         {
@@ -17872,7 +18192,7 @@
           "path": "README.ja.md"
         },
         {
-          "hash": "8cd9e02565146b4db13655df554a4e27baf2d94ec43806996afdb6b4d800ba06",
+          "hash": "3fac89ba1c89c4d32b97fd53a3b1afbedb1f19e30a8a15bbf9e4d93a4c1670ca",
           "path": "README.md"
         },
         {
@@ -18298,7 +18618,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 26
+          "files": 29
         },
         {
           "boundary": "league-gen",
@@ -18915,14 +19235,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 77,
+          "files": 78,
           "job": "check",
           "runner": "cargo test",
           "step": "Test (doc tests)"
         },
         {
           "coverage": true,
-          "files": 77,
+          "files": 78,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -19152,7 +19472,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 18
+          "files": 20
         },
         {
           "boundary": "league-relay",
@@ -19757,8 +20077,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "4b1d3d940e7aa613e84d2c5b8d441e6d7fcdf9fc",
-    "tracked": 686
+    "commit": "543e488caafd76007c5b1f60de63e3bc4f22a92f",
+    "tracked": 689
   },
   "landings": [
     {
@@ -21093,7 +21413,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 138,
+  "testFiles": 139,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",
