@@ -158,13 +158,14 @@ fn half_base_value_for_units(units: Units, parity: Units) -> Units {
 ///
 /// 1. **Trade prices do not count:** no traded price, volume, window, or qualification test enters
 ///    the close mark.
-/// 2. **Standing bids first, compared against the unrounded `50%` floor:** units that executable
-///    non-self resting `Buy` bids would buy are walked highest-bid-first (`offer_id` ascending on
-///    price ties; `seat`'s own bids skipped). A slice of `take` units whose `bid_cred`
-///    (`min(take * bid_price, locked_cred)`) strictly exceeds the unrounded `50%` base floor
-///    (`bid_cred * UNIT_SCALE * BPS_SCALE > take * parity * UNSOLD_EXCESS_PARITY_BPS`) adds
-///    `bid_cred`; any slice that does not beat that unrounded floor adds nothing during the walk
-///    and instead joins the pooled floored unit count.
+/// 2. **Standing bids first, compared against the unrounded `50%` floor (`#54` whole-unit
+///    depth):** units that executable non-self resting `Buy` bids covering at least one whole unit
+///    (`remaining_units >= UNIT_SCALE`) would buy are walked highest-bid-first (`offer_id` ascending
+///    on price ties; `seat`'s own bids and sub-unit bids `< UNIT_SCALE` skipped). A slice of `take`
+///    units whose `bid_cred` (`min(take * bid_price, locked_cred)`) strictly exceeds the unrounded
+///    `50%` base floor (`bid_cred * UNIT_SCALE * BPS_SCALE > take * parity *
+///    UNSOLD_EXCESS_PARITY_BPS`) adds `bid_cred`; any slice that does not beat that unrounded floor
+///    adds nothing during the walk and instead joins the pooled floored unit count.
 /// 3. **One pooled `50%` floor over the rest:** all non-winning bid slices and remaining uncovered
 ///    units are pooled together and valued once via [`half_base_value_for_units`] at
 ///    [`UNSOLD_EXCESS_PARITY_BPS`] (`50%`) of fixed base value (`parity`), so a holding with no
@@ -215,7 +216,11 @@ pub(crate) fn close_mark_breakdown(
     let mut bids: Vec<&CredOffer> = state
         .offers
         .values()
-        .filter(|o| o.good == good && bid_executable_by_seller(state, seat, o))
+        .filter(|o| {
+            o.good == good
+                && o.remaining_units >= UNIT_SCALE
+                && bid_executable_by_seller(state, seat, o)
+        })
         .collect();
     bids.sort_by(|a, b| {
         b.price_per_unit_cred
@@ -290,10 +295,11 @@ pub(crate) fn seat_close_stock(state: &EngineState, seat: u8) -> (Vec<Units>, Ve
     )
 }
 
-/// Computes `seat`'s terminal marked Net Asset Equity at Season Close (`2026-11-16` ruling),
-/// valuing commodity holdings by [`mark_good_holding_at_close`] (executable non-self standing bids
-/// floored at `50%` of base value first, and remaining units at `50%` of base value; trade prices
-/// never enter) while keeping `CRED`, escrows, debt, and open check liabilities exact.
+/// Computes `seat`'s terminal marked Net Asset Equity at Season Close (`2026-11-16` ruling +
+/// `#54`), valuing commodity holdings by [`mark_good_holding_at_close`] (executable non-self
+/// standing bids covering at least `UNIT_SCALE` (`1.000` unit) floored at `50%` of base value
+/// first, and remaining units at `50%` of base value; trade prices never enter) while keeping
+/// `CRED`, escrows, debt, and open check liabilities exact.
 #[must_use]
 pub fn compute_final_marked_net_asset_equity(state: &EngineState, seat: u8) -> Units {
     let idx = usize::from(seat);
@@ -614,4 +620,87 @@ pub fn compute_final_scoreboard(
         closed_turn: state.turn,
         standings,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contracts::CredOffer;
+    use crate::types::TableId;
+
+    #[test]
+    fn close_mark_requires_at_least_one_whole_unit_bid_depth() {
+        let tid = TableId(4_054);
+        let Ok(spec) = TableSpec::standard_chiral_ring(tid, 4, 5) else {
+            panic!("standard_chiral_ring must succeed");
+        };
+        let Ok(eng) = crate::engine::TurnEngine::new(spec) else {
+            panic!("TurnEngine::new must succeed");
+        };
+        let mut st = eng.state().clone();
+        st.turn = 32;
+        let parity = st.parities.asset_parity(AssetId::Raw(0));
+        let held = 5_000;
+        let baseline = half_base_value_for_units(held, parity);
+
+        // Sub-unit bids (`1` and `999` milli-units) must yield `units_marked_by_bids == 0`.
+        st.offers.insert(
+            1,
+            CredOffer {
+                offer_id: 1,
+                maker: 1,
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                remaining_units: 1,
+                price_per_unit_cred: 15_000_000,
+                locked_cred: 15_000,
+                domain_id: None,
+                is_hybrid: false,
+                created_turn: 32,
+            },
+        );
+        st.offers.insert(
+            2,
+            CredOffer {
+                offer_id: 2,
+                maker: 2,
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                remaining_units: UNIT_SCALE - 1,
+                price_per_unit_cred: 10_000,
+                locked_cred: 9_990,
+                domain_id: None,
+                is_hybrid: false,
+                created_turn: 32,
+            },
+        );
+        let sub = close_mark_breakdown(&st, 0, AssetId::Raw(0), held);
+        assert_eq!(sub.units_marked_by_bids, 0);
+        assert_eq!(sub.units_at_floor, held);
+        assert_eq!(sub.marked_value, baseline);
+
+        // Adding a `1.000`-unit (`UNIT_SCALE`) bid above the 50% floor marks `UNIT_SCALE` units.
+        st.offers.insert(
+            3,
+            CredOffer {
+                offer_id: 3,
+                maker: 3,
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                remaining_units: UNIT_SCALE,
+                price_per_unit_cred: 3_000,
+                locked_cred: 3_000,
+                domain_id: None,
+                is_hybrid: false,
+                created_turn: 32,
+            },
+        );
+        let whole = close_mark_breakdown(&st, 0, AssetId::Raw(0), held);
+        assert_eq!(whole.units_marked_by_bids, UNIT_SCALE);
+        assert_eq!(whole.units_at_floor, held - UNIT_SCALE);
+        assert_eq!(
+            whole.marked_value,
+            3_000 + half_base_value_for_units(held - UNIT_SCALE, parity)
+        );
+    }
 }

@@ -1,0 +1,821 @@
+{
+  "source": "https://api.drand.sh/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+  "beacon_id": "quicknet",
+  "scheme_id": "bls-unchained-g1-rfc9380",
+  "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+  "public_key": "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
+  "genesis_time": 1692803367,
+  "period": 3,
+  "beacons": [
+    {
+      "round": 1,
+      "randomness": "1466a6cd24e327188770752f6134001c64d6efcc590ccc26b721611ad96f165a",
+      "signature": "b55e7cb2d5c613ee0b2e28d6750aabbb78c39dcc96bd9d38c2c2e12198df95571de8e8e402a0cc48871c7089a2b3af4b"
+    },
+    {
+      "round": 2,
+      "randomness": "5782d6987841c654515a0e72b2d1ebb4e741234042c37cb19608ae50d93fb60c",
+      "signature": "b6b6a585449b66eb12e875b64fcbab3799861a00e4dbf092d99e969a5eac57dd3f798acf61e705fe4f093db926626807"
+    },
+    {
+      "round": 3,
+      "randomness": "7ef4621ace1c6da4eb2eee7cd901f81385bca5b189771ec0f08d0d2566dd1a21",
+      "signature": "b3fab6df720b68cc47175f2c777e86d84187caab5770906f515ff1099cb01e4deaa027075d860823e49477b93c72bd64"
+    },
+    {
+      "round": 4,
+      "randomness": "93519af44f33975a7da43c67d094952ce259c5a0f3c4f4ca86f68bac8da98f88",
+      "signature": "821b77bbd693bf82989524477a37bc245dc4643086f48f09e5e008b4ccf2eba720798a1585855f70aa3ee63e5bed5ed5"
+    },
+    {
+      "round": 5,
+      "randomness": "454499da27a1cf7b49a30850b8caad7d92008d6e06313359922594bdaafa750c",
+      "signature": "830c14582e34336e45a188cc7acd19661a4d97c455b502f431c959d26c006080d456d890b80d1d7c151dd149726c764a"
+    },
+    {
+      "round": 6,
+      "randomness": "91b28f64e8a8e5b2af1f9f8a8eba890eac23a9892906fa1a5cf25735751ee60e",
+      "signature": "9939a4113ede08c0ecea17c99f62e73b4a2f44fb734fba3ad006a9dc870bbe2f3b965a7c055d1f7e4261977fd487affd"
+    },
+    {
+      "round": 7,
+      "randomness": "dad6720c975a5e4b24c8b0c89c2ab62d9dbb31ba77692caa77be471c6fe32384",
+      "signature": "81f76a4ac64d225f2e029426a554f0c1e1e65c1018099141aa609d12e61921f733a851de54c40f75328f0b156f2822f0"
+    },
+    {
+      "round": 8,
+      "randomness": "996f280fcd832b382ea43338549f108fae303bdb9f781fe99fc062f554a036f1",
+      "signature": "a0c06b9964123d2e6036aa004c140fc301f4edd3ea6b8396a15dfd7dfd70cc0dce0b4a97245995767ab72cf59de58c47"
+    },
+    {
+      "round": 9,
+      "randomness": "1da6d91e4ac29edafde45e9d46c003806725c092086df11d40716f1ed49f0d03",
+      "signature": "b498d4d9efd15add1c1932e340b9b87a494a7a660118e89f96892fc24e630b717777a6b7f06d5a20a9c56cbb6d2521e9"
+    },
+    {
+      "round": 10,
+      "randomness": "850f2d84fec6935508464a33f5389b3103087bc44599d782b83cbe2eaa8451e3",
+      "signature": "ac415e508c484053efed1c6c330e3ae0bf20185b66ed088864dac1ff7d6f927610824986390d3239dac4dd73e6f865f5"
+    },
+    {
+      "round": 11,
+      "randomness": "dd92a19f450cb5c514d7a6fdfe22c6f0a5269841af4baae722c5efef2f7269a9",
+      "signature": "92920df5ba3e245eb45fbc02e94e784220fa2cc670b7d45c2ac99012dcd51844270371f6f0dbbe24e9261f3fee33315e"
+    },
+    {
+      "round": 12,
+      "randomness": "acd06507f2c4e93a6f1be7429759c2284adb93e144aec5ca88639eccf9fe9e78",
+      "signature": "ad67029fa55e96eec1236797df0eb46321608e035594e589fb37b5f0fef30988abb40551c04e219dbd8d7e241d972c08"
+    },
+    {
+      "round": 13,
+      "randomness": "24b63c501680cbaeb034399bfc4d5a0987cbf50e872801af8be5c3a0b67c9709",
+      "signature": "98e9cdc747e2666d49329757dbc639d1c2b0f0b703b84e77ffd2dafcc4f1e6ed488ff993120cf142dc12380a5550a1c3"
+    },
+    {
+      "round": 14,
+      "randomness": "6ed1ebe0b001f53e60864fa37a90bd6712c95ba3d01793eb73092e029a8effc3",
+      "signature": "8cb605a9da683714414b1438aee2b240987742358d9c21a11e412006df9199f94a5912a57a7f05759482f31f46eeeca5"
+    },
+    {
+      "round": 15,
+      "randomness": "d673e3fdf9465ab47bc1fbd948273195b48f008568836f20a67f81f7ac98596f",
+      "signature": "8d955780033fc62993dc740761fb54e850f7d85cae96e7111527c1929327bd1c31a478dcb7804331267fedc4c40ad087"
+    },
+    {
+      "round": 16,
+      "randomness": "8b49348af31ea82f70e3b592a80c8831c324b00a81fb2967e79055fad7ca8a5d",
+      "signature": "8d1c215d70018a328453d6057785286de89b5a4e234ba666f3ee26fa5d983cb9fe788444285878e1ad309953c855196f"
+    },
+    {
+      "round": 17,
+      "randomness": "6438b9b6aa082eab6cc6ff379a77ecca69644a976952d164ae0c60c3a5e1a9f0",
+      "signature": "94f9c7253eea975717e393d19ea1f81024395cca164b030f93e5251b47b6cbf6fbe70a30e624292eca6272943ee303cd"
+    },
+    {
+      "round": 18,
+      "randomness": "b7336f940830dc27762fe3f743970978d50346abb7e26f237cf6f09edb6dcda8",
+      "signature": "88e20c8d52a5fa0815053ece43dd9d3685efd187fc331d245ff2944db99d3b61757c4ffa885ec75f786b8b50f739656a"
+    },
+    {
+      "round": 19,
+      "randomness": "80f3b884332d055a55269c38968655706ce08dc1657729b7e0ad57ea9170a4fd",
+      "signature": "af33571b51187128438da7ddab633babd3af652adb92b8f46e7385ea9849497847301ecc0b7891e52b024ceaaef5eea9"
+    },
+    {
+      "round": 20,
+      "randomness": "1fb592cb3542c9e46da33233bfd8c795369abd7bf89a40838e86c505bee1a707",
+      "signature": "8a7aea2fcfbc93b12387f194c5717cd51d295c2b0ff9a6af2ace47b55c210146008b78dff4d21e40f5a25457f2f3739d"
+    },
+    {
+      "round": 21,
+      "randomness": "72061c5d4870a86ae81f3c85a86df4255cb6efa73a7ad00566188bcd2d61ecb9",
+      "signature": "a69348ee7877b70ceb54be7d92f38a396afcd02fe82c4b4ea7b972442f3862531c4e21ff0141ad344ded2a67548d96b6"
+    },
+    {
+      "round": 22,
+      "randomness": "a40cad81e8ca51e6b8fe7ace2eba480715d9be81296d9a811b08549d749b5629",
+      "signature": "a7ad8a7fe9ead89968a0a5ab34374e948a33dd20f1b2ffba7659896a1ef151864be0efb93a3f8dec21284c7a14477296"
+    },
+    {
+      "round": 23,
+      "randomness": "4edb495528f42f43f87cbe32098c2ea1b2a02f4b2df5106ab359ed3802e56c05",
+      "signature": "834e67cab495278eefc16f206a3cf6995917cb7c788acad0f6a0ab50a37d26dd22a83c8d62fd2982600d8ba86639f5e3"
+    },
+    {
+      "round": 24,
+      "randomness": "9d55dd80254626c635f192595d4fac94324c1444044841dfadd3da31e149e722",
+      "signature": "aff273fc4b98c9a3b7fdbb0814ae42696eed9597a73802a29aaf3131ce80ed6433c8198b5e8067557728adf54bf69cbf"
+    },
+    {
+      "round": 25,
+      "randomness": "71daa42a3fc13cc3e3acc4721b500c9e2f34cd56c79bce4b722e05967ff79e7e",
+      "signature": "b37046ca23e6703cbb72d8b665cddcc5f24434a121e0dbcd6f9c05d31304bc02bbda292424dff733ffe862a16723aadd"
+    },
+    {
+      "round": 26,
+      "randomness": "e3e006f4ac6152f25b356b77664cf807b37c08ec5bc64370a7a6307ceacc6296",
+      "signature": "a25460ae0b9c58c0540f9a7884f27622d3da6551dbaf69ba055451ed05b9c86b107f51ba130ddfeee46fea60333d3387"
+    },
+    {
+      "round": 27,
+      "randomness": "0b890bb019128bb50b71f0a6cd15887851c1c292667b0d4d3e5c50691d875754",
+      "signature": "a4c3f95e5eccae8dbc60f1ab5f4e3b3285dd532ec4638df13d40c7c846ec91121b204c3b0e54a74503bbb2504547c50d"
+    },
+    {
+      "round": 28,
+      "randomness": "1158d5ba126c707d9af188c868f67c0fe5efae82508c7734e07056bf866f5256",
+      "signature": "ae750eca431005ff864793ff0a6086bb80fddb8d9ff9518d79e2f81b1a41b6180900a19d233cbb910b1d186643bf920c"
+    },
+    {
+      "round": 29,
+      "randomness": "e81308b8728752ceb7d622ea4e138c7f2510c0dacd5db48ea69e41b7bc1c0bde",
+      "signature": "8e146c5e52b70c60b8f02ce8c2e78f042bcb68e2c155f95b73a5b03034e1d25896c984be97dc95630dff4b211d251da1"
+    },
+    {
+      "round": 30,
+      "randomness": "a4c75f683d35e33aa787720c9922dd26fd552ccd43850d3ce37c59ac1e2df68f",
+      "signature": "99180d69c5d8f4905e24b68aca935b085fcb35e8f22a72fa88cc40754c90799c14da643471aeb389abd2be693c575dce"
+    },
+    {
+      "round": 31,
+      "randomness": "40c07a86718ab3448755e17dc1b279588b9eaac498dcd71fbe6dcc08d4f55523",
+      "signature": "95afd349174851f06f3324411c0c34eea96107ef2a7b3219ef7eb8ecad3baf3bffec407f49314264259cf4a405209995"
+    },
+    {
+      "round": 32,
+      "randomness": "864f23ab97e0dbce190fbad2751964bba969f29d5dc08eea6c4a64dec53e4e6d",
+      "signature": "b4fc552318aa4b9ae7b957f300067bfb072548231c1eff21587d309c21cceff12ec7e18f85beaea8e5009ba328561255"
+    },
+    {
+      "round": 33,
+      "randomness": "c3e8e9ae06d031d48a7f8324436618467405703dc9504b780030e31d9e948ca8",
+      "signature": "97caa9c04c4116a5118f3adb420cb9925f9e6612542616989d807612a5809980d0fb4f5853d43e08c9ad571af9649fb3"
+    },
+    {
+      "round": 34,
+      "randomness": "289fb5f08e4d32b99f1103c972d54507e2f914458c45b709d78bfe5ef5db8d2c",
+      "signature": "8824530fd71f78bfe0997bb1164d335ff7bb0f9d3df209674947ba076c9fb13c1d2cfd7fb75f3624ae76e5207bd2f127"
+    },
+    {
+      "round": 35,
+      "randomness": "6245d49acd18a86fc8c9bcbfd3d35128c364f3893b22679600dd556ce05f22e5",
+      "signature": "8d55ba9999f2eeb8a3bb8022fc3e85d7f97ee00d81a96246741bce66b306677251a160185d62c3fe132245e758acc816"
+    },
+    {
+      "round": 36,
+      "randomness": "6afb61e4fa5637d9a62dee6a964e850ceae629689d45a7bfe55adbc66dd63067",
+      "signature": "b0b51aa9fa1a866feae03168b57ee8247aa85a7b0a0b6a905e48bd1d75856d33f26f812d0cd4665ec89b20d937fc56e0"
+    },
+    {
+      "round": 37,
+      "randomness": "16e853049c54ed9dcdbc4b7784903e5bf7fe5aae4e81dfc3ede50776b6507264",
+      "signature": "94b9cf9ed5911b212973a12a2a4f4ea6479be129369a6a88857374413b8ed5432d5b120c02973c6d92c3be28a17ffb57"
+    },
+    {
+      "round": 38,
+      "randomness": "37ec59a9e8394e94d5292a6f5d0c36463c7bb606fcfde8b83e4b80526e6c80bd",
+      "signature": "8e8702a6fe0491515b02576cb1845a8575687b4c482fd89f3dd32c5dfbfa405f35fecc9028abadd5e18404fdf56d33b9"
+    },
+    {
+      "round": 39,
+      "randomness": "bfe76d3dacc6f57a4c84fb6c41e01cd28a9d691834fc20faaebf0148837e85e2",
+      "signature": "a79aa384fedc25a8664dfa2a6f21e91d8e7d440dbf9d667cc3dafdb6e1cd1d5a4ad809f4d0e0c6379467599e36a16dde"
+    },
+    {
+      "round": 40,
+      "randomness": "35ba79deb80f26b0c690a07dc425c9894178c07c57d506e97b03be82cfd5fd81",
+      "signature": "aa9fe48558baaa3371dd37f8b77419141487bdd17e37dd9c78dacefa6c668bbd018dd12980b49fed55f814166d3ab6fe"
+    },
+    {
+      "round": 41,
+      "randomness": "39464d29d2b5445ff44758ab6ffe5f43a9f05d56805484c3324cd7b71f3093a3",
+      "signature": "a055a36923794420f747e075066c4ab48d6629d248c5efb2790308b4e65757f6ab2a338e397b29ef230aa5a203a7feed"
+    },
+    {
+      "round": 42,
+      "randomness": "8ada64bae5c6c0f5540a6a13af56e663240edfbd2c76ac6a8f27671eb7259ce3",
+      "signature": "95a9f9f5b231b7714de1553105d8ffdf3dcda24cfdb1e689319bccf79a9c8ce430a91b811fbfaf763900bc998b5d686a"
+    },
+    {
+      "round": 43,
+      "randomness": "c8f7c61c7024f8b45ffbf5be58b1f112a26be93c26f5461af9f8522233705dbb",
+      "signature": "a96a579010b3d2261959104b29b5b46685b3a6b6f6aae7304ef72d44fe7d44e667bcdd500935d7deb58a2b4d89419ea6"
+    },
+    {
+      "round": 44,
+      "randomness": "61fb54be0f4ef74bff6e7a2f1d17bf3ecd439a53ba1ff60f682eed4254136bab",
+      "signature": "89c5699a2511f6125551980122fc9ca34fd2ee5a3ec3f57c259e47d60c23f7072f3a573c358eb10581df636248e05392"
+    },
+    {
+      "round": 45,
+      "randomness": "cc80e22034fa04ce2376581632cefee9edf215bbbf26d9429c9b476c5e50d617",
+      "signature": "b1723254710cb972314b7a24ee4abefbdf2179cc323897dceca293011aa30c5830954d3e7a750c3dd1d6de26d9fcb1d2"
+    },
+    {
+      "round": 46,
+      "randomness": "fbfc91ad10cb29e1f93054500a318b6a5387fafacd09e6b87fc362ecbd07fad3",
+      "signature": "a260bea4a2255c88ee4447aa7b16325f95fbf82f03247782a6a71fd9aa5e1d2172caeefec561dd6c593fd0e24decd2b3"
+    },
+    {
+      "round": 47,
+      "randomness": "357d3f02b25cf1bc5dfd9ab5760b3808d1f8414dad3303278d7ace9514bee3ec",
+      "signature": "87ae19b9974dca5b81a73d0bc2eef59fc6376712c15800b352c7e0ba1d301097a2f9ca6b27874f5a5678cc8a764a8d0d"
+    },
+    {
+      "round": 48,
+      "randomness": "ee5f199fd21fa1bdef6603dba8a38ee4e15f68507c793137fe4aeeee5d5c4f47",
+      "signature": "982869102f510f1fc0b8e2de1d9a74589eb7583a192781c895103d485c7b8445e1315cff95f5425cb3920d1111f1989e"
+    },
+    {
+      "round": 49,
+      "randomness": "afe22e38cea65cce97fe3924841418d86f7fba7aaec24f6f10ae54c2a9b7e24f",
+      "signature": "a488f8152c6bfcdd585bd89f33e489d5180d377b593a3befe6aee004aa40317648da08d25bb78859577edc630a326052"
+    },
+    {
+      "round": 50,
+      "randomness": "2d3752d95eb5bd4f3105a4846ce8c25e52d909eb1f3af7315ad8100c1481dd9d",
+      "signature": "8cf091f0d52cbe82469f79fed4b4b6a5280dc338024ebc20ef1eae6d40798ee39dcea6a75f2dee4d06b09f0788f24f6a"
+    },
+    {
+      "round": 51,
+      "randomness": "0cc76050dfb88cbcc9cd7a0e9005c64fc283b894a7959bd511d82a6d7828da95",
+      "signature": "a8763fad709d03c7fbb4806dcd61a6c5eadd53715f4c69c057cbf0781b25355a6386efb060d1124632ab41c7439110fe"
+    },
+    {
+      "round": 52,
+      "randomness": "ca8cf00b6d59c65daab2bb52d916766180c748c6ef11e454f8c1674ee0fdd752",
+      "signature": "80a4c2c06895603f86165cbb5c59a3e31bf5aea97799415691176e9b07c99214560130eed599f6b412bd5a684fc17628"
+    },
+    {
+      "round": 53,
+      "randomness": "83b256d0b5069f2a09b4d431b010283e26bf36a875091be16680f26d4c99dba0",
+      "signature": "89bbad9163dc5f0e2ea6c7560c5d6cbf2a929183ba4751af180345f74b7d4232de5983a82950d10aa86735553b9877e2"
+    },
+    {
+      "round": 54,
+      "randomness": "7b51b2d3712fd34df83ebe48a4bf2f858ed4b817068801ac9065c811d3b6444b",
+      "signature": "93e691cfdd7e027301b0815a9a3292c3893abb79d7d915a1c2e5a329772b4046e8221f96f71994c692a032156d697a55"
+    },
+    {
+      "round": 55,
+      "randomness": "6c5c6b72c2e451b4a34f30cb278a33d2f5e87c49959725ea85549e8bbbb40183",
+      "signature": "84cbecd5d95b2efb47668d7f35a2515f366737e1ed9dd8fa2950a8d7bf76d8c605106584ad29401107282b43c80e6d50"
+    },
+    {
+      "round": 56,
+      "randomness": "70da9905e3805b24730c6e6a09994fca4ad44691601757cae232fad9e7155def",
+      "signature": "b610d3f120f1c219e7b6bbe1e40368197977765a323627a81cb5cea91c3bcebc75e34ddf737c7e44b4c9ec2d3b7e467f"
+    },
+    {
+      "round": 57,
+      "randomness": "d30ccf36a8a390ecf1a2351f8e58cac99c3f06a79e151a8a47b57eca88e5f418",
+      "signature": "a28731239b137bb6700239a60dc7cbdde775ff389ba78712dc6af9f0fd0b07a328c61b683c248dd1ac178bf74f3422e4"
+    },
+    {
+      "round": 58,
+      "randomness": "332624168cf851e60405b713f6f78a0e6c2d5f1ed97e845e799b7348e4ed2dc0",
+      "signature": "8bde4953e6480ffbc5785c2ad777434dc2e3fae7de247ec8ed7a7e0131a9141ea7ebb8f285247261f3458fcf48deb273"
+    },
+    {
+      "round": 59,
+      "randomness": "942bc1aa91ddf83e4a41507c8eeef7df27e70af479e6a24ce9f96f289577ba31",
+      "signature": "ab0128e636cfd6615bd46151a35fa05a128e4aeba77756d0f212d3e12e29c0c0947fcf54f96ef7eb658f244fd409d228"
+    },
+    {
+      "round": 60,
+      "randomness": "22d4830ce7d8851b8ff458fef8a9e6f4cf9e48fc3e1f9cbdc184effb669f2bb6",
+      "signature": "83e59da7eabb34dd8caff2a6ac8a1c47c9a0a7a31b427cc788948d4307ec17c511684fe134fb05b0ace6b56fd663683e"
+    },
+    {
+      "round": 61,
+      "randomness": "b978879e4292234c32097a1aa3f9bd9716cb0f0484953e3e12977167740d0918",
+      "signature": "86fa8410def3cd5fbd663c60930a59b851d0164f1354f2a5dd0e5605c2f03367e7bf173582626459ec06496cfad6b73b"
+    },
+    {
+      "round": 62,
+      "randomness": "e67b37cb56eee64f0e3eb652ba0dd90541f09405a09275d3b28374e637008ab0",
+      "signature": "af7b54646815f7fd5ef3cff68f482bd09a147af469638051d0f390dce288a12430a03521745427e2b5db9ab0e0bdd18f"
+    },
+    {
+      "round": 63,
+      "randomness": "e449c5f332fedc7364b95c4d64846eb7a96f8621f0d020dc2ce2c1b15fbd5ada",
+      "signature": "b9035e6ee8d63d5caa33f011596cc698d9e431a1a16b302323538e91fe448c8e4ce512f6fe918a001b2aa451c680205a"
+    },
+    {
+      "round": 64,
+      "randomness": "252417a15be67c91751f025cbbf42fdf75495f055e5a7a7b1313e6106d4c4ebc",
+      "signature": "b51f1f57134bbe17c34c7e097a90ee3150e2280778ca9f2d626b4121151be01bc770fc189766e3a3510268560f0d5b14"
+    },
+    {
+      "round": 65,
+      "randomness": "24661aa1525e7a7d5e9be3e4f03be2d48bffa923a189e2e80b93e161798a72c2",
+      "signature": "b98c4d72c35aa10dc291319a2a7ecbfb147de4011d86d29443ca0f46ee299533f4d1cef6c19738fab8972503b0e54c24"
+    },
+    {
+      "round": 66,
+      "randomness": "50d54972b5c69918ad32bd6359dddf41190bf399478de3d215bfc868f38ae190",
+      "signature": "a2426e81f9dd9dff2fcb7c7463159c177c6b8862832b4366b879e0afd05b3df5bc9cf8740593d4610aaa3d28467c0451"
+    },
+    {
+      "round": 67,
+      "randomness": "a6294a17be7acccecddd9757bd59be48f4bc5dc944328ba1db7b06febaca2c11",
+      "signature": "8a5e6a60b0be2adc46d31a12618cb9bb0584aa90751e7e575582f080dfdb430edf5af11411fe30a786c75c234a67c71e"
+    },
+    {
+      "round": 68,
+      "randomness": "fc22c4400b17dde638ca8b6fad4c695bbab5d1ddacadcd6034075ab62328e71b",
+      "signature": "a1a819968d9573a4257291c303df97a1962157ea35d8db75c37cb30f2ba09025ec6595ea9bcd74dd95753e4c573f9f3b"
+    },
+    {
+      "round": 69,
+      "randomness": "99f8ab8cb49cfed3da4e189f84c75ed8678d82468a3c3ce9b4c8cfa9b3c20d24",
+      "signature": "a1d3c49c0d858a91a7b26239e3d8170a5c2853cc7bf8cd5a3f0a75d567951ab6297f7dff7ba626f1ac0ddd4474d0cb70"
+    },
+    {
+      "round": 70,
+      "randomness": "19e0c1f6bbdd8dd07a538ed8bcd795825e3b7070cd3c370b02131ceff6826fc6",
+      "signature": "b389949df02345256560532d2b05bcead0d2b997e90498a4963ca2084fe15047cc759b7b27110301a4551561d99a3dcd"
+    },
+    {
+      "round": 71,
+      "randomness": "0d07bc177b7860f1c19d2922e049268f1e76ba6ae07e921d27c1be64e7816b22",
+      "signature": "a54d0442fcdb8c7a9bc88dcac8d9e74dc022de6327c5fd2721dc2edd506faa9c37a791a344e00ad7361e77c1e1d713ff"
+    },
+    {
+      "round": 72,
+      "randomness": "27913455c539667b592fd6c7c5dac7362ccfe8f1e8188c6e63ff6a6479ea8938",
+      "signature": "8234f8f3e363498cd00450f68589856be0bdd0d684083fa1a03e1e2d2451bb7d2234ab0ce5ce988657db9665060b5c5b"
+    },
+    {
+      "round": 73,
+      "randomness": "7ab347778ca14f4a6a1786e2eabbdae294a33f57c8acc2697727918e60f3779c",
+      "signature": "92722d330e90709acb4d896d9326f50b11b698630078df1a68011b70b95d1c46b87d78dbfa33629f6a1f2d9c0341879b"
+    },
+    {
+      "round": 74,
+      "randomness": "13a091b07f257da926b027d19a304566b7027f7ddc683d9b9b8a2cfba7439b0a",
+      "signature": "a07a13adb5b093090ba44e8adbefe9fbac782c77df15b900fa7334a9e6d582030e3d4f50eff28372ce798d469960df9b"
+    },
+    {
+      "round": 75,
+      "randomness": "ed65952fcb977993c6c7ecd69c13e6a9689c46ee35ef00bd09358e081c0fd67b",
+      "signature": "8f5a494727505657c63f3e828ab75a5a55ef3de0f03e5643dc7d77aa7136b37a14c2fa408d7d9fa19cd059faedd4bb7e"
+    },
+    {
+      "round": 76,
+      "randomness": "8427b4a289403eae07255cbfec2270d70d7838cb8bc3869a8d29df88d66220a1",
+      "signature": "a009068164197b6ca027f0c799383800f36c3451a0632ce06fa68372d58327dbbda5a88b362482e8e49a3d6f1cc8acc5"
+    },
+    {
+      "round": 77,
+      "randomness": "c0e644a52e5b7460e87622411a8b7b7840e22fc2101823b3f69b4f29f00b7811",
+      "signature": "b3c1dce777d098dd5951a8e37fa5ed5c85d6bc90710cbb309430b1b1d87042a8d915f6185a1a83f7ea012451b0a848a5"
+    },
+    {
+      "round": 78,
+      "randomness": "ac5a8e8a5d9c5b076e563958d83099cdfe6eee6326cabc7b8cdc05f4cebdb849",
+      "signature": "85a232eac95a019640701d176b7ccf30171f680c9e9e1527d30e86634584ea646682ea012b31282cb2dd28f689f49977"
+    },
+    {
+      "round": 79,
+      "randomness": "569434225c0603d86d2096136923e4df65b8e80fc60d88c7b1604944f69e177a",
+      "signature": "87d19d4a687e48c513740c587f8c64d331b0a8e4f7def1ef20b0bf34bbe404f4b9d8c40cece2aff7062963c31a0ab104"
+    },
+    {
+      "round": 80,
+      "randomness": "ada205c2a4d270a4df5934da6e5fb805fae0aa81e7a7f9e13da8538e804646bb",
+      "signature": "a3ffb615585fb76bfe98c62fb710172cd3c3911837c9c306179a9cb05ea7222d871db521fabdd627da1768d4bb6d8cc8"
+    },
+    {
+      "round": 81,
+      "randomness": "9c5447999d3bf4fa5200e578f70a62609ae52f7123fade5baee021dee0f10c6e",
+      "signature": "b28542519d37b61e19063a278bc17fc4a95dcd1f9c0f3a7c41e41a230de291c003dd0f5dee1f02a6673c549b66ecf73c"
+    },
+    {
+      "round": 82,
+      "randomness": "9f769b61eb7731f7356174db829aa6c35e1f8a96441579a8afaa6e5b21b1ec51",
+      "signature": "acfde8cd31a3fb9e56f2687446a98f4b6a3e6e983ce877494fa06a9d09f684ba053ae3c52040c4da6bd2940168ce75f7"
+    },
+    {
+      "round": 83,
+      "randomness": "d8fd25103f222f267f036eaa94b69d4263245ca583e0a4594d33ff32597d0810",
+      "signature": "a8ae5257467d175cee546505e8f76e75c603d1d88ca94a7426b7207e001e810149e2830f8e7f334077f1337b81d0effb"
+    },
+    {
+      "round": 84,
+      "randomness": "d30cc64427a7f3ce6f2c8befaf53b4f55950881774557d0b50daae7b085cafa6",
+      "signature": "b0926327873da7eb0591e73b8286c51a943f7a456d4ff7ef669041622a2350b916b266b196ba6f5d974d6afb1fd5b9d5"
+    },
+    {
+      "round": 85,
+      "randomness": "d4cf0b3d30980fa8f2b6a169d84151f58a9fff93bd06d395a650830bca9e5423",
+      "signature": "93a16ad17972c2d223ae9e24dcc36309e17fb4fdf6121975305e1f4d40c055cf9df06b7bf5ccb34421ea5afa244e60ee"
+    },
+    {
+      "round": 86,
+      "randomness": "d01481ab8dc3c82fc8b4f4bb9934fd8cd79139dc3503f4a1942427c51c7a5a41",
+      "signature": "b80023672f2386aa54f8d42376df90b77bf587b7c0786eaff7a8f5aae5d3d71bfdc2b7b3d99cac15e38d22927910cc7a"
+    },
+    {
+      "round": 87,
+      "randomness": "b51df62691eba96892d8800c8d84f9f2b4de2cee0b40cf027095f5a8f20db317",
+      "signature": "98920e31ad35f0ca14c49e341ae75eb02f31cbf220f8f583c18aabd6d0e5e92fe264074c1be9cc6e64316c90a2a9c00e"
+    },
+    {
+      "round": 88,
+      "randomness": "7cc92b7c2de593d915c4843655cb084bfecc658791f07c617b9edc1eb4ec2354",
+      "signature": "84bbe044fa621a7e8d1a3f28de6a5bca699bcf5529cbbfc4c00f3722ea65b62ba5c943c6fddc9e62c03dffd87c5cbab1"
+    },
+    {
+      "round": 89,
+      "randomness": "74769c8b5115866227f91242c7c64aa31479b2fd89e3ac9254d910939e700fcc",
+      "signature": "b7fb486f7dcd80e7a565a8dcaf37c855fa082d18c745dd8f7d1d60cac3c0dca0bc546891f5cabddc7441d752e53ac9e7"
+    },
+    {
+      "round": 90,
+      "randomness": "a461721597964ef7a6b7394d7727060b25ecdfef9ab872db56b16d83f2e1f30c",
+      "signature": "b4546cb43182cd51f98532b88e6554f537de5634e553ef1f813572bbe31cc2a437eb797d2001d33cfc1142526d80c4c5"
+    },
+    {
+      "round": 91,
+      "randomness": "bfd978f4e836e5d8398c4262c870a9042978c11731b2e0557d583f36289c0d6b",
+      "signature": "a7b178d5ec4a86b3e7ee809e115ece54a7b350bf0a1e37fcd3c3193b6224c229ce915b70c1cc707a6b3e5f7dde238ab4"
+    },
+    {
+      "round": 92,
+      "randomness": "861d745b53a91522764776fe9c84136ec8688488cbab3da07a377f53e3637c7e",
+      "signature": "872ca7b366783510a582b6516a036c9cacafa0145d9124bf2c3d61c7c9215c19aced02c57f3d8d364859a49d01b51175"
+    },
+    {
+      "round": 93,
+      "randomness": "30666ac8c16aabe7011f231dd43a8297efec684a8d00b61679b147875304104e",
+      "signature": "95ce91e9b64eac1513eb18d7a30779aea6782b04e633e3ada4761ad7d3a8716b4f5544f901d8d00dbd5b961f5e3a4891"
+    },
+    {
+      "round": 94,
+      "randomness": "0677844d7900666db8ed532fa4841b8cc44148c85590456d8c8461ab52cdb309",
+      "signature": "82c272ff73da877bc6312b8da908a946817d8ace44dda5e56e5da1226ecd64afc18034eed58f12186395ae07422c3042"
+    },
+    {
+      "round": 95,
+      "randomness": "df56c2f952d733d6246b647624841a43f5d2a6f1c1b27f08c75a80fc2af71560",
+      "signature": "8d40a656434b81765b2d79bd7ba74bbf2cfe76a73cb9eb9d7ed2989d4ce4e375c372d611345d86d8509aa7dbcbeeebb4"
+    },
+    {
+      "round": 96,
+      "randomness": "f885b5483962b95bf7abe7536163a2b72e300d835c67af65ad32e0673d794cba",
+      "signature": "985f5b6033e73abd7631e810e0e8f5b19de2061da4e29110cd95f3358cce935df0b3b121478fa81bd3610ffb30de756c"
+    },
+    {
+      "round": 97,
+      "randomness": "c41378704485741fec5aa1bb4bb8902b5c77f4604365c6d261ba03aaf4c45ba6",
+      "signature": "93ed87ef291cb2f08a0be8fd94f2fd08ad64bdbc41202d9fd3a5e3724df8645863c49c648288123fe04dcb8947c59183"
+    },
+    {
+      "round": 98,
+      "randomness": "ebee2b437e92f41db22df491b0d72988e9f89e85b90364bc5f42cddb39fc9daf",
+      "signature": "b01acaa973a86ddf95126754e4f258efbfa30ca3ea97ad7f8fd0b61d9e2c67b7e29df0d1d923f6c3ab1695a11181e607"
+    },
+    {
+      "round": 99,
+      "randomness": "9b4d31df56203fb514f38f3129e607cfc8b11302e1aedfc43b455a4aa3a098a0",
+      "signature": "8d864568ad1ec5fdffc0e957c9e7e0d90f673d15512f328b21dc81e52bce25f527d25c2ad63352eb1304aa8eb2d03a91"
+    },
+    {
+      "round": 100,
+      "randomness": "79fe5b8fa2e43dd58852099a422e4653e470910b8e65e592caf23fcfd8d0642c",
+      "signature": "a4a4ff2320c23471a4bf9540ee5fc68e4c6a750dc89fd8bbeb9ba56e0708673b2d285461388f14537332492726efd282"
+    },
+    {
+      "round": 101,
+      "randomness": "966d0eee13f38469fa8a5f8d06f1d9c4cc65c96d18730510109b681f4c0296f0",
+      "signature": "8e4812d08192220e1f7822bae97d7a2f196c73c421927c28d39257b3792b986674e4395323c78dc2a93041e3fc1eaa22"
+    },
+    {
+      "round": 102,
+      "randomness": "675ef16f9209ccb41d7f12d11846625776f0bb8ad1044becdc95388751051356",
+      "signature": "b4702c33246ca375d26f0b738c204c7d2100b5fb85d6e64025c381e4eba474604e8bc3babf1876b9b5e3e6c65a899ac4"
+    },
+    {
+      "round": 103,
+      "randomness": "40a2610b155ad1a28222a1a1f42a2ff4f9f7dccba6a863db88a7939f06267ec7",
+      "signature": "886435ce9394051cf9d2452a10cee837e2951fb3b6765fee86900c51d4b91c56cc310c0de7bb25b5e276c6770de3c2b1"
+    },
+    {
+      "round": 104,
+      "randomness": "8acad8523a9cb561b4d9f454859bb5c4b581d7736229e2a84a2ec7bd3a8c8113",
+      "signature": "84ccc1690d07b606768313c315cfaf38b0e12160d9a263816c78ed2ef14d6352a2ee0a51cae8d639934062c5c5ca9026"
+    },
+    {
+      "round": 105,
+      "randomness": "9b31d5ddde8d294bf231e9aa95d9778eccdf50a78b09d4cf3adb42e5fa8836ec",
+      "signature": "93f22a71647b8c860f12f447b44cdd9c816feec7751afb2250218ce8c93dd57197be891685937ae8810bb85cdb12cff5"
+    },
+    {
+      "round": 106,
+      "randomness": "6baaf38124885fb79f4921f3ca204805cea30ee3ad7292a905a30370288d469e",
+      "signature": "a759ce33b3fcb683b6c877337a1d5434e51aabbac9410a56016a192db13e24afc934cb729940f2084cfae88b1f05f936"
+    },
+    {
+      "round": 107,
+      "randomness": "33403da4cbe3c1e25498fa1f1b9873164a60d2522686f4a64c6b886c04d690f5",
+      "signature": "85f180bc48675feeba256961b940f30f9159eb16746b83d6c00caaff76bd8420b2d28e8cd0150da11683e76890275528"
+    },
+    {
+      "round": 108,
+      "randomness": "c8b25a718f11e060378abe2cf9ba3def60d9c7d0db6a1cbbae8564e83f4a466e",
+      "signature": "aa774468215644c283709b5732c7f7a018b9acddc0649e320565fc3fa1e069a06463721565e86e9ef0a670238b1462ac"
+    },
+    {
+      "round": 109,
+      "randomness": "377432924ca46665197ce4cd713fe2e48bbdfe7fd2d6e9689c5990e2c715a7d6",
+      "signature": "9831a57217e03fa52754a9552b7845167aa8952abcf44dc71b9b864745d11181bc085626cdde0bac632e3ac995f24497"
+    },
+    {
+      "round": 110,
+      "randomness": "fe7d8b588f899d8f6032330b4e5c7fe21dc4577605dadc854253b036c71c0f3e",
+      "signature": "a3c352f4a97b771e7edd347fcaf2562627786e1380d3719f34740f7f07b33a8d2270c22fb1e558cb8af4481b6ea4cb50"
+    },
+    {
+      "round": 111,
+      "randomness": "43a894d4a9eabbb5b1cf84665dbf5cb49aa36b4410c3a2d3a0f0c1b1070da886",
+      "signature": "85ff21f037af565e27333d5f95a742eb57eab0f85775c9c278cc54fb535cc9a3d7e00cc2413b9cbca9c630d03dfa8a9d"
+    },
+    {
+      "round": 112,
+      "randomness": "26482088a7a0f8222fcb0ef7f74cf4b8874268776f5fa47d173c5e5249e07ff4",
+      "signature": "b5827c81798ac2a3dfecd81959708ad79dec2c192466e2eedcefdc48e06c065b05ce10559d34eeb2559cb86392210f9e"
+    },
+    {
+      "round": 113,
+      "randomness": "5203aa9807f64715a28ad6a1f27e87975a0f3bb969f5ea4ff64d11d26bbf5ee6",
+      "signature": "841de670e0e6698c1211b361efc96e4085c44d3fbb00e9fe8ed4c6fa2ec3e8381675540ccdca312b36ad7ecfe0464321"
+    },
+    {
+      "round": 114,
+      "randomness": "dbc1bfef77aac2e121a279eb5e68e7e415c504decb04330f13913b2222ae0129",
+      "signature": "a18b74ffbeb133addafc02239a0676c536918c1685ed3dfdf8cffc8ef81537f02c013e9b6149b2fe408252202245a971"
+    },
+    {
+      "round": 115,
+      "randomness": "89acc35315e5a799222318c6d19d84d3f241820a7b94bf987d4d0f4a07a252c0",
+      "signature": "92d0edf5ad49f95f6e7f6a151759c7a985d982d2e4b080240c9ecd3278cc6cbdaa4d2d6bfaa61bd01c6091b8ba977372"
+    },
+    {
+      "round": 116,
+      "randomness": "4f48d5caf3c1e962125dfd789df2e379c1a2ba7e91b2cf9177f76d7a91a6d0b8",
+      "signature": "924c193642cae11c781fe8da545b17b5c246d32164c8de0eaabd9233100f7f62e3d04240c7ac0a6ebb9568c471747d93"
+    },
+    {
+      "round": 117,
+      "randomness": "3503fe9cf5499691abe2ad22d5a7e84e25888602a3dc1bf8a5732688b27b4026",
+      "signature": "989a1c925a8db8636ddf96f3879b078ef8ff8a8777f81f07bb25292c3bbff2c27eb6c21bc248070836be318dc8a6a84b"
+    },
+    {
+      "round": 118,
+      "randomness": "db028f2deea442e3d564496224a15354d3b14e8c381a3038fdd39b06b7dc3c51",
+      "signature": "b50c282afdad1dc4d15448627d6147a0ddf90ff0cb680c397f54b8f4bfd4540f60c6aa883c4b65a43d3d1129ac963af2"
+    },
+    {
+      "round": 119,
+      "randomness": "f94d49b1254a807df945bd9e58096caccbac2cc0652be6cc8d6b9ee5f6506369",
+      "signature": "ac5d57dad42a2e8475ad97bc3f50d0c63b3fd57633b5f658866ea7f684acc01484ef8edd0fedde8ec85e06d99b121497"
+    },
+    {
+      "round": 120,
+      "randomness": "8f095f861a713f11238dd0f33cfab7234351e1be23762e1e66d221002af8e3a3",
+      "signature": "87bd8d063b2e519d2a1c6ea04f635def858461bd7d74dbc217ad25c61deb4d8ba38c892f2e3a0536e8e5f91f8dfd1dc2"
+    },
+    {
+      "round": 121,
+      "randomness": "9f041d26fd999c82fabf50a22fc7e0be9b068623df1c00d7c8849cdf5da6d25f",
+      "signature": "add0b70bf54c5dacfc7289994e085c3a635442f524088b1734c908a4278b2567188d8fa569752d9b4d68e2ccd0e023bd"
+    },
+    {
+      "round": 122,
+      "randomness": "65c551da3d5ba5d2bd9a871a082bee65707030176ca9a8aeb5eb7e317a0383e2",
+      "signature": "af5a7bbab526fe7c1d5d4d22845a4591db87b568fe22628f97bf3bfb7bbe37d13d835bc3806835503d98b3eb4ed9bb0d"
+    },
+    {
+      "round": 123,
+      "randomness": "fb8f7bc29bf24db51871ec8c79f3a1e4bd0557bc0dfcee9ed1d924e69d1c60dc",
+      "signature": "b75c69d0b72a5d906e854e808ba7e2accb1542ac355ae486d591aa9d43765482e26cd02df835d3546d23c4b13e0dfc92"
+    },
+    {
+      "round": 124,
+      "randomness": "c33fcb835bfe816f524ced7b8b1b30a2087ba248fb8779cfe0d0232c5a918907",
+      "signature": "ae7daf097d692438d5acb7689827632c826ad78018a4daa67395973afe6bd274003c49c4b5f3390dde10ff3bb98d6609"
+    },
+    {
+      "round": 125,
+      "randomness": "63fa2fdab0388f1c530b6e67761f31ddd6a31911695eb4caf15baad249d37099",
+      "signature": "a9bec90d9b7c61f305492d9b3a5eccfbfa7e1edb3fefc02fc64588942132df219e49bc78d59232f1b2cc26f38430c92f"
+    },
+    {
+      "round": 126,
+      "randomness": "dd7d718689318f3dd1ffd1cb6c169777c090779d64ef27125f73c20069929c6b",
+      "signature": "8fe536df624578f70778bcbc43133ffd65cdc9ee35d8e795fc534ccdabc758dd0b8a08864625f6381a3bcfced419d277"
+    },
+    {
+      "round": 127,
+      "randomness": "aadf7b4c48e4222843cf8bba65c765f56770be5c009edd4891137e5b891ca470",
+      "signature": "a3259d8093013418e5752f90055b8e03747bbb2775feb2c7809ddf0ff950b89f4930af3269388e492149d98e37c994ed"
+    },
+    {
+      "round": 128,
+      "randomness": "b448ed660e35bcbf11c8a3f2ee8e805b6dbb20e817ace055bacbfce78f658a26",
+      "signature": "83783c94f8000028fa31f4578b9980255afbf088406ce2e9d452247305c00e921bd480d6c0bcbd3576ff11f14722cf6c"
+    },
+    {
+      "round": 129,
+      "randomness": "faf0c8652ea5dce5af5d1de488ae5aedf49037c34391eb19ba102602463bccb5",
+      "signature": "b7a3cece1065c2601636463c9307012327a333490344eb5b287b0d45667b22283d5b85237c1e3eefc5a36dc1e1b38aa0"
+    },
+    {
+      "round": 130,
+      "randomness": "08982a3fd2d29c4d056b2fc895419dc49d966863dcbacf66d94a44b68b099885",
+      "signature": "a1dc8cc12512a3912867ce482158743666ece2fb2c141182d2bab14ef62036a8053b586ac9f543a46adbfd572fff142c"
+    },
+    {
+      "round": 131,
+      "randomness": "332e73035ff70657f81734ff4b4bdb768b9529716353bbfc6215fe3df7e0d873",
+      "signature": "a490c0fb9be8e943efa13613ab6f8e3fe252c3204e8176b08ec33c736faf939549d4e43a8208fda03ddf25f9d3b79b5a"
+    },
+    {
+      "round": 132,
+      "randomness": "88ac395d0aa1282763cc5411cd2ae1c580bdbde820c7212379ac4f18bcf8af85",
+      "signature": "902399434e9695087ff44106217528d5394f9a481ab098e50296280062623bb94dd1dc77658ef9bde271a7da43e60390"
+    },
+    {
+      "round": 133,
+      "randomness": "89046d115127166cd1e21a3d8038fed3603b3b03574f16856c9997d9308b49a2",
+      "signature": "b325b2e78660b52f06236e9401bf94f0b8a5925fb24c1c131b88d43f27d269292abfcba18656046e8d1cfb1fe869d120"
+    },
+    {
+      "round": 134,
+      "randomness": "6517821d9defbf04cff0c78ef8a232ea75e242ecc8b6e0db292e515bf7a35e7f",
+      "signature": "80d7c7ae48e0bdf7fcdf4343affca6027de94414e39b4a30d1a7f97b8c6e0030f37a719a33b2ea690ccd375b10e2ea36"
+    },
+    {
+      "round": 135,
+      "randomness": "70cd2ee47c225e1295a911ffb6ced7094c8a39f8c489f9dc7be21e9419cbb80f",
+      "signature": "b12c3b77a081cf85a5b7d60d22050f9c632ddbb6a61bc777419936b1fa06ea0f61820a2e91f80c1d652a896a5928350f"
+    },
+    {
+      "round": 136,
+      "randomness": "edf5453ccf3156eb079051cab95770150f14328288e8645678c3e58e793f2d84",
+      "signature": "916de7ce877c59e117c6788b6c6eec5b6a40fa730a8a998799e004993911c1d1d694ba3abd884de833db099060969efd"
+    },
+    {
+      "round": 137,
+      "randomness": "c0def361b8dd5d1bac13c5d5364b3b14d6a1861c71be6b8f5fabf87a2e18cc49",
+      "signature": "b6b1cd56ddd85f949e134d002d265a8b484b813f44f9bb12dabe765bd5a2173ce941c7ea52fbfe044c1773ad0f8a4408"
+    },
+    {
+      "round": 138,
+      "randomness": "29c9078cb4c1a0317be204961c4b6c3d85846b98821c387c69864f04e6705718",
+      "signature": "a0c56a9a0275e3f6fe7456f69d128f3b2eafa4257fe6188f9b7b34e05d7afebf7d396905f193edc9eb87fd9a8ba28f77"
+    },
+    {
+      "round": 139,
+      "randomness": "842f6890b23bd281d707c775dd5956d43e8375f88bd681a392bf740f4a24b9e6",
+      "signature": "9358b7dbd5cddaff4388ed2c35adf7bc43fbcf5367e22ed095823da5d96a0a7a12ca8a382899691d23cec8080b82b087"
+    },
+    {
+      "round": 140,
+      "randomness": "51e5d39198547f5d5c57519a099673be464e72ae11ff5a2ce44940a2e08b6ac0",
+      "signature": "addf989ad0ba1df4f4a3d67fe70176a8b1c5a14973c2734883b6e1fdbdbdedaf33dc95469334079a94fd3bdcfcf842ab"
+    },
+    {
+      "round": 141,
+      "randomness": "907e777e17d460b1791c06a2b5b0b82eabd76b502da5a48019d132c8f2592b23",
+      "signature": "ae8bc960a515363cf14ad4e8994c8553287a58e085d1ea5c1fa03098772ebbe3be22f1708f3a6dd04b7322d766db0133"
+    },
+    {
+      "round": 142,
+      "randomness": "263d9f67bf5978a3b2cc63293b8a78eaa25384ee357a68ca85ff116713a26e3d",
+      "signature": "b5c06c64bf7668a845c7875694dfa0997e20cd41a8710f8ff1c81a645c09d2210629672d9cf9afc3311146f49add0e20"
+    },
+    {
+      "round": 143,
+      "randomness": "c0e61c40f56327db204c5d7a9220e90a44b354043b2e0cc6360374981d5e25fa",
+      "signature": "99bd881de09e5ddb9571c64f62a12124caafbcc7b1e083ff4357c170eade810301981726045e1ce44f6f502e5e2a060b"
+    },
+    {
+      "round": 144,
+      "randomness": "3dd1d14b7149425023d6f0c15cb49bbae631b6d223598ddddc992924b704b2d5",
+      "signature": "a5dd97e7c16336d913ea7606bdf93e8a3e145d8eca47ef6fcff47c37a37669a436ad7d2316407edf3d31cd790a8c3874"
+    },
+    {
+      "round": 145,
+      "randomness": "6380491055e15c692dd0eb6fd185c41579942b3ced095372eca29a05c58e72a7",
+      "signature": "aa0ee9e539f1d7201d3adbda6dccc4ca425fd2e4864f4526d0c1dcc13e8fffa4f2afb8a3cf1d98cb0997dcd5ca93bfb6"
+    },
+    {
+      "round": 146,
+      "randomness": "18074aa85a1004b40b1a150b1f248f1452513c83342e7eb69775604749591fd3",
+      "signature": "a66672c2893b9e18f5941cc16fb6ba087cc4d8f98a7ed04e39ff6accc4a78a13153b59b0e45676ab1013ea2bd6d2d103"
+    },
+    {
+      "round": 147,
+      "randomness": "82fa3cb216ac2c86717ff6facee6087cc4c7d9f8a3f63d768437249882b84325",
+      "signature": "a56531566c82488555ddfe117471f7d72af10e0a55291839a932b91645e23b79b157650f22613801f3a2e5d22143d1b4"
+    },
+    {
+      "round": 148,
+      "randomness": "d8c84f1ee5b594dc242f94baab88487f63d9469da0158713e2dbf9a6b765f90f",
+      "signature": "93e42938b2053c3899b7ce98b3601964763a268394a8338794be253fd41ac64ce3bf810328ab4c15611390be4644692d"
+    },
+    {
+      "round": 149,
+      "randomness": "88f4c89c50f8ed1b9e9cb5345bdbd14fcde866db9b859bbddeeacf5cc4ed13a3",
+      "signature": "85566ea666a36128bd03c34f7ddfa396589e57f4f747878c9ad1da2480cff58cbd89437e1e79ef41f9ed9894c9858cee"
+    },
+    {
+      "round": 150,
+      "randomness": "58a3dbc3e5c30290249d50d996080acc5f23e49e278b9cdd90d29dccba6e6a08",
+      "signature": "a987ea3b91a03c457f85103a4658b933c7de7fc5a15a75968e528497a00caa66abe3ae7309f3c2338ba2c5c2352b725c"
+    },
+    {
+      "round": 151,
+      "randomness": "fa0a7b8bd88b6ce2a68f22150f832f1e2a823534e0971d332f2e1f5b7c817b2b",
+      "signature": "9583902c3e0e2ed868bc5388beca009a7c9457cbddd522d529fd4c62ee6e7fb770f2436447eb57472e57086445aa7ddb"
+    },
+    {
+      "round": 152,
+      "randomness": "f919c31f27f637e76bacac8ed83d3b47b657d0e01a9dd9939eac14ef78e8ca30",
+      "signature": "918d1f91b300db7ac84c86e63cc26a479c799991e1c89e16b87cf0c4f07a1411b8293dca9826bacf6f0e5d7357e1b00b"
+    },
+    {
+      "round": 153,
+      "randomness": "bbaf3b9f261aba6a78f0cc4eb37812459dadb950022514fcf55a6de75dc21e09",
+      "signature": "8bfada97bf5c738394df7b6d3b89fabfc18b002f993d95e93209c55c928ec8c35ee1efbfa0a0482e4018cf437e5df795"
+    },
+    {
+      "round": 154,
+      "randomness": "6c3ee866b0adbdfacdabaf922c923a53cf7218e28000143bed6d1bdf1c3fb673",
+      "signature": "8cfd153612cea89f2b2ebf53a1b2c44333a14790b983688473ef186620df90b6c0218fc6493fe3cb3a1562aa9645a683"
+    },
+    {
+      "round": 155,
+      "randomness": "e668052a3c5fc1835c5a39b42d6d52b38a6bfdfefb278acbb2f09d30515e6fd2",
+      "signature": "a147df96dbdaf238317dfcf95fbf147af34baaade363268106e7d3066c8bc830f3c28fd7aa8ba14aa6e7173b3fd2ac88"
+    },
+    {
+      "round": 156,
+      "randomness": "96d38ec7272359fec83e82a986dc6fd4a57d9e3fc5c50ea38210d9ef730e5c4a",
+      "signature": "b1995044d3eee8b4b966c4c913f352b09b100447eaa9958b7f17901eb1e73e97152788b1409190b4c7a505ec89cb6adf"
+    },
+    {
+      "round": 157,
+      "randomness": "865d533ad97a28be59e98c195938a939e531fcf8eb356189c9d93a3ef349c330",
+      "signature": "91c999af1e201094dabfb5053b99423e4d38ad7855c764d4722f56fcee67cb6a38a1913c3feb08ae36d609963579dfe4"
+    },
+    {
+      "round": 158,
+      "randomness": "1bc85141385b3195dd132abefdab0ba48563bc384da5725820ddbf8b6da6dc69",
+      "signature": "8c620e680d0aef6a509d5cdf14c18867549a42449ae6589deb2fddc145f8303e4694360ab4610b5434378a0a84c8b5f9"
+    },
+    {
+      "round": 159,
+      "randomness": "bf64d6053c218fa32a3e27c050d8b242a31982722131836e75af750ce0ba9de1",
+      "signature": "b74f78677696346e4e24432f94f00286b1f5573fc3e1a6556ba48be4111228657182634047796a5d2a111e592c9382f2"
+    },
+    {
+      "round": 160,
+      "randomness": "e3dd7596d844c492c0ea7a3535278b8ef10c43bbf1fed833ea0fbd4489388703",
+      "signature": "8dea22081a7de7f1a2dce75365dd2623019b0e5e778d4910292c8258f236586b0450798551edded0cd747b1fb7c8c1b0"
+    },
+    {
+      "round": 1000,
+      "randomness": "fe290beca10872ef2fb164d2aa4442de4566183ec51c56ff3cd603d930e54fdd",
+      "signature": "b44679b9a59af2ec876b1a6b1ad52ea9b1615fc3982b19576350f93447cb1125e342b73a8dd2bacbe47e4b6b63ed5e39"
+    },
+    {
+      "round": 33966260,
+      "randomness": "4b9a645f44faf1ca8ef3b4602d4b0090505d333eb92b471b8e2487fc3724461f",
+      "signature": "b30744a7edfe2428e7bb00dcbd417a41f36a99ae8684675d6496b6849d7cff0c7f1cd3164479f19c3bf06fc40f14b20f"
+    }
+  ]
+}

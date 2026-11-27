@@ -114,7 +114,7 @@ pub struct HoldingMark {
     pub units: Units,
     /// The close mark (`mark_good_holding_at_close`).
     pub marked_value: Units,
-    /// Units marked by standing bids above the `50%` floor.
+    /// Units marked by standing `>= UNIT_SCALE` (`1.000`-unit) bids above the `50%` floor.
     pub units_marked_by_bids: Units,
     /// Units marked at the pooled `50%` floor.
     pub units_at_floor: Units,

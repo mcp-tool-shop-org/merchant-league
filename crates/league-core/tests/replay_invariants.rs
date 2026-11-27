@@ -30,11 +30,31 @@ use league_core::{
     compute_preimage_condition, convert_mandate_points_to_equity, deal_graded_mandates,
     deal_graded_mandates_with_entropy, default_graded_mandate_deck, derive_drand_beacon,
     derive_turn_beacon, drand_quicknet_round_for_close, drand_quicknet_signature_status,
-    evaluate_mandate_bonus, floor_bps_part, half_up_bps, layout_seed_digest, mul_units_parity,
-    replay_season, replay_season_with_state_predicates, scale_bps_signed, town_import_cost_cred,
-    verify_drand_quicknet_beacon, verify_order_reveal, verify_preimage_condition,
-    verify_sealed_mandate_deal, width_independent_index,
+    draw_shocks_for_turn, evaluate_mandate_bonus, floor_bps_part, half_up_bps, layout_seed_digest,
+    mul_units_parity, replay_season, replay_season_with_state_predicates, scale_bps_signed,
+    town_import_cost_cred, verify_drand_quicknet_beacon, verify_order_reveal,
+    verify_preimage_condition, verify_sealed_mandate_deal, width_independent_index,
 };
+
+fn quicknet_sig_for_round(round: u64) -> Vec<u8> {
+    #[derive(serde::Deserialize)]
+    struct BeaconVec {
+        round: u64,
+        signature: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct VectorFile {
+        beacons: Vec<BeaconVec>,
+    }
+    let vf: VectorFile = must_ok(
+        serde_json::from_str(include_str!("vectors/drand_quicknet_vectors.json")),
+        "parse vendored quicknet vectors",
+    );
+    let Some(entry) = vf.beacons.into_iter().find(|b| b.round == round) else {
+        panic!("missing vendored quicknet vector for round {round}");
+    };
+    must_ok(hex::decode(entry.signature), "decode quicknet sig hex")
+}
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
     match res {
@@ -3330,8 +3350,8 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
     ));
 
     let schedule = DrandSchedule {
-        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 60,
-        turn_period_secs: 60,
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX,
+        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS,
     };
     let tid_drand = TableId(9130);
     let (spec_drand, deal_drand) = must_ok(
@@ -3351,7 +3371,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
             vec![SealedOrderBundle::default(); 4],
         );
         let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "expected round");
-        let sig = vec![0x40_u8.wrapping_add(t); DRAND_QUICKNET_SIGNATURE_BYTES];
+        let sig = quicknet_sig_for_round(round);
         let beacon = must_ok(derive_drand_beacon(&sig), "drand beacon");
         let r = must_ok(eng_drand.sweep_turn_with_drand(round, &sig), "sweep drand");
         drand_turns.push(LoggedTurn {
@@ -3381,7 +3401,11 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         turns: drand_turns,
         mandate_reveals: vec![None; 4],
     };
-    assert!(replay_season(&drand_ok).is_ok());
+    let drand_ok_out = must_ok(replay_season(&drand_ok), "replay drand_ok");
+    assert_eq!(
+        drand_ok_out.drand_beacon_auth_status,
+        Some(DrandBeaconAuthStatus::Authenticated)
+    );
 
     let mut drand_missing_round = drand_ok.clone();
     drand_missing_round.turns[0].drand_round = None;
@@ -3410,6 +3434,22 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         replay_season(&drand_noninc),
         Err(EngineError::SeasonEnded(_))
     ));
+
+    let mut drand_tampered_sig = drand_ok.clone();
+    if let Some(ref mut sig) = drand_tampered_sig.turns[0].drand_signature {
+        sig[0] ^= 1;
+        let forged_beacon = must_ok(derive_drand_beacon(sig), "forged beacon");
+        drand_tampered_sig.turns[0].turn_beacon = forged_beacon;
+        drand_tampered_sig.turns[0].drawn_shocks =
+            draw_shocks_for_turn(tid_drand, 4, Turn(1), forged_beacon);
+    }
+    assert!(
+        matches!(
+            replay_season(&drand_tampered_sig),
+            Err(EngineError::InvalidOrder(_))
+        ),
+        "replay_season must reject a forged 1-bit-flipped drand signature even when turn_beacon == SHA-256(sig)"
+    );
 
     let mut drand_bad_beacon = drand_ok;
     drand_bad_beacon.turns[0].turn_beacon[0] ^= 1;
@@ -4397,8 +4437,8 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
     ));
 
     let schedule = DrandSchedule {
-        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 300,
-        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS * 10,
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX,
+        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS * 3,
     };
     let tid = TableId(941);
     let (spec, _) = must_ok(
@@ -4409,7 +4449,7 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
     for t in 1..=3_u8 {
         commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
         let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "round");
-        let sig = vec![0x30_u8.wrapping_add(t); DRAND_QUICKNET_SIGNATURE_BYTES];
+        let sig = quicknet_sig_for_round(round);
         let _ = must_ok(eng.sweep_turn_with_drand(round, &sig), "sweep drand 1..3");
     }
 
@@ -4434,18 +4474,21 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
     commit_and_reveal_all(&mut eng, tid, 4, t4);
 
     let r4_expected = must_ok(schedule.expected_round_for_turn(Turn(4)), "round 4");
-    let sig_4 = vec![0x7B_u8; DRAND_QUICKNET_SIGNATURE_BYTES];
+    let sig_4 = quicknet_sig_for_round(r4_expected);
     let expected_beacon = must_ok(derive_drand_beacon(&sig_4), "beacon 4");
     assert_eq!(
         drand_quicknet_signature_status(r4_expected, &sig_4),
-        Ok(DrandBeaconAuthStatus::HashBoundUnauthenticated)
+        Ok(DrandBeaconAuthStatus::Authenticated)
     );
     assert_eq!(
         verify_drand_quicknet_beacon(&schedule, Turn(4), r4_expected, &sig_4, expected_beacon),
-        Ok(DrandBeaconAuthStatus::HashBoundUnauthenticated)
+        Ok(DrandBeaconAuthStatus::Authenticated)
     );
 
-    // Off-schedule round, round 0, truncated signature, and all-zero signature must all be rejected.
+    // Off-schedule round, round 0, truncated signature, all-zero signature, forged bytes, and
+    // 1-bit signature/round flips must all be rejected.
+    let mut sig_4_flipped = sig_4.clone();
+    sig_4_flipped[0] ^= 1;
     assert!(matches!(
         drand_quicknet_signature_status(0, &sig_4),
         Err(EngineError::InvalidOrder(_))
@@ -4458,27 +4501,36 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
         drand_quicknet_signature_status(r4_expected, &[0u8; DRAND_QUICKNET_SIGNATURE_BYTES]),
         Err(EngineError::InvalidOrder(_))
     ));
+    assert!(matches!(
+        drand_quicknet_signature_status(r4_expected, &[0x7B; DRAND_QUICKNET_SIGNATURE_BYTES]),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        drand_quicknet_signature_status(r4_expected, &sig_4_flipped),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        drand_quicknet_signature_status(r4_expected ^ 1, &sig_4),
+        Err(EngineError::InvalidOrder(_))
+    ));
     assert_eq!(
-        DrandBeaconAuthStatus::HashBoundUnauthenticated.as_str(),
-        "hash_bound_unauthenticated"
+        DrandBeaconAuthStatus::Authenticated.as_str(),
+        "authenticated"
     );
     assert_eq!(
-        DrandBeaconAuthStatus::HashBoundUnauthenticated.to_string(),
-        "hash_bound_unauthenticated"
+        DrandBeaconAuthStatus::Authenticated.to_string(),
+        "authenticated"
     );
     let encoded_status = must_ok(
-        serde_json::to_string(&DrandBeaconAuthStatus::HashBoundUnauthenticated),
+        serde_json::to_string(&DrandBeaconAuthStatus::Authenticated),
         "serialize auth status",
     );
-    assert_eq!(encoded_status, "\"hash_bound_unauthenticated\"");
+    assert_eq!(encoded_status, "\"authenticated\"");
     let decoded_status: DrandBeaconAuthStatus = must_ok(
         serde_json::from_str(&encoded_status),
         "deserialize auth status",
     );
-    assert_eq!(
-        decoded_status,
-        DrandBeaconAuthStatus::HashBoundUnauthenticated
-    );
+    assert_eq!(decoded_status, DrandBeaconAuthStatus::Authenticated);
     assert!(matches!(
         eng.sweep_turn_with_drand(r4_expected + 1, &sig_4),
         Err(EngineError::InvalidOrder(_))
@@ -4489,6 +4541,10 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
     ));
     assert!(matches!(
         eng.sweep_turn_with_drand(r4_expected, &[0u8; DRAND_QUICKNET_SIGNATURE_BYTES]),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        eng.sweep_turn_with_drand(r4_expected, &sig_4_flipped),
         Err(EngineError::InvalidOrder(_))
     ));
 
@@ -5310,8 +5366,8 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
 
     let tid_eval = TableId(950);
     let schedule = DrandSchedule {
-        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 300,
-        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS * 10,
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 30,
+        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS,
     };
 
     let (mut missing_sched_spec, _) = must_ok(
@@ -5642,7 +5698,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
                 ));
             }
             let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "round");
-            let sig = vec![0x71_u8.wrapping_add(t); DRAND_QUICKNET_SIGNATURE_BYTES];
+            let sig = quicknet_sig_for_round(round);
             let beacon = must_ok(derive_drand_beacon(&sig), "beacon");
             let r = must_ok(eng.sweep_turn_with_drand(round, &sig), "sweep drand");
             if t == 4 {
@@ -6743,17 +6799,6 @@ fn clean_32(tag: u8) -> [u8; 32] {
     })
 }
 
-fn clean_drand_sig(tag: u8, turn: u8) -> Vec<u8> {
-    (0..DRAND_QUICKNET_SIGNATURE_BYTES)
-        .map(|i| {
-            0x35_u8
-                .wrapping_add(tag.wrapping_mul(11))
-                .wrapping_add(turn.wrapping_mul(5))
-                .wrapping_add((i as u8).wrapping_mul(3))
-        })
-        .collect()
-}
-
 fn coupled_layout_seed_candidates(seed: u64) -> [([u8; 32], &'static str); 2] {
     use sha2::{Digest as _, Sha256};
     let mut padded = [0_u8; 32];
@@ -6871,8 +6916,8 @@ fn run_eval_season_parts(
 
 fn run_game_season_parts(table_id: TableId, layout_seed: u64, sig_tag: u8) -> SeasonParts {
     let schedule = DrandSchedule {
-        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 60,
-        turn_period_secs: 60,
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + u64::from(sig_tag % 4) * 96,
+        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS,
     };
     let (spec, deal) = must_ok(
         TableSpec::standard_game_chiral_ring_with_mandates(table_id, 4, layout_seed, schedule),
@@ -6904,7 +6949,7 @@ fn run_game_season_parts(table_id: TableId, layout_seed: u64, sig_tag: u8) -> Se
             vec![SealedOrderBundle::default(); 4],
         );
         let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "expected_round");
-        let sig = clean_drand_sig(sig_tag, t);
+        let sig = quicknet_sig_for_round(round);
         let beacon = must_ok(derive_drand_beacon(&sig), "derive_drand_beacon");
         let receipt = must_ok(
             engine.sweep_turn_with_drand(round, &sig),

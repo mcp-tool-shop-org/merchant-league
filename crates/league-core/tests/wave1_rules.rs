@@ -17,14 +17,14 @@ use league_core::{
     ContractDeliveryOrder, ConverterRunOrder, CouncilPlatform, CouncilVoteBallot,
     DEFAULT_CANCEL_LOCK_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS, DEFAULT_WASH_FREEZE_BOND_CRED,
     DEFAULT_WASH_FREEZE_BOUNTY_CRED, DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
-    DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES, DrandBeaconAuthStatus,
-    DrandSchedule, DualEscrowProposal, EngineError, EscrowProposal, EscrowStatus, FillKind,
-    FillRecord, FundamentalParities, HARD_TURN_CAP, LoggedTurn, MarketAction, OfferProposal,
-    OfferSide, OrderReveal, ReplayBeaconMode, ReplayLayoutSeed, ReplayOutcome, ReplayRecord,
-    RevealSalt, SealedOrderBundle, SeasonReplayLog, Seat, SweepReceipt, TableId, TableMode,
-    TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, attach_state_predicates,
-    audit_wash_freeze, break_tie_with_turn_beacon, compute_order_commitment, derive_drand_beacon,
-    derive_turn_beacon, mark_good_holding_at_close, replay_season, town_import_cost_cred,
+    DRAND_QUICKNET_GENESIS_UNIX, DrandBeaconAuthStatus, DrandSchedule, DualEscrowProposal,
+    EngineError, EscrowProposal, EscrowStatus, FillKind, FillRecord, FundamentalParities,
+    HARD_TURN_CAP, LoggedTurn, MarketAction, OfferProposal, OfferSide, OrderReveal,
+    ReplayBeaconMode, ReplayLayoutSeed, ReplayOutcome, ReplayRecord, RevealSalt, SealedOrderBundle,
+    SeasonReplayLog, Seat, SweepReceipt, TableId, TableMode, TableSpec, Turn, TurnEngine,
+    TurnPhase, UNIT_SCALE, Units, attach_state_predicates, audit_wash_freeze,
+    break_tie_with_turn_beacon, compute_order_commitment, derive_drand_beacon, derive_turn_beacon,
+    mark_good_holding_at_close, replay_season, town_import_cost_cred,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -76,7 +76,7 @@ fn game_spec_with_drand(
     seed: u64,
 ) -> (TableSpec, DrandSchedule, league_core::SealedMandateDeal) {
     let schedule = DrandSchedule {
-        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 600,
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX,
         turn_period_secs: 3,
     };
     let (spec, deal) = must_ok(
@@ -86,8 +86,24 @@ fn game_spec_with_drand(
     (spec, schedule, deal)
 }
 
-fn drand_sig(tag: u8, turn: u8) -> Vec<u8> {
-    vec![tag ^ turn.wrapping_add(1); DRAND_QUICKNET_SIGNATURE_BYTES]
+fn quicknet_sig_for_round(round: u64) -> Vec<u8> {
+    #[derive(serde::Deserialize)]
+    struct BeaconVec {
+        round: u64,
+        signature: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct VectorFile {
+        beacons: Vec<BeaconVec>,
+    }
+    let vf: VectorFile = must_ok(
+        serde_json::from_str(include_str!("vectors/drand_quicknet_vectors.json")),
+        "parse vendored quicknet vectors",
+    );
+    let Some(entry) = vf.beacons.into_iter().find(|b| b.round == round) else {
+        panic!("missing vendored quicknet vector for round {round}");
+    };
+    must_ok(hex::decode(entry.signature), "decode quicknet sig hex")
 }
 
 // --- B1: Cancel lock + error codes + live/replay parity + engine exemption ----------------------
@@ -1045,7 +1061,7 @@ fn b3_old_logs_without_part_b_fields_still_replay_identically_and_b4_drand_statu
     let compat_spec: TableSpec = must_ok(serde_json::from_value(spec_val), "compat TableSpec");
     assert_eq!(compat_spec, spec);
 
-    // Run Game mode season and verify ReplayOutcome::drand_beacon_auth_status == Some(HashBoundUnauthenticated)
+    // Run Game mode season and verify ReplayOutcome::drand_beacon_auth_status == Some(Authenticated)
     // and deterministic replay on both JSON with and without `cancel_lock_at`.
     let mut eng = must_ok(TurnEngine::new(spec.clone()), "game eng");
     let mut turns = Vec::new();
@@ -1057,7 +1073,7 @@ fn b3_old_logs_without_part_b_fields_still_replay_identically_and_b4_drand_statu
         let (commitments, reveals) =
             commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
         let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "round");
-        let sig = drand_sig(0x6D, t);
+        let sig = quicknet_sig_for_round(round);
         let beacon = must_ok(derive_drand_beacon(&sig), "beacon");
         let rec = must_ok(eng.sweep_turn_with_drand(round, &sig), "sweep drand");
         live_digests.push(rec.post_state_digest);
@@ -1103,7 +1119,7 @@ fn b3_old_logs_without_part_b_fields_still_replay_identically_and_b4_drand_statu
     assert_eq!(out.scoreboard, live_board);
     assert_eq!(
         out.drand_beacon_auth_status,
-        Some(DrandBeaconAuthStatus::HashBoundUnauthenticated)
+        Some(DrandBeaconAuthStatus::Authenticated)
     );
 }
 
@@ -1512,11 +1528,13 @@ fn cancel_lock_spoof_bot_5_ring_seeds_per_n_direction_and_issue54_report() {
             "N={n}: uncancelled spoof bids must execute at Step 0"
         );
         assert!(m.cred_locked_on > m.cred_locked_off);
-        assert!(m.issue54_lift_off > 0, "N={n}: #54 close-mark lift > 0");
-        // Cancel lock does NOT block late PostOffer submissions or #54 0.001-unit close marks:
         assert_eq!(
-            m.issue54_lift_on, m.issue54_lift_off,
-            "N={n}: cancel lock leaves #54 close-mark lift unchanged ({} vs {})",
+            m.issue54_lift_off, 0,
+            "N={n}: #54 close-mark dust bid lift == 0"
+        );
+        assert_eq!(
+            m.issue54_lift_on, 0,
+            "N={n}: #54 close-mark dust bid lift == 0 under cancel lock ({} vs {})",
             m.issue54_lift_on, m.issue54_lift_off
         );
     }
@@ -1530,8 +1548,8 @@ fn cancel_lock_spoof_bot_200_ring_seeds_per_n_full_measurement() {
         assert_eq!(m.pulls_refused_off, 0, "N={n}");
         assert!(m.pulls_refused_on > 0, "N={n}");
         assert!(m.bids_exec_step0_on > m.bids_exec_step0_off, "N={n}");
-        assert!(m.issue54_lift_off > 0, "N={n}");
-        assert_eq!(m.issue54_lift_on, m.issue54_lift_off, "N={n}");
+        assert_eq!(m.issue54_lift_off, 0, "N={n}");
+        assert_eq!(m.issue54_lift_on, 0, "N={n}");
     }
 }
 

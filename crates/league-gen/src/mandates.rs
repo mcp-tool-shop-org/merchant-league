@@ -497,8 +497,8 @@ mod tests {
             let (_q_dn, imp_dn, cost_dn, px_dn, mk_dn, eq_dn) = run_wash(false);
             let gross_vol: Units = q_up.iter().map(|&(_, q)| q).sum();
 
-            // 3. High-bid residual (friendly Seat 1 locks all its 15.000 CRED into a 1 milli-unit resting bid on Turn 24;
-            // also measure rival Seat 2 sniping that 1 milli-unit bid in Phase 1).
+            // 3. High-bid residual (#54: 1 milli-unit bid at Turn 24 is excluded below UNIT_SCALE,
+            // giving 0 lift; a whole-unit 1.000-unit bid still marks 1_000 units at s1_cred_t24).
             let mut eng_bid = match TurnEngine::new(base_spec.clone()) {
                 Ok(e) => e,
                 Err(e) => panic!("eng_bid: {e}"),
@@ -539,6 +539,34 @@ mod tests {
                 .standings
                 .iter()
                 .find(|x| x.seat == 1)
+                .map_or(0, |x| x.net_asset_equity);
+
+            let mut eng_whole_bid = eng_bid.clone();
+            if eng_whole_bid
+                .apply_market_action(MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(0),
+                        amount: 1_000,
+                        price_per_unit_cred: s1_cred_t24,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .is_err()
+            {
+                panic!("friendly whole-unit high bid failed");
+            }
+            let _ = step_turn(&mut eng_whole_bid, 24);
+            let board_whole_bid = match eng_whole_bid.finalize_season() {
+                Ok(b) => b,
+                Err(e) => panic!("fin whole bid: {e}"),
+            };
+            let s0_eq_whole_bid = board_whole_bid
+                .standings
+                .iter()
+                .find(|x| x.seat == 0)
                 .map_or(0, |x| x.net_asset_equity);
 
             // Sniped high-bid: rival Seat 2 imports 1 milli-unit of Raw(0) for 1 milli-CRED and crosses at bid_px!
@@ -606,8 +634,9 @@ mod tests {
                 eq_dn - s0_eq_base
             );
             println!(
-                "  HIGH-BID (1 milli-unit @ px={bid_px}, locked={s1_cred_t24}): s0_eq_uncrossed={s0_eq_bid} lift=+{} | s1_eq_base={s1_eq_before_bid} s1_eq_uncrossed={s1_eq_uncrossed} s1_eq_if_sniped={s1_eq_sniped} (s1_loss={}) s0_eq_if_sniped={s0_eq_sniped}",
+                "  HIGH-BID (1 milli-unit @ px={bid_px}, locked={s1_cred_t24}): s0_eq_uncrossed={s0_eq_bid} lift=+{} whole_lift=+{} | s1_eq_base={s1_eq_before_bid} s1_eq_uncrossed={s1_eq_uncrossed} s1_eq_if_sniped={s1_eq_sniped} (s1_loss={}) s0_eq_if_sniped={s0_eq_sniped}",
                 s0_eq_bid - s0_eq_base,
+                s0_eq_whole_bid - s0_eq_base,
                 s1_eq_sniped - s1_eq_before_bid
             );
 
@@ -615,10 +644,14 @@ mod tests {
             assert_eq!(mk_dn, s0_mark_base);
             assert_eq!(eq_up, s0_eq_base);
             assert_eq!(eq_dn, s0_eq_base);
-            let expected_bid_mark = s1_cred_t24
-                + ((i128::from(s0_hold_base - 1) * i128::from(parity_raw0) * 5_000) / 10_000_000)
-                    as Units;
-            assert_eq!(s0_eq_bid - s0_eq_base, expected_bid_mark - s0_mark_base);
+            assert_eq!(s0_eq_bid, s0_eq_base);
+            let expected_whole_bid_mark = s1_cred_t24
+                + ((i128::from(s0_hold_base - 1_000) * i128::from(parity_raw0) * 5_000)
+                    / 10_000_000) as Units;
+            assert_eq!(
+                s0_eq_whole_bid - s0_eq_base,
+                expected_whole_bid_mark - s0_mark_base
+            );
             assert_eq!(s0_eq_sniped, s0_eq_base);
         }
     }

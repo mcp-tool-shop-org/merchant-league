@@ -102,24 +102,43 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 3,
-      "changed": 7,
+      "added": 1,
+      "changed": 18,
       "moved": 0,
-      "parts": 3,
-      "removed": 0
+      "parts": 6,
+      "removed": 1
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-core/src/scoring.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-core/src/scoring.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-core/tests/vectors/drand_quicknet_vectors.json is now read by crates/league-core/src/commit.rs, crates/league-core/tests/core_card2_randomness_scoring.rs, crates/league-core/tests/replay_invariants.rs and crates/league-core/tests/wave1_rules.rs.",
+        "subjects": [
+          "crates/league-core/tests/vectors/drand_quicknet_vectors.json",
+          "crates/league-core/src/commit.rs",
+          "crates/league-core/tests/core_card2_randomness_scoring.rs",
+          "crates/league-core/tests/replay_invariants.rs",
+          "crates/league-core/tests/wave1_rules.rs"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-27; 3 files added and 7 changed content.",
+        "sentence": "1 file added, 1 removed and 18 changed content, across 6 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "4b1d3d940e7aa613e84d2c5b8d441e6d7fcdf9fc",
-      "generatedAt": "2026-11-27T16:53:16.604Z"
+      "commit": "543e488caafd76007c5b1f60de63e3bc4f22a92f",
+      "generatedAt": "2026-11-27T18:43:11.223Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -203,7 +222,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "543e488caafd76007c5b1f60de63e3bc4f22a92f",
+  "commit": "62c55f3e492ed3c5c926549dd9eb336aa4fba4a2",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (422 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -306,6 +325,7 @@
         "crates/league-core/src/lib.rs",
         "crates/league-core/src/observation.rs",
         "crates/league-core/src/replay.rs",
+        "crates/league-core/src/scoring.rs",
         "crates/league-core/tests/",
         "crates/league-error/",
         "crates/league-eval/build.rs",
@@ -347,8 +367,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 54,
-      "runsMore": 84,
+      "runsCount": 55,
+      "runsMore": 85,
       "sends": [
         "uploads coverage to Codecov"
       ],
@@ -753,7 +773,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-27T18:43:11.223Z",
+  "generatedAt": "2026-11-27T22:51:31.813Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "57 writes and 69 reads use paths built at run time and are not named here.",
@@ -802,9 +822,9 @@
   "startReason": "This path follows league-eval (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 139,
+  "testFiles": 141,
   "testedBy": {
-    "league-core": 34,
+    "league-core": 35,
     "league-error": 11,
     "league-eval": 17,
     "league-gen": 10,

@@ -678,28 +678,57 @@ pub fn standings_tie_key(
 /// Expected byte length of a compressed BLS12-381 G1 drand `quicknet` signature.
 pub const DRAND_QUICKNET_SIGNATURE_BYTES: usize = 48;
 
+/// Expected byte length of a compressed BLS12-381 G2 drand `quicknet` chain public key.
+pub const DRAND_QUICKNET_PUBLIC_KEY_BYTES: usize = 96;
+
+/// Pinned League of Entropy drand `quicknet` chain hash
+/// (`52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971`).
+///
+/// Source: <https://api.drand.sh/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info>
+/// (`period: 3`, `genesis_time: 1692803367`, `schemeID: "bls-unchained-g1-rfc9380"`).
+pub const DRAND_QUICKNET_CHAIN_HASH: [u8; 32] = [
+    0x52, 0xdb, 0x9b, 0xa7, 0x0e, 0x0c, 0xc0, 0xf6, 0xea, 0xf7, 0x80, 0x3d, 0xd0, 0x74, 0x47, 0xa1,
+    0xf5, 0x47, 0x77, 0x35, 0xfd, 0x3f, 0x66, 0x17, 0x92, 0xba, 0x94, 0x60, 0x0c, 0x84, 0xe9, 0x71,
+];
+
+/// Pinned League of Entropy drand `quicknet` compressed BLS12-381 G2 chain public key (`96` bytes).
+///
+/// Source: <https://api.drand.sh/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info>.
+pub const DRAND_QUICKNET_PUBLIC_KEY: [u8; DRAND_QUICKNET_PUBLIC_KEY_BYTES] = [
+    0x83, 0xcf, 0x0f, 0x28, 0x96, 0xad, 0xee, 0x7e, 0xb8, 0xb5, 0xf0, 0x1f, 0xca, 0xd3, 0x91, 0x22,
+    0x12, 0xc4, 0x37, 0xe0, 0x07, 0x3e, 0x91, 0x1f, 0xb9, 0x00, 0x22, 0xd3, 0xe7, 0x60, 0x18, 0x3c,
+    0x8c, 0x4b, 0x45, 0x0b, 0x6a, 0x0a, 0x6c, 0x3a, 0xc6, 0xa5, 0x77, 0x6a, 0x2d, 0x10, 0x64, 0x51,
+    0x0d, 0x1f, 0xec, 0x75, 0x8c, 0x92, 0x1c, 0xc2, 0x2b, 0x0e, 0x17, 0xe6, 0x3a, 0xaf, 0x4b, 0xcb,
+    0x5e, 0xd6, 0x63, 0x04, 0xde, 0x9c, 0xf8, 0x09, 0xbd, 0x27, 0x4c, 0xa7, 0x3b, 0xab, 0x4a, 0xf5,
+    0xa6, 0xe9, 0xc7, 0x6a, 0x4b, 0xc0, 0x9e, 0x76, 0xea, 0xe8, 0x99, 0x1e, 0xf5, 0xec, 0xe4, 0x5a,
+];
+
+/// Cryptographic scheme ID for drand `quicknet` (`bls-unchained-g1-rfc9380`: G1 signatures, G2 pubkey).
+pub const DRAND_QUICKNET_SCHEME_ID: &str = "bls-unchained-g1-rfc9380";
+
+/// Official RFC 9380 hash-to-curve Domain Separation Tag for `bls-unchained-g1-rfc9380`.
+pub const DRAND_QUICKNET_DST: &[u8] = b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
+
 /// Authentication status of a drand `quicknet` round signature (`#29`).
 ///
-/// Until `#29` lands with BLS12-381 pairing verification against the League of Entropy
-/// `quicknet` chain public key, `league-core` verifies round-schedule binding and
-/// `turn_beacon == SHA-256(drand_signature)` only — beacons in replay are **hash-bound, not yet
-/// authenticated**.
+/// `league-core` verifies round-schedule binding, `turn_beacon == SHA-256(drand_signature)`, and
+/// the BLS12-381 pairing signature over `SHA-256(round.to_be_bytes())` against the pinned
+/// League of Entropy `quicknet` chain public key ([`DRAND_QUICKNET_PUBLIC_KEY`]).
 #[must_use]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DrandBeaconAuthStatus {
-    /// Structural signature check only — no signature authentication against the `quicknet` chain
-    /// public key is performed yet (`#29`). Hash binding (`turn_beacon == SHA-256(drand_signature)`)
-    /// and schedule-round binding are established only by [`verify_drand_quicknet_beacon`].
-    HashBoundUnauthenticated,
+    /// BLS12-381 signature verified offline against [`DRAND_QUICKNET_PUBLIC_KEY`] under
+    /// [`DRAND_QUICKNET_SCHEME_ID`] (`bls-unchained-g1-rfc9380`, `#29`).
+    Authenticated,
 }
 
 impl DrandBeaconAuthStatus {
-    /// Returns the stable `snake_case` status string (`"hash_bound_unauthenticated"`).
+    /// Returns the stable `snake_case` status string (`"authenticated"`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::HashBoundUnauthenticated => "hash_bound_unauthenticated",
+            Self::Authenticated => "authenticated",
         }
     }
 }
@@ -710,15 +739,8 @@ impl fmt::Display for DrandBeaconAuthStatus {
     }
 }
 
-/// Returns the `#29` drand `quicknet` BLS12-381 authentication status for
-/// `(drand_round, drand_signature)`.
-///
-/// Rejects round `0`, signatures whose byte length is not [`DRAND_QUICKNET_SIGNATURE_BYTES`]
-/// (`48`), and the degenerate all-zero slice. Until `#29` lands with the pinned `quicknet` chain
-/// public key and BLS12-381 pairing check, every well-formed non-zero input returns
-/// [`DrandBeaconAuthStatus::HashBoundUnauthenticated`] (no cryptographic signature authentication
-/// performed).
-pub fn drand_quicknet_signature_status(
+fn verify_bls_unchained_g1_with_pubkey(
+    pubkey_bytes: &[u8; DRAND_QUICKNET_PUBLIC_KEY_BYTES],
     drand_round: u64,
     drand_signature: &[u8],
 ) -> Result<DrandBeaconAuthStatus, EngineError> {
@@ -738,17 +760,46 @@ pub fn drand_quicknet_signature_status(
             "degenerate all-zero drand signature is forbidden".to_owned(),
         ));
     }
-    Ok(DrandBeaconAuthStatus::HashBoundUnauthenticated)
+    let pk = blst::min_sig::PublicKey::uncompress(pubkey_bytes)
+        .and_then(|key| key.validate().map(|()| key))
+        .map_err(|err| {
+            EngineError::InvalidConfig(format!("invalid drand quicknet G2 public key: {err:?}"))
+        })?;
+    let sig = blst::min_sig::Signature::uncompress(drand_signature)
+        .and_then(|point| point.validate(true).map(|()| point))
+        .map_err(|err| {
+            EngineError::InvalidOrder(format!(
+                "invalid drand quicknet G1 signature for round {drand_round}: {err:?}"
+            ))
+        })?;
+    let msg_digest: [u8; 32] = Sha256::digest(drand_round.to_be_bytes()).into();
+    let res = sig.verify(false, &msg_digest, DRAND_QUICKNET_DST, &[], &pk, false);
+    if res != blst::BLST_ERROR::BLST_SUCCESS {
+        return Err(EngineError::InvalidOrder(format!(
+            "drand quicknet BLS12-381 signature verification failed for round {drand_round}: {res:?}"
+        )));
+    }
+    Ok(DrandBeaconAuthStatus::Authenticated)
+}
+
+/// Verifies `(drand_round, drand_signature)` offline against the pinned League of Entropy
+/// `quicknet` chain public key ([`DRAND_QUICKNET_PUBLIC_KEY`]) under
+/// [`DRAND_QUICKNET_SCHEME_ID`] (`#29`).
+///
+/// Rejects round `0`, signatures whose byte length is not [`DRAND_QUICKNET_SIGNATURE_BYTES`]
+/// (`48`), the degenerate all-zero slice, non-canonical/off-curve/off-subgroup G1 points, and any
+/// signature that fails the BLS12-381 pairing check over `SHA-256(drand_round.to_be_bytes())`.
+pub fn drand_quicknet_signature_status(
+    drand_round: u64,
+    drand_signature: &[u8],
+) -> Result<DrandBeaconAuthStatus, EngineError> {
+    verify_bls_unchained_g1_with_pubkey(&DRAND_QUICKNET_PUBLIC_KEY, drand_round, drand_signature)
 }
 
 /// Derives the 32-byte turn randomness beacon as `SHA-256(drand_signature)` (`design-v2` §6.1).
 ///
-/// **Deferred authentication notice (`#29`):** Drand beacons in Game mode are currently
-/// **hash-bound, not yet authenticated** — `league-core` checks `turn_beacon ==
-/// SHA-256(drand_signature)` on the scheduled `drand_round` and routes signature checking through
-/// [`drand_quicknet_signature_status`], which returns
-/// [`DrandBeaconAuthStatus::HashBoundUnauthenticated`] until `#29` adds BLS12-381 pairing
-/// verification against the `quicknet` chain public key.
+/// Call [`drand_quicknet_signature_status`] or [`verify_drand_quicknet_beacon`] to authenticate the
+/// BLS12-381 signature against [`DRAND_QUICKNET_PUBLIC_KEY`].
 pub fn derive_drand_beacon(drand_signature: &[u8]) -> Result<[u8; 32], EngineError> {
     if drand_signature.len() != DRAND_QUICKNET_SIGNATURE_BYTES {
         return Err(EngineError::InvalidOrder(format!(
@@ -764,13 +815,10 @@ pub fn derive_drand_beacon(drand_signature: &[u8]) -> Result<[u8; 32], EngineErr
     Ok(Sha256::digest(drand_signature).into())
 }
 
-/// Validates an `ExternalDrand` turn beacon against a pre-named `DrandSchedule`, confirming
-/// `drand_round == expected_round_for_turn(turn)` and `expected_beacon == SHA-256(drand_signature)`,
-/// and calling [`drand_quicknet_signature_status`] (`#29`'s home).
-///
-/// Until `#29` lands, drand beacons in replay are **hash-bound, not yet authenticated** against the
-/// `quicknet` chain public key; this returns
-/// [`DrandBeaconAuthStatus::HashBoundUnauthenticated`].
+/// Validates and authenticates an `ExternalDrand` turn beacon against a pre-named `DrandSchedule`,
+/// confirming `drand_round == expected_round_for_turn(turn)`, BLS12-381 signature validity against
+/// [`DRAND_QUICKNET_PUBLIC_KEY`] via [`drand_quicknet_signature_status`], and
+/// `expected_beacon == SHA-256(drand_signature)`.
 pub fn verify_drand_quicknet_beacon(
     schedule: &DrandSchedule,
     turn: Turn,
@@ -1012,7 +1060,40 @@ impl PolicyChaChaRng {
 
 #[cfg(test)]
 mod tests {
-    use super::PolicyChaChaRng;
+    use super::*;
+
+    const VECTORS_JSON: &str = include_str!("../tests/vectors/drand_quicknet_vectors.json");
+
+    #[derive(Deserialize)]
+    struct QuicknetBeaconVector {
+        round: u64,
+        randomness: String,
+        signature: String,
+    }
+
+    #[derive(Deserialize)]
+    struct QuicknetVectorFile {
+        scheme_id: String,
+        chain_hash: String,
+        public_key: String,
+        genesis_time: u64,
+        period: u64,
+        beacons: Vec<QuicknetBeaconVector>,
+    }
+
+    fn load_vectors() -> QuicknetVectorFile {
+        match serde_json::from_str(VECTORS_JSON) {
+            Ok(v) => v,
+            Err(err) => panic!("failed to parse vendored quicknet vectors: {err}"),
+        }
+    }
+
+    fn decode_hex_vec(hex_str: &str) -> Vec<u8> {
+        match hex::decode(hex_str) {
+            Ok(bytes) => bytes,
+            Err(err) => panic!("invalid hex in quicknet vector: {err}"),
+        }
+    }
 
     #[test]
     fn policy_chacha_rng_is_deterministic_and_bounded() {
@@ -1029,5 +1110,85 @@ mod tests {
             assert!(idx_a < 17);
             assert_eq!(idx_a, idx_b);
         }
+    }
+
+    #[test]
+    fn drand_quicknet_pinned_params_and_official_vectors_authenticate() {
+        let vectors = load_vectors();
+        assert_eq!(vectors.scheme_id, DRAND_QUICKNET_SCHEME_ID);
+        assert_eq!(vectors.chain_hash, hex::encode(DRAND_QUICKNET_CHAIN_HASH));
+        assert_eq!(vectors.public_key, hex::encode(DRAND_QUICKNET_PUBLIC_KEY));
+        assert_eq!(vectors.genesis_time, DRAND_QUICKNET_GENESIS_UNIX);
+        assert_eq!(vectors.period, DRAND_QUICKNET_PERIOD_SECS);
+        assert!(!vectors.beacons.is_empty());
+
+        for v in &vectors.beacons {
+            let sig = decode_hex_vec(&v.signature);
+            assert_eq!(sig.len(), DRAND_QUICKNET_SIGNATURE_BYTES);
+            assert_eq!(
+                drand_quicknet_signature_status(v.round, &sig),
+                Ok(DrandBeaconAuthStatus::Authenticated),
+                "official quicknet round {} must authenticate",
+                v.round
+            );
+            let beacon = match derive_drand_beacon(&sig) {
+                Ok(b) => b,
+                Err(err) => panic!("derive_drand_beacon round {}: {err}", v.round),
+            };
+            assert_eq!(hex::encode(beacon), v.randomness);
+        }
+    }
+
+    #[test]
+    fn drand_quicknet_rejects_every_one_bit_signature_or_round_mutation_and_bad_points() {
+        let vectors = load_vectors();
+        let sample = match vectors.beacons.iter().find(|v| v.round == 33_966_260) {
+            Some(v) => v,
+            None => panic!("round 33966260 must be present in vendored vectors"),
+        };
+        let valid_sig = decode_hex_vec(&sample.signature);
+
+        // Every single bit flip across the 48-byte (384-bit) signature must be rejected.
+        for byte_idx in 0..DRAND_QUICKNET_SIGNATURE_BYTES {
+            for bit in 0..8_u8 {
+                let mut mutated = valid_sig.clone();
+                mutated[byte_idx] ^= 1_u8 << bit;
+                assert!(
+                    matches!(
+                        drand_quicknet_signature_status(sample.round, &mutated),
+                        Err(EngineError::InvalidOrder(_))
+                    ),
+                    "1-bit signature flip at byte {byte_idx} bit {bit} must fail"
+                );
+            }
+        }
+
+        // Every single bit flip across the 64-bit round number must be rejected.
+        for bit in 0..64_u32 {
+            let mutated_round = sample.round ^ (1_u64 << bit);
+            assert!(
+                matches!(
+                    drand_quicknet_signature_status(mutated_round, &valid_sig),
+                    Err(EngineError::InvalidOrder(_))
+                ),
+                "1-bit round flip at bit {bit} ({mutated_round}) must fail"
+            );
+        }
+
+        // Point at infinity compressed encoding (0xc0, 0, ..., 0) must be rejected.
+        let mut infinity_g1 = [0u8; DRAND_QUICKNET_SIGNATURE_BYTES];
+        infinity_g1[0] = 0xc0;
+        assert!(matches!(
+            drand_quicknet_signature_status(sample.round, &infinity_g1),
+            Err(EngineError::InvalidOrder(_))
+        ));
+
+        // Corrupt G2 public key must return InvalidConfig.
+        let mut bad_pk = DRAND_QUICKNET_PUBLIC_KEY;
+        bad_pk[0] ^= 0xff;
+        assert!(matches!(
+            verify_bls_unchained_g1_with_pubkey(&bad_pk, sample.round, &valid_sig),
+            Err(EngineError::InvalidConfig(_))
+        ));
     }
 }
