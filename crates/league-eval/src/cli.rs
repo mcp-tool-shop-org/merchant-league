@@ -18,6 +18,11 @@ use crate::driver::{
 };
 use crate::freeze_gate::{FreezeOptions, JoinOptions, run_freeze_with_provenance, run_join};
 use crate::records::{CommunicationMode, EvalArm, summarize_branch_outcomes};
+use crate::report::{
+    DEFAULT_REPORT_BOOTSTRAP_SAMPLES, DEFAULT_REPORT_BOOTSTRAP_SEED, ReportOptions,
+    ReportOutputFormat, run_report,
+};
+use crate::seed_block::{DEFAULT_SEED_BLOCK_RNG_SEED, SeedBlockOptions, run_seed_block};
 use crate::select::{SelectOptions, run_select};
 use crate::serving::CrateGitShaSource;
 use crate::verify_checkpoints::{VerifyCheckpointsOptions, run_verify_checkpoints};
@@ -35,10 +40,12 @@ COMMANDS:
   play                Play up to `--turns` full turns from standard setup or turn-0 fork under `--arm <off|control|on>` and `--communication <talk|silent>`
   branch              Replay a frozen pre-act checkpoint across `--arms <off,control,on>` and `--communication <talk|silent>` holding peer actions fixed
   select              Deterministically select stratified early/mid/late pre-act checkpoints across games
+  seed-block          Generate a deterministic 4-seat Latin-square rotational seed-block manifest
   build-blind-inputs  Build anonymized `blind_inputs/` and disjoint `arm_map/` from run directories
   verify-checkpoints  Verify pre-act checkpoints causally and atomically write read-only `verified_checkpoints.json`
   freeze              Write write-once `scorer_freeze.json` on a clean worktree before scoring or joining
   join                Enforce the freeze gate and join blind scores with `arm_map/` (descriptive only)
+  report              Summarize branch runs with paired seed-level sign-flip p-values, studentized cluster CIs, and voided-game counts
 ";
 
 /// CLI error output mode (`--error-format text|json`).
@@ -196,7 +203,7 @@ fn run_cli_args(
 
     let Some(subcmd_os) = iter.next() else {
         return Err(EvalError::Usage(
-            "missing subcommand (`play`, `branch`, `select`, `build-blind-inputs`, `verify-checkpoints`, `freeze`, or `join`); run with `--help`"
+            "missing subcommand (`play`, `branch`, `select`, `seed-block`, `build-blind-inputs`, `verify-checkpoints`, `freeze`, `join`, or `report`); run with `--help`"
                 .to_owned(),
         ));
     };
@@ -216,12 +223,14 @@ fn run_cli_args(
         "play" => cmd_play(&rest, redaction_keys, git_sha, stdout),
         "branch" => cmd_branch(&rest, redaction_keys, git_sha, stdout),
         "select" => cmd_select(&rest, stdout),
+        "seed-block" => cmd_seed_block(&rest, redaction_keys, stdout),
         "build-blind-inputs" => cmd_build_blind_inputs(&rest, stdout),
         "verify-checkpoints" => cmd_verify_checkpoints(&rest, git_sha, stdout),
         "freeze" => cmd_freeze(&rest, git_sha, stdout),
         "join" => cmd_join(&rest, stdout),
+        "report" => cmd_report(&rest, stdout),
         other => Err(EvalError::Usage(format!(
-            "unknown subcommand '{other}'; expected `play`, `branch`, `select`, `build-blind-inputs`, `verify-checkpoints`, `freeze`, or `join`"
+            "unknown subcommand '{other}'; expected `play`, `branch`, `select`, `seed-block`, `build-blind-inputs`, `verify-checkpoints`, `freeze`, `join`, or `report`"
         ))),
     }
 }
@@ -875,6 +884,195 @@ fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> 
         stdout,
         "states_joined={} decisions_joined={}",
         report.states_joined, report.decisions_joined
+    )
+    .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
+    Ok(())
+}
+
+fn cmd_report(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> {
+    let mut branch_dirs: Vec<PathBuf> = Vec::new();
+    let mut joined_path: Option<PathBuf> = None;
+    let mut bootstrap_seed = DEFAULT_REPORT_BOOTSTRAP_SEED;
+    let mut bootstrap_samples = DEFAULT_REPORT_BOOTSTRAP_SAMPLES;
+    let mut format = ReportOutputFormat::Text;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut out_json_path: Option<PathBuf> = None;
+    let mut out_text_path: Option<PathBuf> = None;
+
+    let mut iter = args.iter().cloned().peekable();
+    while let Some(arg_os) = iter.next() {
+        let arg = arg_os
+            .into_string()
+            .map_err(|_| EvalError::Usage("argument contains non-UTF-8 characters".to_owned()))?;
+        match arg.as_str() {
+            "--error-format" => {
+                let val = take_value(&mut iter, "--error-format")?;
+                let _ = ErrorFormat::parse(&val)?;
+            }
+            "--branches" => {
+                let first = take_value(&mut iter, "--branches")?;
+                for part in first.split(',').filter(|p| !p.trim().is_empty()) {
+                    branch_dirs.push(PathBuf::from(part.trim()));
+                }
+                while let Some(next_os) = iter.peek() {
+                    let s = next_os.to_string_lossy();
+                    if s.starts_with("--") {
+                        break;
+                    }
+                    let val = take_value(&mut iter, "--branches")?;
+                    for part in val.split(',').filter(|p| !p.trim().is_empty()) {
+                        branch_dirs.push(PathBuf::from(part.trim()));
+                    }
+                }
+            }
+            "--joined" => joined_path = Some(PathBuf::from(take_value(&mut iter, "--joined")?)),
+            "--bootstrap-seed" => {
+                let raw = take_value(&mut iter, "--bootstrap-seed")?;
+                bootstrap_seed = raw
+                    .parse()
+                    .map_err(|_| EvalError::Usage(format!("invalid --bootstrap-seed '{raw}'")))?;
+            }
+            "--bootstrap-samples" => {
+                let raw = take_value(&mut iter, "--bootstrap-samples")?;
+                bootstrap_samples = raw.parse().map_err(|_| {
+                    EvalError::Usage(format!("invalid --bootstrap-samples '{raw}'"))
+                })?;
+            }
+            "--format" => {
+                let raw = take_value(&mut iter, "--format")?;
+                format = ReportOutputFormat::parse(&raw).map_err(EvalError::Usage)?;
+            }
+            "--out" => out_dir = Some(PathBuf::from(take_value(&mut iter, "--out")?)),
+            "--out-json" => {
+                out_json_path = Some(PathBuf::from(take_value(&mut iter, "--out-json")?));
+            }
+            "--out-text" => {
+                out_text_path = Some(PathBuf::from(take_value(&mut iter, "--out-text")?));
+            }
+            other => {
+                return Err(EvalError::Usage(format!("unknown `report` flag '{other}'")));
+            }
+        }
+    }
+
+    let opts = ReportOptions {
+        branch_dirs,
+        joined_path,
+        bootstrap_seed,
+        bootstrap_samples,
+        out_dir,
+        out_json_path,
+        out_text_path,
+    };
+    let result = run_report(&opts)?;
+    let rendered = match format {
+        ReportOutputFormat::Text => &result.text,
+        ReportOutputFormat::Json => &result.json,
+    };
+    stdout
+        .write_all(rendered.as_bytes())
+        .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
+    Ok(())
+}
+
+fn cmd_seed_block(
+    args: &[OsString],
+    redaction_keys: &[ApiKey],
+    stdout: &mut dyn Write,
+) -> Result<(), EvalError> {
+    let mut seeds: Vec<u64> = Vec::new();
+    let mut seats_path: Option<PathBuf> = None;
+    let mut arm = EvalArm::Off;
+    let mut communication = CommunicationMode::Talk;
+    let mut turns: u8 = HARD_TURN_CAP;
+    let mut table_id_base: u64 = 1;
+    let mut block_seed: u64 = DEFAULT_SEED_BLOCK_RNG_SEED;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut allowed_vm_hosts: Vec<String> = Vec::new();
+
+    let mut iter = args.iter().cloned();
+    while let Some(arg_os) = iter.next() {
+        let arg = arg_os
+            .into_string()
+            .map_err(|_| EvalError::Usage("argument contains non-UTF-8 characters".to_owned()))?;
+        match arg.as_str() {
+            "--error-format" => {
+                let val = take_value(&mut iter, "--error-format")?;
+                let _ = ErrorFormat::parse(&val)?;
+            }
+            "--seeds" => {
+                let raw = take_value(&mut iter, "--seeds")?;
+                for part in raw.split(',').filter(|p| !p.trim().is_empty()) {
+                    let parsed = part.trim().parse::<u64>().map_err(|_| {
+                        EvalError::Usage(format!("invalid `--seeds` integer '{part}'"))
+                    })?;
+                    seeds.push(parsed);
+                }
+            }
+            "--seats" => seats_path = Some(PathBuf::from(take_value(&mut iter, "--seats")?)),
+            "--arm" => {
+                let raw = take_value(&mut iter, "--arm")?;
+                arm = EvalArm::parse(&raw).map_err(EvalError::Usage)?;
+            }
+            "--communication" => {
+                let raw = take_value(&mut iter, "--communication")?;
+                communication = CommunicationMode::parse(&raw).map_err(EvalError::Usage)?;
+            }
+            "--turns" => {
+                let raw = take_value(&mut iter, "--turns")?;
+                turns = raw
+                    .parse()
+                    .map_err(|_| EvalError::Usage(format!("invalid --turns '{raw}'")))?;
+            }
+            "--table-id-base" => {
+                let raw = take_value(&mut iter, "--table-id-base")?;
+                table_id_base = raw
+                    .parse()
+                    .map_err(|_| EvalError::Usage(format!("invalid --table-id-base '{raw}'")))?;
+            }
+            "--block-seed" => {
+                let raw = take_value(&mut iter, "--block-seed")?;
+                block_seed = raw
+                    .parse()
+                    .map_err(|_| EvalError::Usage(format!("invalid --block-seed '{raw}'")))?;
+            }
+            "--out" => out_dir = Some(PathBuf::from(take_value(&mut iter, "--out")?)),
+            "--allow-vm-host" => allowed_vm_hosts.push(take_value(&mut iter, "--allow-vm-host")?),
+            other => {
+                return Err(EvalError::Usage(format!(
+                    "unknown `seed-block` flag '{other}'"
+                )));
+            }
+        }
+    }
+
+    let env_key = ApiKey::from_env().ok();
+    let redact_ref = env_key.as_ref().or_else(|| redaction_keys.first());
+    for host in &allowed_vm_hosts {
+        let _ = validate_vm_host_allowance(host)?;
+    }
+
+    let opts = SeedBlockOptions {
+        seeds,
+        seats_path: seats_path
+            .ok_or_else(|| EvalError::Usage("`seed-block` requires `--seats <file>`".to_owned()))?,
+        arm,
+        communication,
+        turns,
+        table_id_base,
+        block_seed,
+        out_dir: out_dir
+            .ok_or_else(|| EvalError::Usage("`seed-block` requires `--out <dir>`".to_owned()))?,
+        allowed_vm_hosts,
+    };
+    let manifest = run_seed_block(&opts, redact_ref)?;
+    let total_games: usize = manifest.blocks.iter().map(|b| b.games.len()).sum();
+    writeln!(
+        stdout,
+        "seed_blocks={} rotated_games={} out={}",
+        manifest.blocks.len(),
+        total_games,
+        opts.out_dir.display()
     )
     .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
     Ok(())
