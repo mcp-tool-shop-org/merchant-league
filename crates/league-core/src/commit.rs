@@ -2,6 +2,7 @@
 //! and typed diplomatic intent pledges (never storing raw chat prose).
 
 use std::fmt;
+use std::sync::OnceLock;
 
 use hkdf::Hkdf;
 use rand_chacha::ChaCha20Rng;
@@ -720,6 +721,7 @@ pub const DRAND_QUICKNET_DST: &[u8] = b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_N
 pub enum DrandBeaconAuthStatus {
     /// BLS12-381 signature verified offline against [`DRAND_QUICKNET_PUBLIC_KEY`] under
     /// [`DRAND_QUICKNET_SCHEME_ID`] (`bls-unchained-g1-rfc9380`, `#29`).
+    #[serde(alias = "hash_bound_unauthenticated")]
     Authenticated,
 }
 
@@ -739,8 +741,29 @@ impl fmt::Display for DrandBeaconAuthStatus {
     }
 }
 
-fn verify_bls_unchained_g1_with_pubkey(
+static QUICKNET_PUBKEY: OnceLock<Result<blst::min_sig::PublicKey, String>> = OnceLock::new();
+
+fn decode_and_validate_g2_pubkey(
     pubkey_bytes: &[u8; DRAND_QUICKNET_PUBLIC_KEY_BYTES],
+) -> Result<blst::min_sig::PublicKey, EngineError> {
+    blst::min_sig::PublicKey::uncompress(pubkey_bytes)
+        .and_then(|key| key.validate().map(|()| key))
+        .map_err(|err| {
+            EngineError::InvalidConfig(format!("invalid drand quicknet G2 public key: {err:?}"))
+        })
+}
+
+fn cached_quicknet_pubkey() -> Result<&'static blst::min_sig::PublicKey, EngineError> {
+    match QUICKNET_PUBKEY.get_or_init(|| {
+        decode_and_validate_g2_pubkey(&DRAND_QUICKNET_PUBLIC_KEY).map_err(|err| err.to_string())
+    }) {
+        Ok(pk) => Ok(pk),
+        Err(msg) => Err(EngineError::InvalidConfig(msg.clone())),
+    }
+}
+
+fn verify_bls_unchained_g1_with_pubkey(
+    pk: &blst::min_sig::PublicKey,
     drand_round: u64,
     drand_signature: &[u8],
 ) -> Result<DrandBeaconAuthStatus, EngineError> {
@@ -760,11 +783,6 @@ fn verify_bls_unchained_g1_with_pubkey(
             "degenerate all-zero drand signature is forbidden".to_owned(),
         ));
     }
-    let pk = blst::min_sig::PublicKey::uncompress(pubkey_bytes)
-        .and_then(|key| key.validate().map(|()| key))
-        .map_err(|err| {
-            EngineError::InvalidConfig(format!("invalid drand quicknet G2 public key: {err:?}"))
-        })?;
     let sig = blst::min_sig::Signature::uncompress(drand_signature)
         .and_then(|point| point.validate(true).map(|()| point))
         .map_err(|err| {
@@ -773,7 +791,7 @@ fn verify_bls_unchained_g1_with_pubkey(
             ))
         })?;
     let msg_digest: [u8; 32] = Sha256::digest(drand_round.to_be_bytes()).into();
-    let res = sig.verify(false, &msg_digest, DRAND_QUICKNET_DST, &[], &pk, false);
+    let res = sig.verify(false, &msg_digest, DRAND_QUICKNET_DST, &[], pk, false);
     if res != blst::BLST_ERROR::BLST_SUCCESS {
         return Err(EngineError::InvalidOrder(format!(
             "drand quicknet BLS12-381 signature verification failed for round {drand_round}: {res:?}"
@@ -786,14 +804,16 @@ fn verify_bls_unchained_g1_with_pubkey(
 /// `quicknet` chain public key ([`DRAND_QUICKNET_PUBLIC_KEY`]) under
 /// [`DRAND_QUICKNET_SCHEME_ID`] (`#29`).
 ///
-/// Rejects round `0`, signatures whose byte length is not [`DRAND_QUICKNET_SIGNATURE_BYTES`]
-/// (`48`), the degenerate all-zero slice, non-canonical/off-curve/off-subgroup G1 points, and any
-/// signature that fails the BLS12-381 pairing check over `SHA-256(drand_round.to_be_bytes())`.
+/// Decompresses and subgroup-checks [`DRAND_QUICKNET_PUBLIC_KEY`] once per process, and rejects
+/// round `0`, signatures whose byte length is not [`DRAND_QUICKNET_SIGNATURE_BYTES`] (`48`), the
+/// degenerate all-zero slice, non-canonical/off-curve/off-subgroup G1 points, and any signature
+/// that fails the BLS12-381 pairing check over `SHA-256(drand_round.to_be_bytes())`.
 pub fn drand_quicknet_signature_status(
     drand_round: u64,
     drand_signature: &[u8],
 ) -> Result<DrandBeaconAuthStatus, EngineError> {
-    verify_bls_unchained_g1_with_pubkey(&DRAND_QUICKNET_PUBLIC_KEY, drand_round, drand_signature)
+    let pk = cached_quicknet_pubkey()?;
+    verify_bls_unchained_g1_with_pubkey(pk, drand_round, drand_signature)
 }
 
 /// Derives the 32-byte turn randomness beacon as `SHA-256(drand_signature)` (`design-v2` §6.1).
@@ -1187,8 +1207,21 @@ mod tests {
         let mut bad_pk = DRAND_QUICKNET_PUBLIC_KEY;
         bad_pk[0] ^= 0xff;
         assert!(matches!(
-            verify_bls_unchained_g1_with_pubkey(&bad_pk, sample.round, &valid_sig),
+            decode_and_validate_g2_pubkey(&bad_pk),
             Err(EngineError::InvalidConfig(_))
         ));
+
+        // Legacy serialized `hash_bound_unauthenticated` status still deserializes cleanly, while
+        // re-serialization emits `"authenticated"`.
+        let legacy: DrandBeaconAuthStatus =
+            match serde_json::from_str("\"hash_bound_unauthenticated\"") {
+                Ok(status) => status,
+                Err(err) => panic!("legacy DrandBeaconAuthStatus alias must deserialize: {err}"),
+            };
+        assert_eq!(legacy, DrandBeaconAuthStatus::Authenticated);
+        assert_eq!(
+            serde_json::to_string(&legacy).ok().as_deref(),
+            Some("\"authenticated\"")
+        );
     }
 }

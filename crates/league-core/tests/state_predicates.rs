@@ -429,6 +429,26 @@ fn hand_worked_season_end_and_marks() {
         h_whole.marked_value,
         mark_good_holding_at_close(&with_whole_bid, 0, AssetId::Refined(0), 1_400)
     );
+    // Same-turn whole-unit bid (`created_turn == st.turn`) must NOT lift the mark (#54): all 1_400
+    // units fall back to the 50% floor (1_400).
+    let mut same_turn_bid = with_whole_bid.clone();
+    if let Some(offer1) = same_turn_bid.offers.get_mut(&1) {
+        offer1.created_turn = same_turn_bid.turn;
+    }
+    let p_same = must(
+        season_end_and_marks(&same_turn_bid, Seat(0)),
+        "season end same-turn bid",
+    );
+    let Some(h_same) = p_same
+        .holdings
+        .iter()
+        .find(|h| h.good == AssetId::Refined(0))
+    else {
+        panic!("Refined(0) same-turn holding")
+    };
+    assert_eq!(h_same.units_marked_by_bids, 0);
+    assert_eq!(h_same.units_at_floor, 1_400);
+    assert_eq!(h_same.marked_value, 1_400);
     // Raw(0): 1_000 free + 2_500 on seat 0's own resting sell = 3_500, all at the floor:
     // 3_500 * 1_750 * 50% / 1_000 = 3_062 (floor of 3_062.5).
     let Some(r0) = p.holdings.iter().find(|h| h.good == AssetId::Raw(0)) else {

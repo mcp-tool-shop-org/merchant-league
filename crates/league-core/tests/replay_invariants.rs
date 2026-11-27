@@ -3406,6 +3406,31 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         drand_ok_out.drand_beacon_auth_status,
         Some(DrandBeaconAuthStatus::Authenticated)
     );
+    // Older saved ReplayOutcome JSON carrying `"hash_bound_unauthenticated"` still deserializes.
+    let ok_json = must_ok(
+        serde_json::to_string(&drand_ok_out),
+        "serialize ReplayOutcome",
+    );
+    assert!(ok_json.contains("\"drand_beacon_auth_status\":\"authenticated\""));
+    let legacy_json = ok_json.replacen(
+        "\"drand_beacon_auth_status\":\"authenticated\"",
+        "\"drand_beacon_auth_status\":\"hash_bound_unauthenticated\"",
+        1,
+    );
+    assert_ne!(legacy_json, ok_json);
+    let decoded_serde: league_core::ReplayOutcome = must_ok(
+        serde_json::from_str(&legacy_json),
+        "serde legacy ReplayOutcome",
+    );
+    let decoded_slice = must_ok(
+        league_core::ReplayOutcome::from_json_slice(legacy_json.as_bytes()),
+        "from_json_slice legacy ReplayOutcome",
+    );
+    assert_eq!(
+        decoded_serde.drand_beacon_auth_status,
+        Some(DrandBeaconAuthStatus::Authenticated)
+    );
+    assert_eq!(decoded_slice, drand_ok_out);
 
     let mut drand_missing_round = drand_ok.clone();
     drand_missing_round.turns[0].drand_round = None;

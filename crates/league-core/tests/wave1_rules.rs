@@ -1396,8 +1396,9 @@ fn run_single_season_for_spoof(
         );
         let probe_rec = must_ok(sim_close_check.sweep_turn(turn_beacon), "probe sweep");
         if probe_rec.season_closed {
-            // Compute Seat 1's Refined(1) holding mark without the 0.001-unit late bid vs with it.
-            // Solvent non-self Seat 2 posts at the end of Phase 1 so spoof CRED drain cannot skip the probe.
+            // Compute Seat 1's Refined(1) holding mark without vs with closing-turn high bids
+            // (`0.001` u and `1.000` u). Solvent non-self Seat 2 posts on the closing turn so #54's
+            // prior-turn resting + whole-unit rules keep `close_turn_mark_lift == 0`.
             let target_good = AssetId::Refined(1);
             let target_units = eng.state().seats[1].refined[1].max(1_000);
             let target_parity = eng.state().parities.asset_parity(target_good);
@@ -1410,7 +1411,7 @@ fn run_single_season_for_spoof(
                     order: OfferProposal {
                         side: OfferSide::Buy,
                         good: target_good,
-                        amount: 1, // 0.001 units (#54 unhittable dust bid)
+                        amount: 1, // 0.001 units (#54 closing-turn dust bid)
                         price_per_unit_cred: tiny_bid_price,
                         domain_id: None,
                         is_hybrid: false,
@@ -1418,9 +1419,31 @@ fn run_single_season_for_spoof(
                 }),
                 "post #54 dust bid",
             );
-            let mark_after =
+            let mark_after_tiny =
                 mark_good_holding_at_close(with_tiny_bid.state(), 1, target_good, target_units);
-            close_turn_mark_lift = i128::from(mark_after - mark_before);
+            let mut with_whole_closing_bid = eng.clone();
+            must_ok(
+                with_whole_closing_bid.apply_market_action(MarketAction::PostOffer {
+                    seat: 2,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: target_good,
+                        amount: UNIT_SCALE, // 1.000 unit closing-turn bid (#54 created_turn == turn)
+                        price_per_unit_cred: target_parity.saturating_mul(2),
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                }),
+                "post #54 whole closing bid",
+            );
+            let mark_after_whole = mark_good_holding_at_close(
+                with_whole_closing_bid.state(),
+                1,
+                target_good,
+                target_units,
+            );
+            close_turn_mark_lift = i128::from(mark_after_tiny - mark_before)
+                + i128::from(mark_after_whole - mark_before);
         }
 
         // Convert raw to refined cleanly so balances sustain across the season.

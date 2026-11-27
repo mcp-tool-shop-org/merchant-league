@@ -52,7 +52,7 @@
           "path": "docs/decision-scorer.md"
         },
         {
-          "hash": "37f4bc8fb2489eb55a3d90623fedaf87ae529e4d6b5a6b35a17d91ca0fc152b3",
+          "hash": "ec1d67caf94733ef369b0759e9a21c4b35bc717d6f7bfe0f00c18972d7ea4a28",
           "path": "docs/design-v2.md"
         },
         {
@@ -661,125 +661,135 @@
             {
               "in": "validate",
               "kind": "err",
-              "line": 47
+              "line": 48
             },
             {
               "in": "draw_nonzero_256_bits",
               "kind": "err",
-              "line": 254
+              "line": 255
             },
             {
               "in": "deal_mandate_deck_indices",
               "kind": "err",
-              "line": 289
+              "line": 290
             },
             {
               "in": "deal_mandate_deck_indices",
               "kind": "err",
-              "line": 294
+              "line": 295
             },
             {
               "in": "deal_graded_mandates_with_entropy",
               "kind": "err",
-              "line": 323
+              "line": 324
             },
             {
               "in": "deal_graded_mandates_with_entropy",
               "kind": "err",
-              "line": 332
+              "line": 333
             },
             {
               "in": "verify_preimage_condition",
               "kind": "err",
-              "line": 417
+              "line": 418
             },
             {
               "in": "verify_order_reveal",
               "kind": "err",
-              "line": 452
+              "line": 453
             },
             {
               "in": "verify_mandate_reveal",
               "kind": "err",
-              "line": 485
+              "line": 486
+            },
+            {
+              "in": "cached_quicknet_pubkey",
+              "kind": "match-err",
+              "line": 761
+            },
+            {
+              "in": "cached_quicknet_pubkey",
+              "kind": "err",
+              "line": 761
             },
             {
               "in": "verify_bls_unchained_g1_with_pubkey",
               "kind": "err",
-              "line": 748
+              "line": 771
             },
             {
               "in": "verify_bls_unchained_g1_with_pubkey",
               "kind": "err",
-              "line": 753
+              "line": 776
             },
             {
               "in": "verify_bls_unchained_g1_with_pubkey",
               "kind": "err",
-              "line": 759
+              "line": 782
             },
             {
               "in": "verify_bls_unchained_g1_with_pubkey",
               "kind": "err",
-              "line": 778
+              "line": 796
             },
             {
               "in": "derive_drand_beacon",
               "kind": "err",
-              "line": 805
+              "line": 825
             },
             {
               "in": "derive_drand_beacon",
               "kind": "err",
-              "line": 811
+              "line": 831
             },
             {
               "in": "verify_drand_quicknet_beacon",
               "kind": "err",
-              "line": 832
+              "line": 852
             },
             {
               "in": "verify_drand_quicknet_beacon",
               "kind": "err",
-              "line": 840
+              "line": 860
             },
             {
               "in": "try_from_bytes",
               "kind": "err",
-              "line": 883
+              "line": 903
             },
             {
               "in": "secret_key",
               "kind": "err",
-              "line": 897
+              "line": 917
             },
             {
               "in": "prove_turn",
               "kind": "err",
-              "line": 923
+              "line": 943
             },
             {
               "in": "prove_turn",
               "kind": "err",
-              "line": 933
+              "line": 953
             },
             {
               "in": "validate_eval_vrf_pubkey",
               "kind": "err",
-              "line": 959
+              "line": 979
             },
             {
               "in": "verify_and_extract_eval_vrf_beacon",
               "kind": "err",
-              "line": 976
+              "line": 996
             },
             {
               "in": "verify_eval_vrf_beacon",
               "kind": "err",
-              "line": 1014
+              "line": 1034
             }
           ],
-          "hash": "cfd7ec5a0629ed8d3e0fa51d479aeb049f2b9c188dae09b2b39548bc6c80d596",
+          "hash": "57301e69472553d39ea9c0e095ee7ae0f13e814eebfb1119a0ce2ac6338cdf87",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/types.rs"
@@ -2016,7 +2026,7 @@
               "line": 276
             }
           ],
-          "hash": "dd9caa9927c74c3794a6b7742e5b65edde449749a0eca842d2334b3fdaed7c8e",
+          "hash": "7c71d17c91769a2155e312d915003160054ad5a466e04b3d7aaf2864a6c34c57",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/contracts.rs",
@@ -2357,10 +2367,10 @@
             {
               "in": "compute_final_scoreboard",
               "kind": "err",
-              "line": 556
+              "line": 561
             }
           ],
-          "hash": "8532ec4774522952b3d4665dcecdf1a6998e1816b50fa6415e65569dd816abe7",
+          "hash": "5afa40a211ec86d89bccda5ad9b2aa6a9235cedd4532719e979e0e7f1189714b",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/commit.rs",
@@ -2659,7 +2669,7 @@
           "testsInside": true
         },
         {
-          "hash": "a8a6be96e4f8835eda7509baa47a27b59bca00df45092a6c3884e0488ae386a3",
+          "hash": "2fe4561df9da0f571feaeeb5e2bfe3edcfa098503d686314a17ae77acffdbfff",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2699,7 +2709,7 @@
           "testsInside": true
         },
         {
-          "hash": "e2c46c3a25197b87a841fafeb64b3910cc2aff940f2c3e106b67c0ed546a1b05",
+          "hash": "8da58514ba10b966e1b56bb659b1d0d64b8b0c6f276cc5591bd7576d857dd30a",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2708,7 +2718,7 @@
           "testsInside": true
         },
         {
-          "hash": "09d66906de6ffddfaca95b69368166e012d0fc61c984678237cabc71ff283aeb",
+          "hash": "c9d00137a0091d911d14e682ef16094ff2011cd7a44679f1bfeac2701460fa10",
           "importOrder": [
             "crates/league-core/src/observation.rs",
             "crates/league-core/src/lib.rs",
@@ -2724,7 +2734,7 @@
           "testsInside": true
         },
         {
-          "hash": "1b819b2bbb9bbc266164bfe0b00fc0b1d7a80c0edf2f8f6ffb0dcb22a25e9a48",
+          "hash": "ca8be42655d6c0e6f52c35a3694db1dac57d7bb024d3c780d388eee085789b8d",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2737,7 +2747,7 @@
           "path": "crates/league-core/tests/vectors/drand_quicknet_vectors.json"
         },
         {
-          "hash": "800251bc9f9af1cb17616cec12bd450ea7e433e5f1dcd601241ebcd278d390f5",
+          "hash": "b3201044c01d27397b3a6a87b28fd435bb23bbf9649622a76e5a5766d5796c9f",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -7243,7 +7253,7 @@
             "mandate_deck_for_ring_table",
             "mean_project_value_milli"
           ],
-          "hash": "737d89dc6d774f2ae7d492d7b5246400a398fb14388c22f40215c934711892f1",
+          "hash": "59bc4a23b2700070680fd57a77f8b045da2d5ad32b7a2b2a3ff73415a811c3ae",
           "importOrder": [
             "crates/league-gen/src/schema.rs",
             "crates/league-core/src/lib.rs",
@@ -18158,6 +18168,10 @@
           "path": ".polyglot-pins.json"
         },
         {
+          "hash": "4925ea1be0ea12fad17d07e81e223aad8d5270a0d19c08f3053579bed7654ebf",
+          "path": "CHANGELOG.md"
+        },
+        {
           "hash": "12de388f20eca284405ca30f1021ba50cf7ac23efd0b23a96282583688d4ed52",
           "path": "CLAUDE.md"
         },
@@ -20090,8 +20104,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "62c55f3e492ed3c5c926549dd9eb336aa4fba4a2",
-    "tracked": 689
+    "commit": "bedf2dc138b8d5ebe5d00492bc0306d9f47444be",
+    "tracked": 690
   },
   "landings": [
     {
@@ -20142,6 +20156,22 @@
         }
       ],
       "target": ".gitignore",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/smoke-container.sh",
+          "call": "literal",
+          "confidence": "text"
+        },
+        {
+          "by": "scripts/test-guards.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "CHANGELOG.md",
       "writers": []
     },
     {

@@ -1297,10 +1297,13 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
     );
     season_hasher.update(format!("CLOSE_OBS0|{close_obs0_json}\n").as_bytes());
     let actual_stream_sha256 = sha256_hex(&season_hasher.finalize());
-    // Stream digest reflects Turn-2 SeatObservation HoldingMark update under #54; Turn 1, Turns 3..=24, close_obs0, and scoreboard match 8abc9abc.
+    // Stream digest reflects Fix 1 (#54 prior-turn resting bid filter `created_turn < state.turn`):
+    // Seat(1..=3) observe after Seat(0..=s-1) Pass-A `PostOffer`s on turn `cur_t`, so same-turn
+    // bids no longer lift Seat(1..=3) `HoldingMark` during Pass-A (`StatePredicateSection` at
+    // turn-start, Seat(0) Turn 1..24, `close_obs0`, receipts, and `FinalScoreboard` stay identical).
     assert_eq!(
         actual_stream_sha256,
-        "8f7c9b72dbc31bb4ad92c5f5a1d9c3bf68b5288358ed5166bdc030680bc67110"
+        "d37727d7fdc4b4c9b33638e2675a7e86120c8253b8e17605a29a79acb213a72c"
     );
 
     let (scoreboard, _log, section, metrics) =

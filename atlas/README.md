@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-27 from commit 62c55f3 by Atlas 1.26.0.
+Mapped at 2026-11-27 from commit bedf2dc by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,11 +8,10 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 16 parts, mostly Rust (422 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-27 (543e488)
+## What changed since 2026-11-27 (62c55f3)
 
-- CI now also runs crates/league-core/src/scoring.rs.
-- crates/league-core/tests/vectors/drand_quicknet_vectors.json is now read by crates/league-core/src/commit.rs, crates/league-core/tests/core_card2_randomness_scoring.rs, crates/league-core/tests/replay_invariants.rs and crates/league-core/tests/wave1_rules.rs.
-- 1 file added, 1 removed and 18 changed content, across 6 parts.
+- CHANGELOG.md is now read by scripts/smoke-container.sh and scripts/test-guards.sh.
+- 1 file added and 10 changed content, across 4 parts.
 
 ## What comes in
 
@@ -78,7 +77,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 12 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 
