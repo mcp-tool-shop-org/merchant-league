@@ -359,27 +359,6 @@ pub trait ToStructuredError {
     fn to_structured_error(&self) -> StructuredError;
 }
 
-/// Temporary negative-control probe with untested lines to prove `codecov/patch`
-/// rejects diffs below 90%; reverted immediately after CI confirms failure.
-#[doc(hidden)]
-#[must_use]
-pub fn _planted_patch_coverage_probe(selector: u32) -> u32 {
-    let base = selector.wrapping_add(3);
-    if base < 10 {
-        return base.saturating_mul(2);
-    }
-    if base < 20 {
-        return base.saturating_add(5);
-    }
-    if base < 30 {
-        return base.saturating_sub(4);
-    }
-    if base < 40 {
-        return base ^ 0x5A;
-    }
-    base.wrapping_mul(7)
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::borrow::ToOwned;
