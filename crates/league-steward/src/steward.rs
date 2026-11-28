@@ -297,6 +297,7 @@ pub struct GameTableSteward<'a, T: Transport> {
     cartel_domain_ids: BTreeMap<u8, String>,
     last_credit_tiers: Vec<CreditTier>,
     last_identities: Vec<SeatIdentity>,
+    last_charter_holders: BTreeMap<league_core::CharterRole, u8>,
     last_observed_ledger: u64,
     last_genesis_hash: Option<String>,
     last_oracle_update_time: u32,
@@ -608,6 +609,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             cartel_domain_ids: BTreeMap::new(),
             last_credit_tiers,
             last_identities,
+            last_charter_holders: BTreeMap::new(),
             last_observed_ledger,
             last_genesis_hash: None,
             last_oracle_update_time: 0,
@@ -804,6 +806,13 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             mat.dropped_records,
         );
 
+        let current_turn = mat.engine.state().turn;
+        let last_charter_holders = mat
+            .active_charters
+            .iter()
+            .filter(|ch| ch.expires_turn > current_turn)
+            .map(|ch| (ch.role, ch.holder))
+            .collect();
         let mut steward = Self {
             client,
             engine: mat.engine,
@@ -824,6 +833,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             cartel_domain_ids: mat.cartel_domain_ids,
             last_credit_tiers: mat.last_credit_tiers,
             last_identities: mat.last_identities,
+            last_charter_holders,
             last_observed_ledger: previous_ledger.max(mat.last_observed_ledger),
             last_genesis_hash,
             last_oracle_update_time: 0,
@@ -914,6 +924,12 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
         self.last_oracle_update_time = outcome.wave3_oracle_update_time;
 
         let current_turn = self.engine.state().turn;
+        self.last_charter_holders = mat
+            .active_charters
+            .iter()
+            .filter(|ch| ch.expires_turn > current_turn)
+            .map(|ch| (ch.role, ch.holder))
+            .collect();
         self.native_escrows.clear();
         for (eid, esc) in mat.native_escrows {
             let new_seq = outcome
@@ -2441,6 +2457,16 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                     league_core::CharterRole::CustomsInspector => "CHARTER_INSPECTOR",
                     league_core::CharterRole::OracleAuditor => "CHARTER_AUDITOR",
                 };
+                if let Some(&prev_holder) = self.last_charter_holders.get(&role)
+                    && let Some(prev_acc) = self.seat_accounts.get(usize::from(prev_holder))
+                {
+                    let _ = delete_credential(
+                        self.client,
+                        &self.steward_account,
+                        prev_acc.address(),
+                        cred_name,
+                    );
+                }
                 let uri_hex =
                     hex::encode_upper(format!("turn:{}:seat:{winner}", receipt.turn).as_bytes());
                 issue_and_accept_credential(
@@ -2451,6 +2477,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                     Some(exp),
                     Some(&uri_hex),
                 )?;
+                self.last_charter_holders.insert(role, winner);
             }
         }
 
@@ -2743,6 +2770,7 @@ mod tests {
         escrows: BTreeMap<(String, u32), (String, String, Units, String)>, // (owner, seq) -> (dest, currency, amt, cond)
         checks: BTreeMap<String, (String, String, String, Units)>, // check_id -> (drawer, dest, currency, max)
         txs: BTreeMap<String, Value>,
+        credentials: BTreeSet<(String, String, String)>,
         obj_seq: u64,
     }
 
@@ -2779,6 +2807,7 @@ mod tests {
             st.escrows.clear();
             st.checks.clear();
             st.txs.clear();
+            st.credentials.clear();
             st.obj_seq = 0;
         }
 
@@ -3100,6 +3129,40 @@ mod tests {
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     st.checks.remove(cid);
+                }
+                "CredentialCreate" => {
+                    let subj = tx_json
+                        .get("Subject")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let ct = tx_json
+                        .get("CredentialType")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    if !st.credentials.insert((account.clone(), subj, ct)) {
+                        result_code = "tecDUPLICATE".to_string();
+                        meta = json!({ "TransactionResult": "tecDUPLICATE" });
+                    }
+                }
+                "CredentialDelete" => {
+                    let issuer = tx_json
+                        .get("Issuer")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&account)
+                        .to_string();
+                    let subj = tx_json
+                        .get("Subject")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let ct = tx_json
+                        .get("CredentialType")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    st.credentials.remove(&(issuer, subj, ct));
                 }
                 "PermissionedDomainSet" => {
                     st.obj_seq += 1;

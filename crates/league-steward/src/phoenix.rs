@@ -489,7 +489,35 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         )?;
     }
 
-    // 2d. Steward TrustSet (tfSetfAuth) across all N * (1 + 2N) trust lines via BatchV1_1 chunks.
+    // Close Wave 2 ledger (#2).
+    let _ = client.ledger_accept()?;
+    closes_used += 1;
+
+    let wave2_batch_count = wave2_batches.len();
+    for qb in &wave2_batches {
+        let verified = verify_queued_batch(client, qb)?;
+        total_batches_verified += 1;
+        total_inner_legs_verified += verified.inners.len();
+    }
+    for qtx in &wave2_txs {
+        let _ = verify_queued_tx(client, qtx)?;
+    }
+
+    // =========================================================================
+    // WAVE 3 (ledger_accept #3):
+    // - Steward TrustSet (tfSetfAuth) across all N * (1 + 2N) validated seat trust lines
+    // - Mint pre-wipe CRED + 2N commodity balances
+    // - Re-open native PREIMAGE-SHA-256 TokenEscrow vaults (atomically in BatchV1_1)
+    // - Re-open native CheckCreate objects & mid-turn commit escrows
+    // - Publish OracleSet Turn prices
+    // =========================================================================
+    let (_, wave2_ripple_close) = client.validated_close_time()?;
+    let mut wave3_batches = Vec::<QueuedBatch>::new();
+    let mut wave3_txs = Vec::<QueuedTx>::new();
+
+    // 3a. Steward TrustSet (tfSetfAuth) runs after all seat TrustSet(tfSetNoRipple) objects were
+    // validated in Close #2, and uses lower TicketSequence numbers so CanonicalTXSet applies
+    // every SetAuth before Steward mints and multi-signer BatchV1_1 transfers below.
     let mut auth_legs = Vec::with_capacity(n * all_currencies.len());
     for seat_acc in seat_accounts.iter().take(n) {
         for cur in &all_currencies {
@@ -512,34 +540,9 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         &mut steward_tickets,
         base_fee,
         last_ledger,
-        &mut wave2_batches,
-        &mut wave2_txs,
+        &mut wave3_batches,
+        &mut wave3_txs,
     )?;
-
-    // Close Wave 2 ledger (#2).
-    let _ = client.ledger_accept()?;
-    closes_used += 1;
-
-    let wave2_batch_count = wave2_batches.len();
-    for qb in &wave2_batches {
-        let verified = verify_queued_batch(client, qb)?;
-        total_batches_verified += 1;
-        total_inner_legs_verified += verified.inners.len();
-    }
-    for qtx in &wave2_txs {
-        let _ = verify_queued_tx(client, qtx)?;
-    }
-
-    // =========================================================================
-    // WAVE 3 (ledger_accept #3):
-    // - Mint pre-wipe CRED + 2N commodity balances
-    // - Re-open native PREIMAGE-SHA-256 TokenEscrow vaults (atomically in BatchV1_1)
-    // - Re-open native CheckCreate objects & mid-turn commit escrows
-    // - Publish OracleSet Turn prices
-    // =========================================================================
-    let (_, wave2_ripple_close) = client.validated_close_time()?;
-    let mut wave3_batches = Vec::<QueuedBatch>::new();
-    let mut wave3_txs = Vec::<QueuedTx>::new();
 
     // Group open native escrows by owner_seat so each owner's CRED mint + EscrowCreate(s) execute
     // atomically inside one multi-signer BatchV1_1 (`tfAllOrNothing`).
