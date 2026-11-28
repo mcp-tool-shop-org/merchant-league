@@ -13,6 +13,7 @@ pub mod relay;
 pub mod seats;
 pub mod secret;
 pub mod transport;
+pub mod whisper_relay;
 pub mod wording;
 
 pub use cli::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, ErrorFormat};
@@ -50,6 +51,14 @@ pub use secret::{
 pub use transport::{
     LocalOpenAiTransport, MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse,
     Transport, TransportError, UreqTransport, map_local_ureq_error, map_ureq_error,
+};
+pub use whisper_relay::{
+    DeliveredWhisper, RecipientTickBatch, SeatSessionPubkey, SeqWatermarkEntry,
+    SignedWhisperEnvelope, SubRoundTickRelease, UnsignedWhisperEnvelope,
+    WHISPER_ENVELOPE_DOMAIN_TAG, WhisperDropReason, WhisperDropRecord, WhisperRelayCoordinator,
+    WhisperRelayStateSnapshot, WhisperTableConfig, WhisperWindowKey, batch_to_negotiation_inputs,
+    ed25519_pubkey_hex_from_secret, escape_untrusted_message_json_str,
+    render_untrusted_message_frame, sign_whisper_envelope, whisper_envelope_signing_bytes,
 };
 pub use wording::{
     ACTIVE_WORDING_ARM, AiPreviewWireOutput, CONTROL_ARM_WORDING, CONTROL_ARM_WORDING_R1,

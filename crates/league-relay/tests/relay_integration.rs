@@ -10045,7 +10045,9 @@ fn part1_b4_1_c5_system_wrapper_snapshot_scratchpad_emc_and_setup_record() -> Te
     ])?;
     match parsed_cmd {
         CliCommand::Turn(args) => assert_eq!(args.memory_mode, MemoryMode::Snapshot),
-        CliCommand::PrebookCheck(_) | CliCommand::Help => return Err("expected Turn".into()),
+        CliCommand::PrebookCheck(_) | CliCommand::WhisperTick(_) | CliCommand::Help => {
+            return Err("expected Turn".into());
+        }
     }
 
     // --- 1. Default Snapshot mode + 500-token scratchpad persistence & cap (with response schema per R2-B3) ---
@@ -11010,7 +11012,9 @@ fn part1_cli_schema_local_validation_and_cost_over_estimate_branches() -> TestRe
                     Some(Path::new("schema.json"))
                 );
             }
-            CliCommand::PrebookCheck(_) | CliCommand::Help => return Err("expected Turn".into()),
+            CliCommand::PrebookCheck(_) | CliCommand::WhisperTick(_) | CliCommand::Help => {
+                return Err("expected Turn".into());
+            }
         }
     }
     assert!(

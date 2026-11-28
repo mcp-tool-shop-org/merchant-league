@@ -738,7 +738,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                         INITIAL_TICKET_COUNT,
                     )?;
                     let ticket = self.seat_tickets[usize::from(seat)].pop();
-                    let (xrpl_seq, _) = submit_escrow_create(
+                    let (xrpl_seq, _, _) = submit_escrow_create(
                         self.client,
                         &self.seat_accounts[usize::from(seat)],
                         fields,
@@ -884,7 +884,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             INITIAL_TICKET_COUNT,
         )?;
         let ticket = self.seat_tickets[s_idx].pop();
-        let (seq, _) = submit_escrow_create(
+        let (seq, tx_hash, _) = submit_escrow_create(
             self.client,
             seat_acc,
             json!({
@@ -897,32 +897,26 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             ticket,
         )?;
 
-        // Retrieve validated transaction from `xrpld` so the firewall inspects the actual on-ledger tx.
-        let account_tx = self.client.call(
-            "account_tx",
-            json!({
-                "account": seat_acc.address(),
-                "ledger_index_min": -1,
-                "ledger_index_max": -1,
-                "limit": 1
-            }),
-        )?;
-        let tx_entry = account_tx
-            .get("transactions")
-            .and_then(Value::as_array)
-            .and_then(|arr| arr.first())
-            .ok_or_else(|| {
-                StewardError::Protocol("account_tx missing commit transaction".into())
-            })?;
-        let mut tx_json = tx_entry
+        // Retrieve validated transaction by exact tx_hash from `xrpld` so concurrent
+        // same-account transactions cannot race `account_tx(limit: 1)`.
+        let tx_reply = self
+            .client
+            .call("tx", json!({ "transaction": tx_hash.clone() }))?;
+        if tx_reply.get("validated").and_then(Value::as_bool) != Some(true) {
+            return Err(StewardError::Protocol(
+                "commit transaction is not validated".into(),
+            ));
+        }
+        let mut tx_json = tx_reply
             .get("tx_json")
-            .or_else(|| tx_entry.get("tx"))
+            .or_else(|| tx_reply.get("tx"))
             .cloned()
-            .ok_or_else(|| StewardError::Protocol("account_tx entry missing tx_json".into()))?;
-        if tx_json.get("hash").is_none()
-            && let Some(h) = tx_entry.get("hash").cloned()
-        {
-            tx_json["hash"] = h;
+            .unwrap_or_else(|| tx_reply.clone());
+        if tx_json.get("hash").is_none() {
+            tx_json["hash"] = tx_reply
+                .get("hash")
+                .cloned()
+                .unwrap_or(Value::String(tx_hash));
         }
         let tx_close_ripple = self
             .client
@@ -3297,5 +3291,110 @@ mod tests {
             }),
             Err(StewardError::InsufficientLineForClawback { .. })
         ));
+    }
+
+    #[test]
+    fn submit_seat_commit_via_xrpld_looks_up_tx_hash_directly_not_account_tx() {
+        use std::rc::Rc;
+        struct InterceptAccountTxTransport {
+            inner: ScriptedXrplNode,
+            account_tx_calls: Rc<RefCell<usize>>,
+            tx_lookup_hashes: Rc<RefCell<Vec<String>>>,
+            force_unvalidated_tx: Rc<RefCell<Option<usize>>>,
+        }
+
+        impl Transport for InterceptAccountTxTransport {
+            fn post(&self, url: &str, body: &Value) -> Result<Value, String> {
+                let method = body
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if method == "account_tx" {
+                    *self.account_tx_calls.borrow_mut() += 1;
+                    return Ok(json!({
+                        "result": {
+                            "status": "success",
+                            "transactions": [{
+                                "tx_json": {
+                                    "Account": "rBogusConcurrentAccount",
+                                    "TransactionType": "AccountSet",
+                                    "Memos": [{"Memo": {"MemoData": "deadbeef"}}]
+                                },
+                                "hash": "BADCONCURRENTHASH"
+                            }]
+                        }
+                    }));
+                }
+                if method == "tx" {
+                    let h = body
+                        .get("params")
+                        .and_then(|p| p.get(0))
+                        .and_then(|p| p.get("transaction"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    self.tx_lookup_hashes.borrow_mut().push(h);
+                    let mut reply = self.inner.post(url, body)?;
+                    if let Some(after) = *self.force_unvalidated_tx.borrow()
+                        && self.tx_lookup_hashes.borrow().len() > after
+                        && let Some(res) = reply.get_mut("result").and_then(Value::as_object_mut)
+                    {
+                        res.insert("validated".to_string(), Value::Bool(false));
+                    }
+                    return Ok(reply);
+                }
+                self.inner.post(url, body)
+            }
+        }
+
+        let account_tx_calls = Rc::new(RefCell::new(0));
+        let tx_lookup_hashes = Rc::new(RefCell::new(Vec::new()));
+        let force_unvalidated_tx = Rc::new(RefCell::new(None));
+        let transport = InterceptAccountTxTransport {
+            inner: ScriptedXrplNode::new(),
+            account_tx_calls: Rc::clone(&account_tx_calls),
+            tx_lookup_hashes: Rc::clone(&tx_lookup_hashes),
+            force_unvalidated_tx: Rc::clone(&force_unvalidated_tx),
+        };
+        let client = StandAlone::with_transport("http://127.0.0.1:5005", transport)
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let schedule = DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 12,
+            turn_period_secs: 12,
+        };
+        let (spec, deal) =
+            TableSpec::standard_game_chiral_ring_with_mandates(TableId(91), 4, 11, schedule)
+                .unwrap_or_else(|e| panic!("spec: {e}"));
+        let mut steward = GameTableSteward::bootstrap(&client, spec, 11, deal)
+            .unwrap_or_else(|e| panic!("bootstrap: {e}"));
+        steward
+            .advance_to_commit()
+            .unwrap_or_else(|e| panic!("commit phase: {e}"));
+
+        let rev = OrderReveal {
+            bundle: SealedOrderBundle::default(),
+            salt: RevealSalt([0x33u8; 32]),
+        };
+        let ch = compute_order_commitment(TableId(91), Turn(1), Seat(0), &rev)
+            .unwrap_or_else(|e| panic!("ch: {e}"));
+        let verified = steward
+            .submit_seat_commit_via_xrpld(0, ch, [0x44u8; 32])
+            .unwrap_or_else(|e| panic!("direct tx lookup commit failed: {e}"));
+        assert_eq!(verified.seat, 0);
+        assert_eq!(verified.commitment, ch);
+        assert_eq!(*account_tx_calls.borrow(), 0);
+        assert!(
+            tx_lookup_hashes
+                .borrow()
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case(&verified.tx_hash))
+        );
+
+        let after_count = tx_lookup_hashes.borrow().len() + 1;
+        *force_unvalidated_tx.borrow_mut() = Some(after_count);
+        let ch1 = compute_order_commitment(TableId(91), Turn(1), Seat(1), &rev)
+            .unwrap_or_else(|e| panic!("ch1: {e}"));
+        let err = steward.submit_seat_commit_via_xrpld(1, ch1, [0x55u8; 32]);
+        assert!(matches!(err, Err(StewardError::Protocol(_))));
     }
 }

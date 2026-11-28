@@ -1,30 +1,23 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-28 from commit 62a27b7 by Atlas 1.26.0.
+Mapped at 2026-11-28 from commit 7065ba0 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-16 parts, mostly Rust (429 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+16 parts, mostly Rust (431 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-28 (5053d70)
+## What changed since 2026-11-28 (62a27b7)
 
-- CI now also runs crates/league-steward/src/amount.rs, crates/league-steward/src/codec.rs, crates/league-steward/src/error.rs and 3 more.
-- CI now also checks crates/league-steward/src/lib.rs.
-- crates/league-core/ is now also read by crates/league-steward/Cargo.toml.
-- crates/league-core/tests/vectors/drand_quicknet_vectors.json is now also read by crates/league-core/src/replay.rs, crates/league-steward/src/steward.rs and crates/league-steward/tests/steward_live.rs.
-- crates/league-error/ is now also read by crates/league-steward/Cargo.toml.
-- And 4 more new writers and readers of places.
-- crates/league-steward/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.
-- crates/league-steward/src/amount.rs is new and belongs to no part, so atlas check fails on it against the previous map.
-- crates/league-steward/src/codec.rs is new and belongs to no part, so atlas check fails on it against the previous map.
-- And 5 more new files that belong to no part.
-- 8 files added and 13 changed content, across 4 parts.
+- league-relay now imports league-seat-types.
+- CI now also runs crates/league-relay/src/whisper_relay.rs.
+- crates/league-seat-types/ is now also read by crates/league-relay/Cargo.toml.
+- 2 files added and 11 changed content, across 4 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 16 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 91 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 5 more.
+1. **CI.** On a pull request; on a push to main touching 16 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 93 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 5 more.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-eval** (a command people run). Runs crates/league-eval/src/main.rs.
 4. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
@@ -37,7 +30,7 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 ## What happens through CI
 
-1. The workflow runs 6 files in scripts, 20 files in league-core, crates/league-error/ in league-error, 18 files in league-eval, 10 files in league-gen, and 38 files in 16 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer, and crates/league-steward/src/lib.rs.
+1. The workflow runs 6 files in scripts, 20 files in league-core, crates/league-error/ in league-error, 18 files in league-eval, 10 files in league-gen, and 40 files in 16 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer, and crates/league-steward/src/lib.rs.
 2. It writes to site/audit-report.json, which is not tracked.
 3. It uploads coverage to Codecov.
 
@@ -67,8 +60,8 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 ## What breaks what
 
+- **league-seat-types** is imported by 7 parts (league-core, league-eval, league-gen, league-relay, league-scorer, league-seat-ui, league-tui) and sits on the path of 5 doors.
 - **league-core** is imported by 6 parts (league-eval, league-gen, league-relay, league-scorer, league-standalone, league-tui) and sits on the path of 5 doors.
-- **league-seat-types** is imported by 6 parts (league-core, league-eval, league-gen, league-scorer, league-seat-ui, league-tui) and sits on the path of 5 doors.
 - **league-error** is imported by 5 parts (league-core, league-ledger, league-relay, league-seat-types, league-standalone) and sits on the path of 8 doors.
 - **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
 - **league-relay** is imported by 1 part (league-eval) and sits on the path of 3 doors.
@@ -112,7 +105,7 @@ Nothing in the files this map could read writes to a tracked place; 1 file could
 
 ## Hand-authored
 
-People write .github/, docs/ and the repository root; 57 writes with paths built at run time may land here.
+People write .github/, docs/ and the repository root; 64 writes with paths built at run time may land here.
 
 ## Where to start
 
@@ -123,7 +116,7 @@ Read those in order to follow one run of league-eval end to end. This path follo
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 57 writes and 69 reads use paths built at run time and are not named here.
+- 64 writes and 73 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
 - 22 writes and 94 reads go to a path their caller passes, not to this repository.
 - 2 writes and 1 read go to a temporary directory, not to this repository.

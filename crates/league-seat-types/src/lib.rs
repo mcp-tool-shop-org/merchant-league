@@ -48,7 +48,7 @@ pub use engine_types::{
     BrokenPromiseRecord, ConverterOrderPreview, EscrowOrderPreview, ProjectOrderPreview, SeatState,
     SeatUpkeepPreview, ShockForecastEvent, TurnPhase,
 };
-pub use intent::{BundleDraftAction, SeatIntent, SeatIntentKind};
+pub use intent::{BundleDraftAction, IntentHeader, SeatIntent, SeatIntentKind, SwapLeg};
 pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
 #[doc(hidden)]
 pub use observation::SeatObservationPublicParts;
@@ -301,12 +301,13 @@ mod tests {
     use alloc::string::ToString;
 
     use crate::{
-        AssetId, AtomicSwapProposal, AuditorShockHint, Bps, BundleDraftAction,
-        COMMODITY_DISPLAY_CATALOG, CharterBidOrder, CharterRole, CoalitionReach, CommitmentHash,
-        CommodityDisplayMap, ContractDeliveryOrder, ConverterRecipe, ConverterRunOrder,
-        CouncilVoteBallot, CounterpartyAssumptions, CreditTier, DRAND_QUICKNET_GENESIS_UNIX,
-        DrandSchedule, DualEscrowProposal, EngineError, EscrowFinishUnlock, FundamentalParities,
-        GoodScarcity, GradedMandateCard, HumanWhatIfRequest, MandateKind, MarketAction, MarketDay,
+        AssetId, AtomicSwapProposal, AuditorShockHint, BondProposal, BondSettlementMode, Bps,
+        BundleDraftAction, COMMODITY_DISPLAY_CATALOG, CharterBidOrder, CharterRole, CoalitionReach,
+        CommitmentHash, CommodityDisplayMap, ContractDeliveryOrder, ConverterRecipe,
+        ConverterRunOrder, CouncilVoteBallot, CounterpartyAssumptions, CreditTier,
+        DRAND_QUICKNET_GENESIS_UNIX, DrandSchedule, DualEscrowProposal, EngineError,
+        EscrowFinishUnlock, FundamentalParities, GoodScarcity, GradedMandateCard,
+        HumanWhatIfRequest, IntentHeader, IntentTarget, MandateKind, MarketAction, MarketDay,
         NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL, OfferProposal, OfferSide,
         ParitySpecSource, PreimageSecret, PreviewTieMode, PrivateMandate, ProjectDeliveryOrder,
         PublicSweepReceipt, PublicTableSpec, RefusedActionPreview, RegentDoctrine,
@@ -314,7 +315,7 @@ mod tests {
         Seat, SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatIntent, SeatIntentKind,
         SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatObservation, SeatObservationPublicParts,
         SeatScreenView, SeatSpoilagePreview, SeatState, SeatStatePredicates, SeatUpkeepPreview,
-        ShockKind, SpoilageAndConversion, Step0To7SweepSummary, TableId, TableMode,
+        ShockKind, SpoilageAndConversion, Step0To7SweepSummary, SwapLeg, TableId, TableMode,
         ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewAxis, ViewColor,
         ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint,
         ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell,
@@ -1566,7 +1567,24 @@ mod tests {
             alloc::format!("{status_line:?}"),
             alloc::format!("{status_line:#?}"),
         ];
-        for text in &debug_strings {
+        let swap_leg = SwapLeg {
+            asset: AssetId::Raw(0),
+            units: 765_432,
+        };
+        let intent_hdr = IntentHeader::SpotOffer {
+            side: OfferSide::Buy,
+            good: AssetId::Refined(1),
+            whole_units: 7777,
+            unit_price_cred: 654_321,
+            domain_id: Some(2),
+        };
+        let intent_debugs = [
+            alloc::format!("{swap_leg:?}"),
+            alloc::format!("{swap_leg:#?}"),
+            alloc::format!("{intent_hdr:?}"),
+            alloc::format!("{intent_hdr:#?}"),
+        ];
+        for text in debug_strings.iter().chain(intent_debugs.iter()) {
             assert!(
                 text.contains("<redacted>") || text.contains("own_mandate: None"),
                 "expected <redacted> or own_mandate: None marker in Debug:\n{text}"
@@ -1578,5 +1596,423 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn intent_header_five_variants_round_trip_validate_and_reject_unknowns() {
+        let cond = CommitmentHash([0xAB; 32]);
+        let valid_headers = [
+            IntentHeader::SpotOffer {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                whole_units: 3,
+                unit_price_cred: 2_100,
+                domain_id: Some(1),
+            },
+            IntentHeader::AtomicSwap {
+                give_legs: vec![SwapLeg {
+                    asset: AssetId::Raw(0),
+                    units: 1_000,
+                }],
+                receive_legs: vec![SwapLeg {
+                    asset: AssetId::Refined(1),
+                    units: 1_500,
+                }],
+                swap_id: Some(9),
+                domain_id: None,
+            },
+            IntentHeader::EscrowDeal {
+                amount_cred: 4_000,
+                finish_after_turn: Some(2),
+                cancel_after_turn: 6,
+                condition_hex: Some(cond),
+                bond: Some(BondProposal {
+                    good: AssetId::Refined(1),
+                    required_units: 1_000,
+                    deadline_turn: 5,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            },
+            IntentHeader::CreditCheck {
+                send_max_cred: 2_000,
+                deliver_min_cred: Some(1_200),
+                due_turn: Some(3),
+                expiration_turn: 6,
+            },
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::VoteForSeat {
+                    office_turn: 4,
+                    candidate: 2,
+                },
+                honor_weight: Some(500),
+            },
+        ];
+
+        let expected_names = [
+            "SpotOffer",
+            "AtomicSwap",
+            "EscrowDeal",
+            "CreditCheck",
+            "DiplomaticPledge",
+        ];
+        for (hdr, exp_name) in valid_headers.iter().zip(expected_names.iter()) {
+            assert_eq!(hdr.variant_name(), *exp_name);
+            assert!(hdr.validate(4).is_ok());
+            let json =
+                serde_json::to_string(hdr).unwrap_or_else(|e| panic!("serialize {exp_name}: {e}"));
+            let rt: IntentHeader = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("deserialize {exp_name}: {e}"));
+            assert_eq!(&rt, hdr);
+        }
+
+        // Unknown 6th variant, arbitrary JSON map, and extra fields must fail closed.
+        for bad_json in [
+            r#"{"OracleHint":{"turn":3}}"#,
+            r#"{"freeform":"map","price":100}"#,
+            r#"{"SpotOffer":{"side":"Buy","good":{"Raw":0},"whole_units":1,"unit_price_cred":1000,"extra":1}}"#,
+            r#"{"AtomicSwap":{"give_legs":[{"asset":"Cred","units":1000,"extra":1}],"receive_legs":[{"asset":{"Raw":1},"units":1000}]}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<IntentHeader>(bad_json).is_err(),
+                "expected rejection for {bad_json}"
+            );
+        }
+
+        // Semantic validation refusals.
+        assert!(
+            IntentHeader::SpotOffer {
+                side: OfferSide::Sell,
+                good: AssetId::Cred,
+                whole_units: 1,
+                unit_price_cred: 1_000,
+                domain_id: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::SpotOffer {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(4),
+                whole_units: 1,
+                unit_price_cred: 1_000,
+                domain_id: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::SpotOffer {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                whole_units: 0,
+                unit_price_cred: 1_000,
+                domain_id: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::AtomicSwap {
+                give_legs: Vec::new(),
+                receive_legs: vec![SwapLeg {
+                    asset: AssetId::Cred,
+                    units: 1_000,
+                }],
+                swap_id: None,
+                domain_id: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: Some(6),
+                cancel_after_turn: 6,
+                condition_hex: Some(cond),
+                bond: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 6,
+                condition_hex: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Raw(0),
+                    required_units: 1_000,
+                    deadline_turn: 5,
+                    mode: BondSettlementMode::SellerPerformanceBond,
+                }),
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 6,
+                condition_hex: Some(CommitmentHash([0u8; 32])),
+                bond: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::CreditCheck {
+                send_max_cred: 500,
+                deliver_min_cred: Some(600),
+                due_turn: Some(2),
+                expiration_turn: 4,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::RevealPreimage {
+                    escrow_id: 0,
+                    condition: cond,
+                },
+                honor_weight: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::VoteForSeat {
+                    office_turn: 4,
+                    candidate: 4,
+                },
+                honor_weight: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::SpotOffer {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                whole_units: 1,
+                unit_price_cred: 1_000,
+                domain_id: None,
+            }
+            .validate(0)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::SpotOffer {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(0),
+                whole_units: 1,
+                unit_price_cred: 0,
+                domain_id: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::AtomicSwap {
+                give_legs: vec![SwapLeg {
+                    asset: AssetId::Cred,
+                    units: 1_000,
+                }],
+                receive_legs: Vec::new(),
+                swap_id: None,
+                domain_id: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::AtomicSwap {
+                give_legs: vec![SwapLeg {
+                    asset: AssetId::Cred,
+                    units: 0,
+                }],
+                receive_legs: vec![SwapLeg {
+                    asset: AssetId::Raw(0),
+                    units: 1_000,
+                }],
+                swap_id: None,
+                domain_id: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 0,
+                finish_after_turn: None,
+                cancel_after_turn: 6,
+                condition_hex: Some(cond),
+                bond: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 0,
+                condition_hex: Some(cond),
+                bond: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 6,
+                condition_hex: None,
+                bond: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 6,
+                condition_hex: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Cred,
+                    required_units: 1_000,
+                    deadline_turn: 5,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 6,
+                condition_hex: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Refined(0),
+                    required_units: 0,
+                    deadline_turn: 5,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::EscrowDeal {
+                amount_cred: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 6,
+                condition_hex: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Refined(0),
+                    required_units: 1_000,
+                    deadline_turn: 0,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::CreditCheck {
+                send_max_cred: 0,
+                deliver_min_cred: None,
+                due_turn: None,
+                expiration_turn: 4,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::CreditCheck {
+                send_max_cred: 500,
+                deliver_min_cred: None,
+                due_turn: None,
+                expiration_turn: 0,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::CreditCheck {
+                send_max_cred: 500,
+                deliver_min_cred: Some(300),
+                due_turn: Some(5),
+                expiration_turn: 4,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::VoteForSeat {
+                    office_turn: 0,
+                    candidate: 1,
+                },
+                honor_weight: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::VoteForSeat {
+                    office_turn: 4,
+                    candidate: 1,
+                },
+                honor_weight: Some(-1),
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::PreserveCartelMembership {
+                    office_turn: 0,
+                    domain_id: 1,
+                    beneficiary: 1,
+                },
+                honor_weight: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::PreserveCartelMembership {
+                    office_turn: 4,
+                    domain_id: 1,
+                    beneficiary: 4,
+                },
+                honor_weight: None,
+            }
+            .validate(4)
+            .is_err()
+        );
+        assert!(
+            IntentHeader::DiplomaticPledge {
+                target: IntentTarget::RevealPreimage {
+                    escrow_id: 1,
+                    condition: CommitmentHash([0u8; 32]),
+                },
+                honor_weight: None,
+            }
+            .validate(4)
+            .is_err()
+        );
     }
 }

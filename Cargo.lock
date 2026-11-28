@@ -1491,12 +1491,14 @@ dependencies = [
 name = "league-relay"
 version = "0.2.0"
 dependencies = [
+ "ed25519-dalek",
  "hex",
  "icu_normalizer",
  "icu_properties",
  "league-core",
  "league-error",
  "league-relay",
+ "league-seat-types",
  "same-file",
  "serde",
  "serde_json",

@@ -19,6 +19,10 @@ use crate::transport::{
     LocalOpenAiTransport, MockDirTransport, RawHttpResponse, Transport, TransportError,
     UreqTransport,
 };
+use crate::whisper_relay::{
+    WhisperRelayCoordinator, WhisperRelayStateSnapshot, WhisperTableConfig,
+    batch_to_negotiation_inputs,
+};
 use crate::wording::{PreviewToolMode, wording_slot};
 use std::fs;
 use std::io::Write;
@@ -72,6 +76,7 @@ pub const USAGE_TEXT: &str = "\
 Usage:
   league-relay turn --game-dir <dir> --day <DD> --round <talk|act> --seats <file> [options]
   league-relay prebook-check --seats <file> --wrapper <path> [--response-schema <path>] [options]
+  league-relay whisper-tick --table-keys <file> --envelopes <file> --out-dir <dir> --table-id <id> --turn <N> --sub-round <K> [options]
 
 Options:
   --wrapper <path>                 System wrapper markdown sent as role='system' (required on turn 1)
@@ -104,6 +109,37 @@ pub enum CliCommand {
     Turn(TurnArgs),
     /// Run a self-contained offline mock `turn` in a fresh temporary game directory (`P43-B3`).
     PrebookCheck(PrebookCheckArgs),
+    /// Validate signed Game/Club whispers and release a discrete sub-round tick-barrier batch.
+    WhisperTick(WhisperTickArgs),
+}
+
+/// Parsed arguments for `league-relay whisper-tick`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhisperTickArgs {
+    /// `--table-keys <file>`
+    pub table_keys_path: PathBuf,
+    /// `--envelopes <file>`
+    pub envelopes_path: PathBuf,
+    /// `--out-dir <dir>`
+    pub out_dir: PathBuf,
+    /// `--table-id <id>`
+    pub table_id: u64,
+    /// `--turn <N>`
+    pub turn: u8,
+    /// `--sub-round <K>`
+    pub sub_round: u8,
+    /// `--state-file <file>`
+    pub state_file: Option<PathBuf>,
+    /// Optional `--game-dir <dir>` for writing `to-seat/day-<DD>-act-<Guild>.negotiation.json`
+    pub game_dir: Option<PathBuf>,
+    /// Optional `--day <DD>` paired with `--game-dir` and `--batna-file`
+    pub day: Option<String>,
+    /// Optional `--batna-file <file>` paired with `--game-dir` and `--day`
+    pub batna_file: Option<PathBuf>,
+    /// `--error-format <text|json>`
+    pub error_format: ErrorFormat,
+    /// Explicit CLI `--log-level` / `-q` / `-v` / `--debug` override, if passed.
+    pub log_level: Option<LogLevel>,
 }
 
 /// Parsed arguments for `league-relay prebook-check` (`P43-B3`).
@@ -404,6 +440,15 @@ where
             log_level,
         );
     }
+    if tokens[pos] == "whisper-tick" {
+        return parse_whisper_tick_args(
+            &tokens[pos..],
+            redaction_key,
+            error_format,
+            seen_error_format,
+            log_level,
+        );
+    }
     if tokens[pos] != "turn" {
         let first_flag = tokens[pos].split('=').next().unwrap_or(&tokens[pos]);
         if is_forbidden_key_flag(first_flag) || looks_like_cli_secret(&tokens[pos]) {
@@ -413,7 +458,8 @@ where
             ));
         }
         return Err(RelayError::Usage(
-            "unknown subcommand (expected 'turn', 'prebook-check', or '--help')".to_owned(),
+            "unknown subcommand (expected 'turn', 'prebook-check', 'whisper-tick', or '--help')"
+                .to_owned(),
         ));
     }
 
@@ -847,7 +893,9 @@ where
             }
             summary.exit_code()
         }
-        Ok(CliRunOutcome::PrebookOk | CliRunOutcome::Help) => EXIT_OK,
+        Ok(CliRunOutcome::PrebookOk | CliRunOutcome::Help | CliRunOutcome::WhisperTickOk) => {
+            EXIT_OK
+        }
         Ok(CliRunOutcome::PrebookSeatFailed) => EXIT_RUNTIME_ERROR,
         Err(e) => {
             let exit_code = e.exit_code();
@@ -894,6 +942,7 @@ enum CliRunOutcome {
     Turn(TurnSummary),
     PrebookOk,
     PrebookSeatFailed,
+    WhisperTickOk,
 }
 
 fn parse_prebook_check_args(
@@ -1055,6 +1104,339 @@ fn parse_prebook_check_args(
         error_format,
         log_level,
     }))
+}
+
+fn parse_whisper_tick_args(
+    tokens: &[String],
+    redaction_key: Option<&ApiKey>,
+    mut error_format: ErrorFormat,
+    mut seen_error_format: Option<ErrorFormat>,
+    mut log_level: Option<LogLevel>,
+) -> Result<CliCommand, RelayError> {
+    let mut table_keys_path: Option<PathBuf> = None;
+    let mut envelopes_path: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut table_id: Option<u64> = None;
+    let mut turn: Option<u8> = None;
+    let mut sub_round: Option<u8> = None;
+    let mut state_file: Option<PathBuf> = None;
+    let mut game_dir: Option<PathBuf> = None;
+    let mut day: Option<String> = None;
+    let mut batna_file: Option<PathBuf> = None;
+
+    let mut idx = 1;
+    while idx < tokens.len() {
+        let raw_arg = &tokens[idx];
+        if matches!(raw_arg.as_str(), "-h" | "--help") {
+            return Ok(CliCommand::Help);
+        }
+        let (flag, inline_val) = match raw_arg.split_once('=') {
+            Some((f, v)) => (f, Some(v)),
+            None => (raw_arg.as_str(), None),
+        };
+        if is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_arg) {
+            return Err(RelayError::SecretInForbiddenPlace(
+                "API key must be read from OPENROUTER_API_KEY only, never passed as an argument"
+                    .to_owned(),
+            ));
+        }
+        if let Some(step) = try_consume_hygiene_flag(
+            flag,
+            inline_val,
+            tokens,
+            idx,
+            &mut error_format,
+            &mut seen_error_format,
+            &mut log_level,
+        )? {
+            idx += step;
+            continue;
+        }
+        match flag {
+            "--table-keys" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                table_keys_path = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--envelopes" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                envelopes_path = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--out-dir" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                out_dir = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--table-id" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                let parsed = val.parse::<u64>().map_err(|_| {
+                    RelayError::Usage("--table-id must be a non-negative integer".to_owned())
+                })?;
+                table_id = Some(parsed);
+                idx += step;
+            }
+            "--turn" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                let parsed = val.parse::<u8>().ok().filter(|n| *n >= 1).ok_or_else(|| {
+                    RelayError::Usage("--turn must be an integer >= 1".to_owned())
+                })?;
+                turn = Some(parsed);
+                idx += step;
+            }
+            "--sub-round" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                let parsed = val.parse::<u8>().ok().filter(|n| *n >= 1).ok_or_else(|| {
+                    RelayError::Usage("--sub-round must be an integer >= 1".to_owned())
+                })?;
+                sub_round = Some(parsed);
+                idx += step;
+            }
+            "--state-file" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                state_file = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--game-dir" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                game_dir = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--day" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                validate_day(val)?;
+                day = Some(val.to_owned());
+                idx += step;
+            }
+            "--batna-file" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                batna_file = Some(PathBuf::from(val));
+                idx += step;
+            }
+            other => {
+                if !other.starts_with('-') {
+                    return Err(RelayError::Usage(
+                        "unexpected positional argument (all options require a '--flag')"
+                            .to_owned(),
+                    ));
+                }
+                return Err(RelayError::Usage(format!(
+                    "unknown option '{}'",
+                    sanitize_flag_name(other, redaction_key)
+                )));
+            }
+        }
+    }
+
+    let neg_flags_present = [game_dir.is_some(), day.is_some(), batna_file.is_some()]
+        .into_iter()
+        .filter(|b| *b)
+        .count();
+    if neg_flags_present != 0 && neg_flags_present != 3 {
+        return Err(RelayError::Usage(
+            "--game-dir, --day, and --batna-file must be supplied together".to_owned(),
+        ));
+    }
+
+    Ok(CliCommand::WhisperTick(WhisperTickArgs {
+        table_keys_path: table_keys_path
+            .ok_or_else(|| RelayError::Usage("missing required --table-keys <file>".to_owned()))?,
+        envelopes_path: envelopes_path
+            .ok_or_else(|| RelayError::Usage("missing required --envelopes <file>".to_owned()))?,
+        out_dir: out_dir
+            .ok_or_else(|| RelayError::Usage("missing required --out-dir <dir>".to_owned()))?,
+        table_id: table_id
+            .ok_or_else(|| RelayError::Usage("missing required --table-id <id>".to_owned()))?,
+        turn: turn.ok_or_else(|| RelayError::Usage("missing required --turn <N>".to_owned()))?,
+        sub_round: sub_round
+            .ok_or_else(|| RelayError::Usage("missing required --sub-round <K>".to_owned()))?,
+        state_file,
+        game_dir,
+        day,
+        batna_file,
+        error_format,
+        log_level,
+    }))
+}
+
+fn run_whisper_tick(
+    args: WhisperTickArgs,
+    redaction_keys: &[ApiKey],
+    stdout: &mut dyn Write,
+    log_level: LogLevel,
+) -> Result<CliRunOutcome, RelayError> {
+    let redact_ref = redaction_keys.first();
+    let keys_raw = fs::read_to_string(&args.table_keys_path).map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not read {}: {e}", args.table_keys_path.display()),
+            redact_ref,
+        ))
+    })?;
+    let config: WhisperTableConfig = serde_json::from_str(&keys_raw).map_err(|e| {
+        RelayError::SeatConfig(redact_secrets(
+            &format!("invalid whisper table keys JSON: {e}"),
+            redact_ref,
+        ))
+    })?;
+    config.validate()?;
+    if config.table_id.0 != args.table_id {
+        return Err(RelayError::IncompatibleSetup(format!(
+            "whisper table keys table_id {} != --table-id {}",
+            config.table_id.0, args.table_id
+        )));
+    }
+
+    let env_raw = fs::read_to_string(&args.envelopes_path).map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not read {}: {e}", args.envelopes_path.display()),
+            redact_ref,
+        ))
+    })?;
+    let env_val: serde_json::Value = serde_json::from_str(&env_raw).map_err(|e| {
+        RelayError::Usage(redact_secrets(
+            &format!("invalid --envelopes JSON: {e}"),
+            redact_ref,
+        ))
+    })?;
+    let env_items: &[serde_json::Value] = if let Some(arr) = env_val.as_array() {
+        arr.as_slice()
+    } else if let Some(arr) = env_val.get("envelopes").and_then(|v| v.as_array()) {
+        arr.as_slice()
+    } else {
+        return Err(RelayError::Usage(
+            "--envelopes JSON must be an array or an object with an 'envelopes' array".to_owned(),
+        ));
+    };
+
+    let mut coord = match &args.state_file {
+        Some(path) if path.exists() => {
+            let state_raw = fs::read_to_string(path).map_err(|e| {
+                RelayError::Io(redact_secrets(
+                    &format!("could not read {}: {e}", path.display()),
+                    redact_ref,
+                ))
+            })?;
+            let snap: WhisperRelayStateSnapshot =
+                serde_json::from_str(&state_raw).map_err(|e| {
+                    RelayError::CorruptLog(redact_secrets(
+                        &format!("invalid whisper state JSON in {}: {e}", path.display()),
+                        redact_ref,
+                    ))
+                })?;
+            WhisperRelayCoordinator::from_snapshot(
+                config.clone(),
+                args.turn,
+                args.sub_round,
+                &snap,
+            )?
+        }
+        _ => WhisperRelayCoordinator::new(config.clone(), args.turn, args.sub_round)?,
+    };
+
+    for item in env_items {
+        let _ = coord.ingest_raw_envelope_value(item);
+    }
+    let release = coord.release_sub_round()?;
+
+    fs::create_dir_all(&args.out_dir).map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not create {}: {e}", args.out_dir.display()),
+            redact_ref,
+        ))
+    })?;
+    for batch in &release.batches {
+        let out_file = args.out_dir.join(format!(
+            "turn-{:02}-sub-{:02}-seat-{}-{}.whispers.txt",
+            release.turn, release.sub_round, batch.recipient_seat, batch.recipient_guild
+        ));
+        let mut content = batch.rendered_frames.join("\n");
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        fs::write(&out_file, content).map_err(|e| {
+            RelayError::Io(redact_secrets(
+                &format!("could not write {}: {e}", out_file.display()),
+                redact_ref,
+            ))
+        })?;
+    }
+    let report_path = args.out_dir.join("whisper-tick-report.json");
+    let report_pretty = serde_json::to_string_pretty(&release)
+        .map_err(|e| RelayError::Io(format!("failed to serialize whisper tick report: {e}")))?;
+    fs::write(&report_path, report_pretty).map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not write {}: {e}", report_path.display()),
+            redact_ref,
+        ))
+    })?;
+
+    if let (Some(game_dir), Some(day), Some(batna_path)) =
+        (&args.game_dir, &args.day, &args.batna_file)
+    {
+        let batna_raw = fs::read_to_string(batna_path).map_err(|e| {
+            RelayError::Io(redact_secrets(
+                &format!("could not read {}: {e}", batna_path.display()),
+                redact_ref,
+            ))
+        })?;
+        if batna_raw.trim().is_empty() {
+            return Err(RelayError::Usage(
+                "--batna-file must contain non-empty fallback text".to_owned(),
+            ));
+        }
+        let to_seat_dir = game_dir.join("to-seat");
+        fs::create_dir_all(&to_seat_dir).map_err(|e| {
+            RelayError::Io(redact_secrets(
+                &format!("could not create {}: {e}", to_seat_dir.display()),
+                redact_ref,
+            ))
+        })?;
+        for batch in &release.batches {
+            let neg = batch_to_negotiation_inputs(batch, &batna_raw)?;
+            let neg_path = to_seat_dir.join(format!(
+                "day-{day}-act-{}.negotiation.json",
+                batch.recipient_guild
+            ));
+            let neg_json = serde_json::to_string_pretty(&neg).map_err(|e| {
+                RelayError::Io(format!("failed to serialize negotiation JSON: {e}"))
+            })?;
+            fs::write(&neg_path, neg_json).map_err(|e| {
+                RelayError::Io(redact_secrets(
+                    &format!("could not write {}: {e}", neg_path.display()),
+                    redact_ref,
+                ))
+            })?;
+        }
+    }
+
+    if let Some(state_path) = &args.state_file {
+        if let Some(parent) = state_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent).map_err(|e| {
+                RelayError::Io(redact_secrets(
+                    &format!("could not create {}: {e}", parent.display()),
+                    redact_ref,
+                ))
+            })?;
+        }
+        let snap_json = serde_json::to_string_pretty(&coord.to_snapshot())
+            .map_err(|e| RelayError::Io(format!("failed to serialize whisper state: {e}")))?;
+        fs::write(state_path, snap_json).map_err(|e| {
+            RelayError::Io(redact_secrets(
+                &format!("could not write {}: {e}", state_path.display()),
+                redact_ref,
+            ))
+        })?;
+    }
+
+    if log_level != LogLevel::Silent {
+        let compact = serde_json::to_string(&release)
+            .map_err(|e| RelayError::Io(format!("failed to serialize whisper tick report: {e}")))?;
+        let _ = writeln!(stdout, "WHISPER_TICK_REPORT: {compact}");
+    }
+
+    Ok(CliRunOutcome::WhisperTickOk)
 }
 
 struct TempPrebookDir {
@@ -1500,6 +1882,13 @@ where
                 &diag_sink,
                 diag_lines,
             );
+        }
+        CliCommand::WhisperTick(w) => {
+            *resolved_error_format = w.error_format;
+            let effective_log_level = resolve_log_level(w.log_level, env_reader)?;
+            *resolved_log_level = effective_log_level;
+            set_panic_hook_log_level(effective_log_level);
+            return run_whisper_tick(w, redaction_keys, stdout, effective_log_level);
         }
         CliCommand::Turn(t) => t,
     };

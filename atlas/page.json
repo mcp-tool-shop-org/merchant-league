@@ -8,6 +8,22 @@
     {
       "doors": 5,
       "importedBy": [
+        "league-core",
+        "league-eval",
+        "league-gen",
+        "league-relay",
+        "league-scorer",
+        "league-seat-ui",
+        "league-tui"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-seat-types",
+      "partLabel": "league-seat-types"
+    },
+    {
+      "doors": 5,
+      "importedBy": [
         "league-eval",
         "league-gen",
         "league-relay",
@@ -19,21 +35,6 @@
       "kind": "part",
       "name": "league-core",
       "partLabel": "league-core"
-    },
-    {
-      "doors": 5,
-      "importedBy": [
-        "league-core",
-        "league-eval",
-        "league-gen",
-        "league-scorer",
-        "league-seat-ui",
-        "league-tui"
-      ],
-      "importedByTests": [],
-      "kind": "part",
-      "name": "league-seat-types",
-      "partLabel": "league-seat-types"
     },
     {
       "doors": 8,
@@ -102,100 +103,46 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 8,
-      "changed": 13,
+      "added": 2,
+      "changed": 11,
       "moved": 0,
       "parts": 4,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-steward/src/amount.rs, crates/league-steward/src/codec.rs, crates/league-steward/src/error.rs and 3 more.",
+        "kind": "import-added",
+        "sentence": "league-relay now imports league-seat-types.",
         "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-steward/src/amount.rs",
-          "crates/league-steward/src/codec.rs",
-          "crates/league-steward/src/error.rs",
-          "crates/league-steward/src/firewall.rs",
-          "crates/league-steward/src/steward.rs",
-          "crates/league-steward/tests/"
+          "league-relay",
+          "league-seat-types"
         ]
       },
       {
         "kind": "door",
-        "sentence": "CI now also checks crates/league-steward/src/lib.rs.",
+        "sentence": "CI now also runs crates/league-relay/src/whisper_relay.rs.",
         "subjects": [
           ".github/workflows/ci.yml",
-          "crates/league-steward/src/lib.rs"
+          "crates/league-relay/src/whisper_relay.rs"
         ]
       },
       {
         "kind": "landing",
-        "sentence": "crates/league-core/ is now also read by crates/league-steward/Cargo.toml.",
+        "sentence": "crates/league-seat-types/ is now also read by crates/league-relay/Cargo.toml.",
         "subjects": [
-          "crates/league-core/",
-          "crates/league-steward/Cargo.toml"
+          "crates/league-seat-types/",
+          "crates/league-relay/Cargo.toml"
         ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-core/tests/vectors/drand_quicknet_vectors.json is now also read by crates/league-core/src/replay.rs, crates/league-steward/src/steward.rs and crates/league-steward/tests/steward_live.rs.",
-        "subjects": [
-          "crates/league-core/tests/vectors/drand_quicknet_vectors.json",
-          "crates/league-core/src/replay.rs",
-          "crates/league-steward/src/steward.rs",
-          "crates/league-steward/tests/steward_live.rs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-error/ is now also read by crates/league-steward/Cargo.toml.",
-        "subjects": [
-          "crates/league-error/",
-          "crates/league-steward/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 4 more new writers and readers of places.",
-        "subjects": []
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "crates/league-steward/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "crates/league-steward/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "crates/league-steward/src/amount.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "crates/league-steward/src/amount.rs"
-        ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "crates/league-steward/src/codec.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "crates/league-steward/src/codec.rs"
-        ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "And 5 more new files that belong to no part.",
-        "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "8 files added and 13 changed content, across 4 parts.",
+        "sentence": "2 files added and 11 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "5053d7058c2ae8329e87a76e9cecce4a648f6522",
-      "generatedAt": "2026-11-28T01:01:39.154Z"
+      "commit": "62a27b7347c11dc625464dbff74973772233d4c0",
+      "generatedAt": "2026-11-28T04:37:02.383Z"
     },
     "unchanged": false
   },
@@ -281,9 +228,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 12 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "62a27b7347c11dc625464dbff74973772233d4c0",
+  "commit": "7065ba09b84cc214f512ef8122a7c34e196056c0",
   "defaultBranch": "main",
-  "derived": "16 parts, mostly Rust (429 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (431 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -332,7 +279,7 @@
         {
           "boundary": "league-relay",
           "depth": 0,
-          "files": 12
+          "files": 14
         },
         {
           "boundary": "league-scorer",
@@ -415,6 +362,7 @@
         "crates/league-relay/src/relay.rs",
         "crates/league-relay/src/secret.rs",
         "crates/league-relay/src/transport.rs",
+        "crates/league-relay/src/whisper_relay.rs",
         "crates/league-relay/tests/",
         "crates/league-scorer/build.rs",
         "crates/league-scorer/tests/",
@@ -433,8 +381,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 61,
-      "runsMore": 91,
+      "runsCount": 62,
+      "runsMore": 93,
       "sends": [
         "uploads coverage to Codecov"
       ],
@@ -490,7 +438,7 @@
         {
           "boundary": "league-relay",
           "depth": 1,
-          "files": 8
+          "files": 9
         },
         {
           "boundary": "league-core",
@@ -509,7 +457,7 @@
         },
         {
           "boundary": "league-seat-types",
-          "depth": 4,
+          "depth": 3,
           "files": 12
         }
       ],
@@ -587,7 +535,7 @@
         {
           "boundary": "league-relay",
           "depth": 0,
-          "files": 9
+          "files": 10
         },
         {
           "boundary": "league-core",
@@ -601,7 +549,7 @@
         },
         {
           "boundary": "league-seat-types",
-          "depth": 5,
+          "depth": 3,
           "files": 12
         }
       ],
@@ -817,6 +765,11 @@
       "to": "league-error"
     },
     {
+      "from": "league-relay",
+      "fromTests": false,
+      "to": "league-seat-types"
+    },
+    {
       "from": "league-scorer",
       "fromTests": false,
       "to": "league-core"
@@ -839,10 +792,10 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-28T04:37:02.383Z",
+  "generatedAt": "2026-11-28T07:08:02.173Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "57 writes and 69 reads use paths built at run time and are not named here.",
+    "64 writes and 73 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
     "22 writes and 94 reads go to a path their caller passes, not to this repository.",
     "2 writes and 1 read go to a temporary directory, not to this repository.",
@@ -888,17 +841,17 @@
   "startReason": "This path follows league-eval (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 142,
+  "testFiles": 144,
   "testedBy": {
     "league-core": 36,
-    "league-error": 12,
+    "league-error": 13,
     "league-eval": 17,
     "league-gen": 10,
     "league-ledger": 9,
-    "league-relay": 14,
+    "league-relay": 16,
     "league-scorer": 8,
     "league-season": 1,
-    "league-seat-types": 9,
+    "league-seat-types": 10,
     "league-seat-ui": 1,
     "league-standalone": 6,
     "league-tui": 2,
@@ -910,7 +863,7 @@
     "league-seat-ui",
     "league-tui"
   ],
-  "unnamedWrites": 57,
+  "unnamedWrites": 64,
   "unread": [],
   "unreadFiles": 1,
   "unreadNote": [],
