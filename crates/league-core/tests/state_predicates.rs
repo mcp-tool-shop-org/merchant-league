@@ -389,17 +389,66 @@ fn hand_worked_season_end_and_marks() {
     let Some(h) = p.holdings.iter().find(|h| h.good == AssetId::Refined(0)) else {
         panic!("Refined(0) holding")
     };
-    // Seat 2's bid: 600 at 1_500 -> 900 > floor 600 * 2_000 * 50% / 1_000 = 600, so 600 units at 900;
-    // the other 400 at the floor: 400 * 2_000 * 50% / 1_000 = 400. Mark 1_300.
+    // Seat 2's bid in busy_state is 600 < UNIT_SCALE (1_000), so #54 excludes it and all 1_000
+    // units mark at the 50% floor (1_000 * 2_000 * 50% / 1_000 = 1_000).
     assert_eq!(h.units, 1_000);
-    assert_eq!(h.units_marked_by_bids, 600);
-    assert_eq!(h.units_at_floor, 400);
-    assert_eq!(h.value_at_floor, 400);
-    assert_eq!(h.marked_value, 1_300);
+    assert_eq!(h.units_marked_by_bids, 0);
+    assert_eq!(h.units_at_floor, 1_000);
+    assert_eq!(h.value_at_floor, 1_000);
+    assert_eq!(h.marked_value, 1_000);
     assert_eq!(
         h.marked_value,
         mark_good_holding_at_close(&st, 0, AssetId::Refined(0), 1_000)
     );
+
+    // Raising Seat 2's bid to >= UNIT_SCALE (1_000 at 1_500 -> locked 1_500) lifts 1_000 units at
+    // 1_500 and pools the remaining 400 of 1_400 units at the 50% floor (400) -> Mark 1_900.
+    let mut with_whole_bid = st.clone();
+    with_whole_bid.seats[0].refined[0] = 1_400;
+    if let Some(offer1) = with_whole_bid.offers.get_mut(&1) {
+        offer1.remaining_units = 1_000;
+        offer1.locked_cred = 1_500;
+    }
+    let p_whole = must(
+        season_end_and_marks(&with_whole_bid, Seat(0)),
+        "season end whole bid",
+    );
+    let Some(h_whole) = p_whole
+        .holdings
+        .iter()
+        .find(|h| h.good == AssetId::Refined(0))
+    else {
+        panic!("Refined(0) whole holding")
+    };
+    assert_eq!(h_whole.units, 1_400);
+    assert_eq!(h_whole.units_marked_by_bids, 1_000);
+    assert_eq!(h_whole.units_at_floor, 400);
+    assert_eq!(h_whole.value_at_floor, 400);
+    assert_eq!(h_whole.marked_value, 1_900);
+    assert_eq!(
+        h_whole.marked_value,
+        mark_good_holding_at_close(&with_whole_bid, 0, AssetId::Refined(0), 1_400)
+    );
+    // Same-turn whole-unit bid (`created_turn == st.turn`) must NOT lift the mark (#54): all 1_400
+    // units fall back to the 50% floor (1_400).
+    let mut same_turn_bid = with_whole_bid.clone();
+    if let Some(offer1) = same_turn_bid.offers.get_mut(&1) {
+        offer1.created_turn = same_turn_bid.turn;
+    }
+    let p_same = must(
+        season_end_and_marks(&same_turn_bid, Seat(0)),
+        "season end same-turn bid",
+    );
+    let Some(h_same) = p_same
+        .holdings
+        .iter()
+        .find(|h| h.good == AssetId::Refined(0))
+    else {
+        panic!("Refined(0) same-turn holding")
+    };
+    assert_eq!(h_same.units_marked_by_bids, 0);
+    assert_eq!(h_same.units_at_floor, 1_400);
+    assert_eq!(h_same.marked_value, 1_400);
     // Raw(0): 1_000 free + 2_500 on seat 0's own resting sell = 3_500, all at the floor:
     // 3_500 * 1_750 * 50% / 1_000 = 3_062 (floor of 3_062.5).
     let Some(r0) = p.holdings.iter().find(|h| h.good == AssetId::Raw(0)) else {
@@ -643,8 +692,13 @@ fn quiet_seasons_predictions_match_every_sweep_and_the_close_mark() {
 fn predicted_marks_equal_the_close_mark_with_standing_bids() {
     let (mut st, _) = busy_state(4);
     st.turn = HARD_TURN_CAP;
-    // Seat 0 owes Refined(3), so its 1_000 Refined(0) is still held at the close.
-    st.seats[0].refined[0] = 1_000;
+    // Seat 0 owes Refined(3), so its 1_400 Refined(0) is still held at the close, and Seat 2's
+    // resting bid covers >= UNIT_SCALE (1_000 at 1_500, locked 1_500).
+    st.seats[0].refined[0] = 1_400;
+    if let Some(offer1) = st.offers.get_mut(&1) {
+        offer1.remaining_units = 1_000;
+        offer1.locked_cred = 1_500;
+    }
     let mut engine = engine_from_state(&st);
     let tid = st.table_id;
     let _ = commit_and_reveal(
@@ -696,17 +750,17 @@ fn predicted_marks_equal_the_close_mark_with_standing_bids() {
         }
     }
     // Hand computation for seat 0's Refined(0) at the close: the only resting bid is seat 2's
-    // 600 at 1_500 (locked 900). 600 * 1_500 / 1_000 = 900 > 600 * 2_000 * 50% / 1_000 = 600,
-    // so 600 units mark at 900; the other 400 pool at the floor: 400 * 2_000 / 2_000 = 400.
+    // 1_000 at 1_500 (locked 1_500). 1_000 * 1_500 / 1_000 = 1_500 > floor 1_000 * 2_000 * 50% / 1_000 = 1_000,
+    // so 1_000 units mark at 1_500; the other 400 pool at the floor: 400 * 2_000 / 2_000 = 400.
     let p0 = must(season_end_and_marks(&closed, Seat(0)), "seat 0");
     let Some(h) = p0.holdings.iter().find(|h| h.good == AssetId::Refined(0)) else {
         panic!("Refined(0)")
     };
     assert_eq!(
         (h.units, h.units_marked_by_bids, h.units_at_floor),
-        (1_000, 600, 400)
+        (1_400, 1_000, 400)
     );
-    assert_eq!((h.value_at_floor, h.marked_value), (400, 1_300));
+    assert_eq!((h.value_at_floor, h.marked_value), (400, 1_900));
 }
 
 // --- Privacy -----------------------------------------------------------------------------------
@@ -732,12 +786,16 @@ fn all(st: &EngineState, s: Seat) -> Vec<u8> {
     json(&must(compute_seat_state_predicates(st, s), "all"))
 }
 
-/// `busy_state` with the bid walk in play for the asking seat 0: it holds 1_000 Refined(0), which
-/// seat 2 bids for above the floor (offer 1), and 3_500 Raw(0) (free plus its own resting sell),
-/// which seat 1 bids for above the floor (offer 4, open book).
+/// `busy_state` with the bid walk in play for the asking seat 0: it holds 1_400 Refined(0), which
+/// seat 2 bids for above the floor (offer 1 raised to 1_000 >= UNIT_SCALE), and 3_500 Raw(0)
+/// (free plus its own resting sell), which seat 1 bids for above the floor (offer 4, open book).
 fn privacy_state(n: u8) -> (EngineState, SealedMandateDeal) {
     let (mut st, deal) = busy_state(n);
-    st.seats[0].refined[0] = 1_000;
+    st.seats[0].refined[0] = 1_400;
+    if let Some(offer1) = st.offers.get_mut(&1) {
+        offer1.remaining_units = 1_000;
+        offer1.locked_cred = 1_500;
+    }
     st.offers.insert(
         4,
         CredOffer {
@@ -1056,9 +1114,9 @@ fn domain_bids_count_in_the_mark_only_when_executable() {
         maker: 1,
         side: OfferSide::Buy,
         good: AssetId::Raw(0),
-        remaining_units: 500,
+        remaining_units: 1_000,
         price_per_unit_cred: 1_500,
-        locked_cred: 750,
+        locked_cred: 1_500,
         domain_id: Some(0),
         is_hybrid,
         created_turn: 8,
@@ -1081,14 +1139,22 @@ fn domain_bids_count_in_the_mark_only_when_executable() {
         g
     };
     let (b, w) = (raw0(&base), raw0(&with_bid));
-    assert_eq!(w.domain_book_units_bid, b.domain_book_units_bid + 500);
+    assert_eq!(w.domain_book_units_bid, b.domain_book_units_bid + 1_000);
     assert_eq!(w.open_book_units_bid, b.open_book_units_bid);
 
-    // Executable, three ways. Mark: 500 at 750 (> 500 * 1_750 / 2_000 = 437) plus 3_000 at the
-    // floor (3_000 * 1_750 / 2_000 = 2_625) = 3_375.
+    // Executable, three ways. Mark: 1_000 at 1_500 (> 1_000 * 1_750 / 2_000 = 875) plus 2_500 at
+    // the floor (2_500 * 1_750 / 2_000 = 2_187) = 3_687.
     let mut member = with_bid.clone();
     member.domains[0].members.insert(0);
-    assert_eq!(raw0_mark(&member), 3_375);
+    assert_eq!(raw0_mark(&member), 3_687);
+
+    // #54: sub-unit domain bid (< UNIT_SCALE = 1_000) is excluded even when executable by the member.
+    let mut member_sub_unit = member.clone();
+    if let Some(bid) = member_sub_unit.offers.get_mut(&99) {
+        bid.remaining_units = 999;
+        bid.locked_cred = 1_499;
+    }
+    assert_eq!(raw0_mark(&member_sub_unit), 3_062);
 
     let mut broker_seller = with_bid.clone();
     broker_seller.charters.push(ActiveCharter {
@@ -1096,7 +1162,7 @@ fn domain_bids_count_in_the_mark_only_when_executable() {
         holder: 0,
         expires_at_turn: 12,
     });
-    assert_eq!(raw0_mark(&broker_seller), 3_375);
+    assert_eq!(raw0_mark(&broker_seller), 3_687);
 
     let mut hybrid = base.clone();
     hybrid.offers.insert(99, domain_bid(true));
@@ -1105,7 +1171,7 @@ fn domain_bids_count_in_the_mark_only_when_executable() {
         holder: 1,
         expires_at_turn: 12,
     });
-    assert_eq!(raw0_mark(&hybrid), 3_375);
+    assert_eq!(raw0_mark(&hybrid), 3_687);
     // A hybrid flag without a broker maker is not executable.
     let mut hybrid_no_broker = base.clone();
     hybrid_no_broker.offers.insert(99, domain_bid(true));

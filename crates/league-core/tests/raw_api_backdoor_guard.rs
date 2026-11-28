@@ -1446,7 +1446,7 @@ const ALLOWED_OBSERVATION_PUB_FNS: [&str; 4] = [
     "preview_seat_bundle",
 ];
 
-const PRODUCTION_ALLOWED_REEXPORTS: [&str; 265] = [
+const PRODUCTION_ALLOWED_REEXPORTS: [&str; 270] = [
     // bot (landed in Part B)
     "bot::ClubBot",
     "bot::ClubBotDecision",
@@ -1473,8 +1473,13 @@ const PRODUCTION_ALLOWED_REEXPORTS: [&str; 265] = [
     "commit::CouncilPlatform",
     "commit::CouncilVoteBallot",
     "commit::DEFAULT_SHOCK_DRAW_TURNS",
+    "commit::DRAND_QUICKNET_CHAIN_HASH",
+    "commit::DRAND_QUICKNET_DST",
     "commit::DRAND_QUICKNET_GENESIS_UNIX",
     "commit::DRAND_QUICKNET_PERIOD_SECS",
+    "commit::DRAND_QUICKNET_PUBLIC_KEY",
+    "commit::DRAND_QUICKNET_PUBLIC_KEY_BYTES",
+    "commit::DRAND_QUICKNET_SCHEME_ID",
     "commit::DRAND_QUICKNET_SIGNATURE_BYTES",
     "commit::DrandBeaconAuthStatus",
     "commit::DrandSchedule",

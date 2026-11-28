@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-27 from commit 543e488 by Atlas 1.26.0.
+Mapped at 2026-11-27 from commit bedf2dc by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,13 +8,14 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 16 parts, mostly Rust (422 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-27 (4b1d3d9)
+## What changed since 2026-11-27 (62c55f3)
 
-Nothing structural changed since 2026-11-27; 3 files added and 7 changed content.
+- CHANGELOG.md is now read by scripts/smoke-container.sh and scripts/test-guards.sh.
+- 1 file added and 10 changed content, across 4 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 16 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 84 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
+1. **CI.** On a pull request; on a push to main touching 16 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 85 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-eval** (a command people run). Runs crates/league-eval/src/main.rs.
 4. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
@@ -27,7 +28,7 @@ Nothing structural changed since 2026-11-27; 3 files added and 7 changed content
 
 ## What happens through CI
 
-1. The workflow runs 6 files in scripts, 19 files in league-core, crates/league-error/ in league-error, 18 files in league-eval, 10 files in league-gen, and 32 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
+1. The workflow runs 6 files in scripts, 20 files in league-core, crates/league-error/ in league-error, 18 files in league-eval, 10 files in league-gen, and 32 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
 2. It writes to site/audit-report.json, which is not tracked.
 3. It uploads coverage to Codecov.
 
@@ -76,7 +77,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 12 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 

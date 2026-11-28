@@ -497,15 +497,77 @@ mod tests {
             let (_q_dn, imp_dn, cost_dn, px_dn, mk_dn, eq_dn) = run_wash(false);
             let gross_vol: Units = q_up.iter().map(|&(_, q)| q).sum();
 
-            // 3. High-bid residual (friendly Seat 1 locks all its 15.000 CRED into a 1 milli-unit resting bid on Turn 24;
-            // also measure rival Seat 2 sniping that 1 milli-unit bid in Phase 1).
+            // 3. High-bid residual (#54 Publisher ruling: BOTH closing-turn 1-milli-unit AND 1.000-unit
+            //    bids at Turn 24 give 0 lift; an earlier Turn-23 resting 1.000-unit bid marks 1_000
+            //    units when uncrossed, or exposes Seat 1 to being sniped on Turn 24!).
             let mut eng_bid = match TurnEngine::new(base_spec.clone()) {
                 Ok(e) => e,
                 Err(e) => panic!("eng_bid: {e}"),
             };
-            for t in 1..=23_u8 {
+            for t in 1..=22_u8 {
                 let _ = step_turn(&mut eng_bid, t);
             }
+            let mut eng_t23_rest = eng_bid.clone();
+            let s1_cred_t23 = eng_t23_rest.state().seats[1].cred;
+            if eng_t23_rest
+                .apply_market_action(MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(0),
+                        amount: 1_000,
+                        price_per_unit_cred: s1_cred_t23,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .is_err()
+            {
+                panic!("Turn-23 resting whole-unit high bid failed");
+            }
+            let _ = step_turn(&mut eng_t23_rest, 23);
+            let mut eng_t23_uncrossed = eng_t23_rest.clone();
+            let _ = step_turn(&mut eng_t23_uncrossed, 24);
+            let board_t23_uncrossed = match eng_t23_uncrossed.finalize_season() {
+                Ok(b) => b,
+                Err(e) => panic!("fin t23 uncrossed: {e}"),
+            };
+            let s0_eq_t23_uncrossed = board_t23_uncrossed
+                .standings
+                .iter()
+                .find(|x| x.seat == 0)
+                .map_or(0, |x| x.net_asset_equity);
+
+            // Rival Seat 2 snipes Seat 1's exposed Turn-23 resting 1.000-unit bid on Turn 24.
+            let _ = eng_t23_rest.apply_market_action(MarketAction::TownImport {
+                seat: 2,
+                good: AssetId::Raw(0),
+                amount: 1_000,
+            });
+            let _ = eng_t23_rest.apply_market_action(MarketAction::PostOffer {
+                seat: 2,
+                order: OfferProposal {
+                    side: OfferSide::Sell,
+                    good: AssetId::Raw(0),
+                    amount: 1_000,
+                    price_per_unit_cred: s1_cred_t23,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            });
+            let _ = step_turn(&mut eng_t23_rest, 24);
+            let board_t23_sniped = match eng_t23_rest.finalize_season() {
+                Ok(b) => b,
+                Err(e) => panic!("fin t23 sniped: {e}"),
+            };
+            let s0_eq_t23_sniped = board_t23_sniped
+                .standings
+                .iter()
+                .find(|x| x.seat == 0)
+                .map_or(0, |x| x.net_asset_equity);
+
+            // Turn 24 closing-turn bids (both 1 milli-unit AND 1.000 whole unit) must give 0 lift.
+            let _ = step_turn(&mut eng_bid, 23);
             let s1_cred_t24 = eng_bid.state().seats[1].cred;
             let bid_px = s1_cred_t24 * 1_000; // 1 milli-unit * (cred * 1_000) / 1_000 == s1_cred_t24 locked!
             let mut eng_bid_uncrossed = eng_bid.clone();
@@ -539,6 +601,34 @@ mod tests {
                 .standings
                 .iter()
                 .find(|x| x.seat == 1)
+                .map_or(0, |x| x.net_asset_equity);
+
+            let mut eng_whole_closing_bid = eng_bid.clone();
+            if eng_whole_closing_bid
+                .apply_market_action(MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(0),
+                        amount: 1_000,
+                        price_per_unit_cred: s1_cred_t24,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .is_err()
+            {
+                panic!("friendly whole-unit closing high bid failed");
+            }
+            let _ = step_turn(&mut eng_whole_closing_bid, 24);
+            let board_whole_closing_bid = match eng_whole_closing_bid.finalize_season() {
+                Ok(b) => b,
+                Err(e) => panic!("fin whole closing bid: {e}"),
+            };
+            let s0_eq_whole_closing_bid = board_whole_closing_bid
+                .standings
+                .iter()
+                .find(|x| x.seat == 0)
                 .map_or(0, |x| x.net_asset_equity);
 
             // Sniped high-bid: rival Seat 2 imports 1 milli-unit of Raw(0) for 1 milli-CRED and crosses at bid_px!
@@ -606,8 +696,10 @@ mod tests {
                 eq_dn - s0_eq_base
             );
             println!(
-                "  HIGH-BID (1 milli-unit @ px={bid_px}, locked={s1_cred_t24}): s0_eq_uncrossed={s0_eq_bid} lift=+{} | s1_eq_base={s1_eq_before_bid} s1_eq_uncrossed={s1_eq_uncrossed} s1_eq_if_sniped={s1_eq_sniped} (s1_loss={}) s0_eq_if_sniped={s0_eq_sniped}",
+                "  HIGH-BID (t24_sub_lift=+{} t24_whole_lift=+{} t23_resting_whole_lift=+{} t23_sniped={s0_eq_t23_sniped} | s1_eq_base={s1_eq_before_bid} s1_eq_uncrossed={s1_eq_uncrossed} s1_eq_if_sniped={s1_eq_sniped} (s1_loss={}) s0_eq_if_sniped={s0_eq_sniped})",
                 s0_eq_bid - s0_eq_base,
+                s0_eq_whole_closing_bid - s0_eq_base,
+                s0_eq_t23_uncrossed - s0_eq_base,
                 s1_eq_sniped - s1_eq_before_bid
             );
 
@@ -615,10 +707,16 @@ mod tests {
             assert_eq!(mk_dn, s0_mark_base);
             assert_eq!(eq_up, s0_eq_base);
             assert_eq!(eq_dn, s0_eq_base);
-            let expected_bid_mark = s1_cred_t24
-                + ((i128::from(s0_hold_base - 1) * i128::from(parity_raw0) * 5_000) / 10_000_000)
-                    as Units;
-            assert_eq!(s0_eq_bid - s0_eq_base, expected_bid_mark - s0_mark_base);
+            assert_eq!(s0_eq_bid, s0_eq_base);
+            assert_eq!(s0_eq_whole_closing_bid, s0_eq_base);
+            let expected_t23_whole_mark = s1_cred_t23
+                + ((i128::from(s0_hold_base - 1_000) * i128::from(parity_raw0) * 5_000)
+                    / 10_000_000) as Units;
+            assert_eq!(
+                s0_eq_t23_uncrossed - s0_eq_base,
+                expected_t23_whole_mark - s0_mark_base
+            );
+            assert_eq!(s0_eq_t23_sniped, s0_eq_base);
             assert_eq!(s0_eq_sniped, s0_eq_base);
         }
     }

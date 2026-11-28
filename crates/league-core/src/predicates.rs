@@ -346,14 +346,17 @@ fn turns_until_close(state: &EngineState, pred: impl Fn(Bps) -> bool) -> u8 {
 /// stock, and other seats' resting bids, credit tiers, wash freezes, domains and charters.
 ///
 /// **Which bids the marks read.** Exactly the resting bids the close rule's own filter
-/// (`bid_executable_by_seller` in `scoring.rs`) lets the asking seat sell into: a resting `Buy` on
-/// the good with units left, made by another seat whose wash freeze has ended; on the open book any
-/// such bid; in a cartel domain only when the maker's credit tier may use prime domains and either
-/// the asking seat is a domain member with such a tier (and the maker is a member or the bid is a
-/// hybrid bid from a maker holding an active Clearinghouse Broker charter), or the asking seat holds
-/// an active Clearinghouse Broker charter, or the bid is a hybrid bid from a maker holding one. A
-/// domain bid outside those cases is never read and changes nothing here. Since cartel-domain books
-/// are public by the same rule, reading the executable domain bids is simply the close rule applied.
+/// (`o.created_turn < state.turn && o.remaining_units >= UNIT_SCALE` and
+/// `bid_executable_by_seller` in `scoring.rs`) lets the asking seat sell into: a resting `Buy` on
+/// the good that was already resting before the current turn began (`created_turn < turn`), has at
+/// least one whole unit (`>= UNIT_SCALE`) left, and was made by another seat whose wash freeze has
+/// ended; on the open book any such bid; in a cartel domain only when the maker's credit tier may
+/// use prime domains and either the asking seat is a domain member with such a tier (and the
+/// maker is a member or the bid is a hybrid bid from a maker holding an active Clearinghouse
+/// Broker charter), or the asking seat holds an active Clearinghouse Broker charter, or the bid is
+/// a hybrid bid from a maker holding one. A domain bid outside those cases is never read and
+/// changes nothing here. Since cartel-domain books are public by the same rule, reading the
+/// executable domain bids is simply the close rule applied.
 pub fn season_end_and_marks(
     state: &EngineState,
     seat: Seat,

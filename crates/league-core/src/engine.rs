@@ -1279,11 +1279,11 @@ impl TurnEngine {
     }
 
     /// Executes the 8-step deterministic `Sweep` for a Game-mode turn using an `ExternalDrand`
-    /// `quicknet` round and 48-byte signature validated against `spec.drand_schedule` (`M2`).
+    /// `quicknet` round and 48-byte signature validated against `spec.drand_schedule` (`M2`) and
+    /// verified offline against [`crate::commit::DRAND_QUICKNET_PUBLIC_KEY`] (`#29`).
     ///
     /// Derives `turn_beacon = SHA-256(drand_signature)` and requires `drand_round` to equal
-    /// `schedule.expected_round_for_turn(current_turn)`. Note: BLS12-381 signature
-    /// authentication against the `quicknet` chain public key follows in the live oracle layer.
+    /// `schedule.expected_round_for_turn(current_turn)`.
     pub fn sweep_turn_with_drand(
         &mut self,
         drand_round: u64,
@@ -1316,7 +1316,7 @@ impl TurnEngine {
             ));
         };
         let beacon = derive_drand_beacon(drand_signature)?;
-        let DrandBeaconAuthStatus::HashBoundUnauthenticated = verify_drand_quicknet_beacon(
+        let DrandBeaconAuthStatus::Authenticated = verify_drand_quicknet_beacon(
             &schedule,
             Turn(self.state.turn),
             drand_round,

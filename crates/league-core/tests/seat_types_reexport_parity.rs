@@ -1172,7 +1172,8 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
     // 6. Full 24-turn explicit season parity vs 8abc9abc
     let expected_s0_hashes_by_turn: [&str; 24] = [
         "4f0b8453619a0818685d9e94d211314addbc1b681e4d9f0a268ec40e28e29403",
-        "4052da3508e2ea4bfaea0a24c2d196c09c31acb72812422adc742d18e3a8e8b4",
+        // Turn 2 updated for #54: ClubBot's Turn-1 sub-unit resting bid (< UNIT_SCALE) no longer lifts HoldingMark.
+        "a0c5e5d79fd7c3177767645ec9d19667cb84700527e533ad499960ec9dcbd086",
         "5d1d5fac4158917ef54e345586c9704754ff32f9e544f64502d3cf910608417e",
         "469aaf1f1243e9b13e92c1179e43bb12d4b4c6aab368725fd9f8844135def5a3",
         "35444bd080c156e8e7ec5311b5897a47cd6f73d00a5182108341614bad184cbb",
@@ -1296,9 +1297,13 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
     );
     season_hasher.update(format!("CLOSE_OBS0|{close_obs0_json}\n").as_bytes());
     let actual_stream_sha256 = sha256_hex(&season_hasher.finalize());
+    // Stream digest reflects Fix 1 (#54 prior-turn resting bid filter `created_turn < state.turn`):
+    // Seat(1..=3) observe after Seat(0..=s-1) Pass-A `PostOffer`s on turn `cur_t`, so same-turn
+    // bids no longer lift Seat(1..=3) `HoldingMark` during Pass-A (`StatePredicateSection` at
+    // turn-start, Seat(0) Turn 1..24, `close_obs0`, receipts, and `FinalScoreboard` stay identical).
     assert_eq!(
         actual_stream_sha256,
-        "3d986245c0b1d9da84d61c269e70cc54ca0dd4130d868b36e83cd556cc5673ff"
+        "d37727d7fdc4b4c9b33638e2675a7e86120c8253b8e17605a29a79acb213a72c"
     );
 
     let (scoreboard, _log, section, metrics) =
@@ -1308,11 +1313,12 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
         scoreboard,
         r#"{"table_id":202611,"closed_turn":24,"standings":[{"seat":0,"project_equity":0,"net_asset_equity":-86548,"mandate_bonus":1133,"total_equity":-85415,"credit_tier":"Aaa","hard_credit_defaults":0,"bond_breaches":0,"broken_promises":0,"honor_penalties":0},{"seat":2,"project_equity":0,"net_asset_equity":-86606,"mandate_bonus":944,"total_equity":-85662,"credit_tier":"Aaa","hard_credit_defaults":0,"bond_breaches":0,"broken_promises":0,"honor_penalties":0},{"seat":3,"project_equity":0,"net_asset_equity":-86683,"mandate_bonus":0,"total_equity":-86683,"credit_tier":"Aaa","hard_credit_defaults":0,"bond_breaches":0,"broken_promises":0,"honor_penalties":0},{"seat":1,"project_equity":0,"net_asset_equity":-86801,"mandate_bonus":0,"total_equity":-86801,"credit_tier":"Aaa","hard_credit_defaults":0,"bond_breaches":0,"broken_promises":0,"honor_penalties":0}]}"#
     );
+    // Turn-2 StatePredicateSection reflects #54 sub-unit bid exclusion (497_077 -> 497_069 bytes).
     check_blob_hash!(
         StatePredicateSection,
         section,
-        497_077,
-        "6fd84fd6de6b68794a5b3775c6d1db96bfd5dfbc3fdac3084f9f0f5ecaac44b6"
+        497_069,
+        "93ddaa9d47aabadc166bdbf2ba5d4739b6dd485f145b2cfe5f1bb44d0c9d48db"
     );
     check_json!(
         Vec<SeatSeasonMetrics>,

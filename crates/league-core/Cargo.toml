@@ -17,6 +17,10 @@ engine-internals = []
 [dependencies]
 league-error = { path = "../league-error" }
 league-seat-types = { path = "../league-seat-types" }
+# Apache-2.0; audited by NCC Group (Jan 2021, ETHF002) with ongoing Galois formal verification
+# (`GaloisInc/BLST-Verification`). `portable` + `no-threads` avoids host-ISA assembly and
+# suppresses background thread pools so `league-core` stays single-threaded and deterministic.
+blst = { version = "0.3.17", default-features = false, features = ["portable", "no-threads"] }
 getrandom = "0.3.4"
 hex = "0.4.3"
 hkdf = "0.12.4"

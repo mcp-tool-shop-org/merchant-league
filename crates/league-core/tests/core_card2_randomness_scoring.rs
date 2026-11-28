@@ -17,9 +17,9 @@ use league_core::{
     CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CANCEL_LOCK_BPS,
     DEFAULT_CLOSING_HAZARD_BPS, DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_SHOCK_DRAW_TURNS,
     DEFAULT_WASH_FREEZE_BOND_CRED, DEFAULT_WASH_FREEZE_BOUNTY_CRED,
-    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES,
-    DrandSchedule, EngineError, EscrowFinishUnlock, EscrowProposal, FinalScoreboard, HARD_TURN_CAP,
-    LoggedTurn, MANDATE_STARTING_NW_FLOOR_BPS, MandateKind, MarketAction, OfferProposal, OfferSide,
+    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DRAND_QUICKNET_GENESIS_UNIX, DrandSchedule, EngineError,
+    EscrowFinishUnlock, EscrowProposal, FinalScoreboard, HARD_TURN_CAP, LoggedTurn,
+    MANDATE_STARTING_NW_FLOOR_BPS, MandateKind, MarketAction, OfferProposal, OfferSide,
     OrderReveal, PreimageSecret, ProjectDeliveryOrder, ReplayBeaconMode, ReplayLayoutSeed,
     RevealSalt, RngDomain, ScheduledShockSpec, SealedEvalSeed, SealedOrderBundle, SeasonReplayLog,
     Seat, SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn, TurnEngine, TurnPhase,
@@ -95,32 +95,37 @@ fn step_empty_turn(engine: &mut TurnEngine, tid: TableId, t: u8, seed: u64) -> b
     rec.season_closed
 }
 
-fn make_drand_sig(stream_tag: u8, turn: u8) -> Vec<u8> {
-    let mut sig = vec![0u8; DRAND_QUICKNET_SIGNATURE_BYTES];
-    for (idx, slot) in sig.iter_mut().enumerate() {
-        let digest: [u8; 32] = Sha256::digest([stream_tag, turn, idx as u8]).into();
-        *slot = digest[0];
+fn quicknet_sig_for_round(round: u64) -> Vec<u8> {
+    #[derive(serde::Deserialize)]
+    struct BeaconVec {
+        round: u64,
+        signature: String,
     }
-    if sig.iter().all(|&b| b == 0) {
-        sig[0] = 1;
+    #[derive(serde::Deserialize)]
+    struct VectorFile {
+        beacons: Vec<BeaconVec>,
     }
-    sig
+    let vf: VectorFile = serde_json::from_str(include_str!("vectors/drand_quicknet_vectors.json"))
+        .must("parse vendored quicknet vectors");
+    let entry = vf
+        .beacons
+        .into_iter()
+        .find(|b| b.round == round)
+        .must("vendored quicknet round present");
+    hex::decode(entry.signature).must("decode quicknet signature hex")
 }
 
-fn run_game_season_from_sigs<F>(
+fn run_game_season_from_schedule(
     spec: &TableSpec,
     schedule: DrandSchedule,
-    mut sig_for_turn: F,
-) -> (SeasonReplayLog, FinalScoreboard, Vec<ScheduledShockSpec>)
-where
-    F: FnMut(u8) -> Vec<u8>,
-{
+) -> (SeasonReplayLog, FinalScoreboard, Vec<ScheduledShockSpec>) {
     let tid = spec.table_id;
     let n = usize::from(spec.seat_count);
     let (_, deal) =
         TableSpec::standard_game_chiral_ring_with_mandates(tid, spec.seat_count, 0, schedule)
             .must("fresh deal");
     let mut spec_run = spec.clone();
+    spec_run.drand_schedule = Some(schedule);
     spec_run.dealt_mandate_commits = (0..n)
         .map(|s| {
             compute_mandate_commitment(tid, Seat(s as u8), &deal.seat_reveals[s])
@@ -140,7 +145,7 @@ where
         let round = schedule
             .expected_round_for_turn(Turn(t))
             .must("scheduled round");
-        let sig = sig_for_turn(t);
+        let sig = quicknet_sig_for_round(round);
         let beacon = derive_drand_beacon(&sig).must("drand beacon");
         let rec = eng
             .sweep_turn_with_drand(round, &sig)
@@ -180,8 +185,8 @@ where
 #[test]
 fn game_mode_shocks_and_close_follow_logged_drand_beacons_and_refuse_seeded_shocks() {
     let schedule = DrandSchedule {
-        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 600,
-        turn_period_secs: 60,
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX,
+        turn_period_secs: 3,
     };
     let tid = TableId(601);
     let (spec, _deal) =
@@ -193,7 +198,7 @@ fn game_mode_shocks_and_close_follow_logged_drand_beacons_and_refuse_seeded_shoc
     );
 
     // Per-use RFC 5869 HKDF streams for the exact same beacon & turn must be pairwise distinct.
-    let sample_beacon = derive_drand_beacon(&make_drand_sig(0x11, 24)).must("beacon");
+    let sample_beacon = derive_drand_beacon(&quicknet_sig_for_round(24)).must("beacon");
     let streams = [
         expand_turn_stream(sample_beacon, tid, Turn(24), RngDomain::Shocks, b""),
         expand_turn_stream(sample_beacon, tid, Turn(24), RngDomain::CloseRoll, b""),
@@ -225,13 +230,16 @@ fn game_mode_shocks_and_close_follow_logged_drand_beacons_and_refuse_seeded_shoc
     );
 
     // Find two distinct logged drand beacon sequences that produce BOTH different shock schedules
-    // AND different closing turns on the exact same Game TableSpec.
-    let (log_a, board_a, shocks_a) =
-        run_game_season_from_sigs(&spec, schedule, |t| make_drand_sig(1, t));
+    // AND different closing turns on the exact same Game TableSpec layout.
+    let (log_a, board_a, shocks_a) = run_game_season_from_schedule(&spec, schedule);
     let mut alt_found = None;
-    for tag in 2..=64_u8 {
+    for offset in 1..=128_u64 {
+        let cand_schedule = DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + offset * 3,
+            turn_period_secs: 3,
+        };
         let (cand_log, cand_board, cand_shocks) =
-            run_game_season_from_sigs(&spec, schedule, |t| make_drand_sig(tag, t));
+            run_game_season_from_schedule(&spec, cand_schedule);
         if cand_shocks != shocks_a && cand_board.closed_turn != board_a.closed_turn {
             alt_found = Some((cand_log, cand_board, cand_shocks));
             break;
@@ -301,7 +309,10 @@ fn game_mode_shocks_and_close_follow_logged_drand_beacons_and_refuse_seeded_shoc
 
     let mut post_close_log = log_a;
     let extra_t = post_close_log.turns.len() as u8 + 1;
-    let extra_sig = make_drand_sig(99, extra_t);
+    let extra_round = schedule
+        .expected_round_for_turn(Turn(extra_t))
+        .must("extra round");
+    let extra_sig = quicknet_sig_for_round(extra_round);
     post_close_log.turns.push(LoggedTurn {
         turn: extra_t,
         market_actions: Vec::new(),
@@ -309,7 +320,7 @@ fn game_mode_shocks_and_close_follow_logged_drand_beacons_and_refuse_seeded_shoc
         commitments: BTreeMap::new(),
         reveals: BTreeMap::new(),
         turn_beacon: derive_drand_beacon(&extra_sig).must("sig"),
-        drand_round: schedule.expected_round_for_turn(Turn(extra_t)).ok(),
+        drand_round: Some(extra_round),
         drand_signature: Some(extra_sig),
         eval_vrf_proof: None,
         drawn_shocks: Vec::new(),
@@ -1359,7 +1370,7 @@ fn final_marks_use_standing_bids_with_50pct_floor_and_ignore_all_trades() {
         if eng.state().phase != TurnPhase::TalkAndMarket {
             break;
         }
-        if t == 24 {
+        if t == 23 {
             eng.apply_market_action(MarketAction::PostOffer {
                 seat: 1,
                 order: OfferProposal {
@@ -1372,6 +1383,8 @@ fn final_marks_use_standing_bids_with_50pct_floor_and_ignore_all_trades() {
                 },
             })
             .must("resting bid");
+        }
+        if t == 24 {
             eng.apply_market_action(MarketAction::PostOffer {
                 seat: 0,
                 order: OfferProposal {
@@ -2198,12 +2211,17 @@ fn pr40_fix2_close_marking_attack_and_bid_matrix_matches_director_rule() {
         );
     }
 
-    // 7a & 7b. High bid above base value:
-    // (a) `0.001` unit (`1` milli-unit) @ `15,000,000` (`locked_cred = 15,000`)
-    // (b) `10.000` units (`10,000` milli-units) @ `3,000` (`locked_cred = 30,000`, Seat 1 initial_cred = 35,000)
+    // 7a & 7b. High bid above base value (`#54` prior-turn resting + whole-unit rule):
+    // (a) Closing-turn (`t == 24`) high bids (`0.001` u @ `15,000,000` and `10.000` u @ `3,000`)
+    //     give zero close-mark lift (`lift_7a == 0`, `units_marked_by_bids == 0`).
+    // (b) Earlier resting (`t == 23`, `created_turn = 23 < 24`) `10.000` u @ `3,000` (`locked_cred = 30,000`)
+    //     lifts by `+21_250`.
     {
-        // 7a: 0.001 unit (`1` milli-unit) @ `15_000_000` (`locked_cred = 15_000`).
+        // 7a: Turn-24 closing-turn bids (`0.001` unit AND `10.000` units) give 0 lift.
+        let mut sp_7a_whole = base_spec.clone();
+        sp_7a_whole.seats[1].initial_cred = 35_000;
         let mut eng_7a = TurnEngine::new(base_spec.clone()).must("7a eng");
+        let mut eng_7a_whole = TurnEngine::new(sp_7a_whole).must("7a whole eng");
         for t in 1..=24_u8 {
             if t == 24 {
                 eng_7a
@@ -2219,10 +2237,25 @@ fn pr40_fix2_close_marking_attack_and_bid_matrix_matches_director_rule() {
                         },
                     })
                     .must("7a high bid");
+                eng_7a_whole
+                    .apply_market_action(MarketAction::PostOffer {
+                        seat: 1,
+                        order: OfferProposal {
+                            side: OfferSide::Buy,
+                            good: AssetId::Raw(0),
+                            amount: 10_000,
+                            price_per_unit_cred: 3_000,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("7a whole closing bid");
             }
             if step_t(&mut eng_7a, t).season_closed {
+                assert!(step_t(&mut eng_7a_whole, t).season_closed);
                 break;
             }
+            let _ = step_t(&mut eng_7a_whole, t);
         }
         let locked_7a = eng_7a
             .state()
@@ -2232,25 +2265,33 @@ fn pr40_fix2_close_marking_attack_and_bid_matrix_matches_director_rule() {
             .must("offer 7a")
             .locked_cred;
         assert_eq!(locked_7a, 15_000);
+        let pred_7a = league_core::season_end_and_marks(eng_7a.state(), Seat(0)).must("pred 7a");
+        let raw0_7a = pred_7a
+            .holdings
+            .iter()
+            .find(|h| h.good == AssetId::Raw(0))
+            .must("raw0 pred 7a");
+        assert_eq!(raw0_7a.units_marked_by_bids, 0);
+        assert_eq!(raw0_7a.marked_value, half_base(s0_hold_base, parity_raw0));
         let b_7a = eng_7a.finalize_season().must("fin 7a");
         let s0_eq_7a = seat_eq(&b_7a, 0);
         let lift_7a = s0_eq_7a - s0_base_eq;
-        // On s0_hold_base = 39_915 (`parity = 1_750`): `half_base(39_915) = 34_925` (rem 625) and
-        // `half_base(39_914) = 34_924` (rem 750), so `15_000 + 34_924 - 34_925 = 14_999` (`<= 15_000`),
-        // and on `240_001` units `half_base(240_001) == half_base(240_000) == 210_000`, giving exact `15_000`.
-        let expected_mark_7a = 15_000 + half_base(s0_hold_base - 1, parity_raw0);
-        assert_eq!(
-            lift_7a,
-            expected_mark_7a - half_base(s0_hold_base, parity_raw0)
-        );
-        assert_eq!(lift_7a, 14_999);
-        assert!(lift_7a <= locked_7a);
+        assert_eq!(lift_7a, 0);
+        let pred_7a_w =
+            league_core::season_end_and_marks(eng_7a_whole.state(), Seat(0)).must("pred 7a whole");
+        let raw0_7a_w = pred_7a_w
+            .holdings
+            .iter()
+            .find(|h| h.good == AssetId::Raw(0))
+            .must("raw0 pred 7a whole");
+        assert_eq!(raw0_7a_w.units_marked_by_bids, 0);
+        assert_eq!(raw0_7a_w.marked_value, half_base(s0_hold_base, parity_raw0));
         println!(
             "{:<52} | seat=0 | eq={s0_eq_7a:>8} | base={s0_base_eq:>8} | delta={lift_7a:+} (locked_cred={locked_7a})",
-            "7a. High bid (0.001 u @ 15,000,000, lock 15,000)"
+            "7a. Closing-turn bids (0.001 & 10.000 u -> 0 lift)"
         );
 
-        // 7b: 10.000 units (`10_000` milli-units) @ `3_000` (`locked_cred = 30_000`).
+        // 7b: Earlier resting (`created_turn = 23 < 24`) 10.000 units @ 3_000 (`locked_cred = 30_000`).
         let mut sp_7b = base_spec.clone();
         sp_7b.seats[1].initial_cred = 35_000;
         let mut eng_7b_base = TurnEngine::new(sp_7b.clone()).must("7b base");
@@ -2263,7 +2304,7 @@ fn pr40_fix2_close_marking_attack_and_bid_matrix_matches_director_rule() {
 
         let mut eng_7b = TurnEngine::new(sp_7b).must("7b eng");
         for t in 1..=24_u8 {
-            if t == 24 {
+            if t == 23 {
                 eng_7b
                     .apply_market_action(MarketAction::PostOffer {
                         seat: 1,
@@ -2407,12 +2448,13 @@ fn pr40_fix2_close_marking_attack_and_bid_matrix_matches_director_rule() {
         );
     }
 
-    // 9. A real bid above the floor (`1_200 > 875`) for part of Seat 0's holding (`10.000` units):
-    //    covered `10.000` units at `1_200` (`12_000`), remaining `s0_hold_base - 10_000` at `50%` base.
+    // 9. An earlier resting bid above the floor (`created_turn = 23 < 24`, `1_200 > 875`) for part
+    //    of Seat 0's holding (`10.000` units): covered `10.000` units at `1_200` (`12_000`),
+    //    remaining `s0_hold_base - 10_000` at `50%` base.
     {
         let mut eng = TurnEngine::new(base_spec).must("real bid eng");
         for t in 1..=24_u8 {
-            if t == 24 {
+            if t == 23 {
                 eng.apply_market_action(MarketAction::PostOffer {
                     seat: 1,
                     order: OfferProposal {
@@ -3112,42 +3154,48 @@ fn pr40_fix3_pooled_floor_dust_wall_worst_slice_0_006_units_and_nonround_bids() 
             s.initial_cred = 15_000;
             s.regent = None;
         }
-        let run_620 = |offers: &[(u8, Units, Units)]| -> (Units, Units, FinalScoreboard) {
-            let mut eng = TurnEngine::new(base_spec.clone()).must("eng 620 fix3");
-            for t in 1..=24_u8 {
-                if t == 24 {
-                    for &(maker, amount, price_per_unit_cred) in offers {
-                        eng.apply_market_action(MarketAction::PostOffer {
-                            seat: maker,
-                            order: OfferProposal {
-                                side: OfferSide::Buy,
-                                good: AssetId::Raw(0),
-                                amount,
-                                price_per_unit_cred,
-                                domain_id: None,
-                                is_hybrid: false,
-                            },
-                        })
-                        .must("post 620 fix3");
+        let run_620_turns =
+            |offers_by_turn: &[(u8, u8, Units, Units)]| -> (Units, Units, FinalScoreboard) {
+                let mut eng = TurnEngine::new(base_spec.clone()).must("eng 620 fix3");
+                for t in 1..=24_u8 {
+                    for &(post_turn, maker, amount, price_per_unit_cred) in offers_by_turn {
+                        if t == post_turn {
+                            eng.apply_market_action(MarketAction::PostOffer {
+                                seat: maker,
+                                order: OfferProposal {
+                                    side: OfferSide::Buy,
+                                    good: AssetId::Raw(0),
+                                    amount,
+                                    price_per_unit_cred,
+                                    domain_id: None,
+                                    is_hybrid: false,
+                                },
+                            })
+                            .must("post 620 fix3");
+                        }
+                    }
+                    let _ = commit_and_reveal_bundles(
+                        &mut eng,
+                        tid,
+                        t,
+                        vec![SealedOrderBundle::default(); 4],
+                    );
+                    if eng
+                        .sweep_turn(derive_turn_beacon(5, tid, Turn(t)))
+                        .must("sweep 620 fix3")
+                        .season_closed
+                    {
+                        break;
                     }
                 }
-                let _ = commit_and_reveal_bundles(
-                    &mut eng,
-                    tid,
-                    t,
-                    vec![SealedOrderBundle::default(); 4],
-                );
-                if eng
-                    .sweep_turn(derive_turn_beacon(5, tid, Turn(t)))
-                    .must("sweep 620 fix3")
-                    .season_closed
-                {
-                    break;
-                }
-            }
-            let hold = eng.state().seats[0].raw[0];
-            let mk = mark_good_holding_at_close(eng.state(), 0, AssetId::Raw(0), hold);
-            (hold, mk, eng.finalize_season().must("fin 620 fix3"))
+                let hold = eng.state().seats[0].raw[0];
+                let mk = mark_good_holding_at_close(eng.state(), 0, AssetId::Raw(0), hold);
+                (hold, mk, eng.finalize_season().must("fin 620 fix3"))
+            };
+        let run_620 = |offers: &[(u8, Units, Units)]| -> (Units, Units, FinalScoreboard) {
+            let timed: Vec<(u8, u8, Units, Units)> =
+                offers.iter().map(|&(m, a, p)| (23, m, a, p)).collect();
+            run_620_turns(&timed)
         };
 
         let (hold_base, mk_base, b_base) = run_620(&[]);
@@ -3209,4 +3257,138 @@ fn pr40_fix3_pooled_floor_dust_wall_worst_slice_0_006_units_and_nonround_bids() 
         assert_eq!(s0_tie.total_equity, s0_base.total_equity);
         assert_eq!(s1_tie.net_asset_equity, s1_base.net_asset_equity);
     }
+}
+
+#[test]
+fn close_marks_turn_32_sub_unit_vs_whole_unit_bids_issue_54() {
+    let tid = TableId(854);
+    let mut base_spec = TableSpec::standard_chiral_ring(tid, 4, 5).must("spec 854");
+    base_spec.closing_hazard_bps = [0; CLOSING_ROLL_WINDOW_LEN];
+    base_spec.shocks = vec![ScheduledShockSpec {
+        hint_turn: 1,
+        forecast_turn: 2,
+        realize_turn: 3,
+        target_seat: 3,
+        kind: ShockKind::TariffHoliday,
+        magnitude_bps: 100,
+    }];
+    for s in &mut base_spec.seats {
+        s.initial_cred = 25_000;
+        s.regent = None;
+    }
+
+    // `bids`: `(post_turn, maker, amount, price_per_unit_cred)` posted before Turn-32 Sweep.
+    let run_turn32 =
+        |bids: &[(u8, u8, Units, Units)]| -> (Units, Units, Units, Units, FinalScoreboard) {
+            let mut eng = TurnEngine::new(base_spec.clone()).must("eng 854");
+            for t in 1..=HARD_TURN_CAP {
+                for &(post_turn, maker, amount, price_per_unit_cred) in bids {
+                    if t == post_turn {
+                        eng.apply_market_action(MarketAction::PostOffer {
+                            seat: maker,
+                            order: OfferProposal {
+                                side: OfferSide::Buy,
+                                good: AssetId::Raw(0),
+                                amount,
+                                price_per_unit_cred,
+                                domain_id: None,
+                                is_hybrid: false,
+                            },
+                        })
+                        .must("post t31/t32 bid");
+                    }
+                }
+                let closed = step_empty_turn(&mut eng, tid, t, 5);
+                if t < HARD_TURN_CAP {
+                    assert!(!closed, "season must stay open until Turn 32");
+                } else {
+                    assert!(closed, "Turn 32 hard cap must close season");
+                }
+            }
+            let parity = eng.state().parities.asset_parity(AssetId::Raw(0));
+            let hold = eng.state().seats[0].raw[0];
+            let pred = league_core::season_end_and_marks(eng.state(), Seat(0)).must("pred 854");
+            let h = pred
+                .holdings
+                .iter()
+                .find(|m| m.good == AssetId::Raw(0))
+                .must("raw0 holding");
+            let board = eng.finalize_season().must("fin 854");
+            (parity, hold, h.units_marked_by_bids, h.marked_value, board)
+        };
+
+    let (parity, hold, marked_base, val_base, board_base) = run_turn32(&[]);
+    assert_eq!(board_base.closed_turn, HARD_TURN_CAP);
+    assert_eq!(marked_base, 0);
+    let s0_base = board_base.standings.iter().find(|e| e.seat == 0).must("s0");
+    let expected_floor =
+        ((i128::from(hold) * i128::from(parity) * i128::from(UNSOLD_EXCESS_PARITY_BPS))
+            / (i128::from(UNIT_SCALE) * BPS_SCALE)) as Units;
+    assert_eq!(val_base, expected_floor);
+
+    // 1. High closing-turn (`Turn 32`) bids — both `0.001` u (`15_000_000`) AND whole-unit
+    //    (`1.000` u @ `15_000` and `10.000` u @ `2_500`) — must never move the close mark.
+    for (label, bid) in [
+        ("t32 0.001u high", (32, 1, 1, 15_000_000)),
+        ("t32 1.000u high", (32, 1, UNIT_SCALE, 15_000)),
+        ("t32 10.000u high", (32, 1, 10 * UNIT_SCALE, 2_500)),
+    ] {
+        let (_, _, marked, val, board) = run_turn32(&[bid]);
+        assert_eq!(marked, 0, "{label}");
+        assert_eq!(val, val_base, "{label}");
+        let s0 = board.standings.iter().find(|e| e.seat == 0).must("s0");
+        assert_eq!(s0.net_asset_equity, s0_base.net_asset_equity, "{label}");
+        assert_eq!(s0.total_equity, s0_base.total_equity, "{label}");
+    }
+
+    // 2. Earlier resting (`Turn 31 < 32`) sub-unit bids (`0.001` u, `0.999` u, and split `1 + 999`)
+    //    must still leave `units_marked_by_bids == 0`.
+    let (_, _, marked_31_001, val_31_001, _) = run_turn32(&[(31, 1, 1, 15_000_000)]);
+    assert_eq!(marked_31_001, 0);
+    assert_eq!(val_31_001, val_base);
+    let (_, _, marked_999, val_999, board_999) = run_turn32(&[(31, 1, UNIT_SCALE - 1, 15_000)]);
+    assert_eq!(marked_999, 0);
+    assert_eq!(val_999, val_base);
+    assert_eq!(
+        board_999
+            .standings
+            .iter()
+            .find(|e| e.seat == 0)
+            .must("s0 999")
+            .net_asset_equity,
+        s0_base.net_asset_equity
+    );
+    let (_, _, marked_split, val_split, _) =
+        run_turn32(&[(31, 1, 1, 14_000_000), (31, 2, UNIT_SCALE - 1, 2_000)]);
+    assert_eq!(marked_split, 0);
+    assert_eq!(val_split, val_base);
+
+    // 3. Earlier resting (`Turn 31`) `1.000`-unit (`UNIT_SCALE`) high bid (`15_000`, `locked_cred = 15_000`):
+    //    marks `1.000` u.
+    let (_, _, marked_1000, val_1000, board_1000) = run_turn32(&[(31, 1, UNIT_SCALE, 15_000)]);
+    let rest_floor = ((i128::from(hold - UNIT_SCALE)
+        * i128::from(parity)
+        * i128::from(UNSOLD_EXCESS_PARITY_BPS))
+        / (i128::from(UNIT_SCALE) * BPS_SCALE)) as Units;
+    assert_eq!(marked_1000, UNIT_SCALE);
+    assert_eq!(val_1000, 15_000 + rest_floor);
+    let s0_1000 = board_1000
+        .standings
+        .iter()
+        .find(|e| e.seat == 0)
+        .must("s0 1000");
+    assert_eq!(
+        s0_1000.net_asset_equity - s0_base.net_asset_equity,
+        val_1000 - val_base
+    );
+
+    // 4. Neither an earlier sub-unit high bid (`t=31`, `500` @ `20_000`) nor a closing-turn whole-unit
+    //    high bid (`t=32`, `UNIT_SCALE` @ `25_000`) blocks/shadows an earlier `1.000`-unit bid (`t=31`, `UNIT_SCALE` @ `3_000`).
+    let (_, _, marked_mix, val_mix, _) = run_turn32(&[
+        (31, 2, 500, 20_000),
+        (32, 3, UNIT_SCALE, 25_000),
+        (31, 1, UNIT_SCALE, 3_000),
+    ]);
+    assert_eq!(marked_mix, UNIT_SCALE);
+    assert_eq!(val_mix, 3_000 + rest_floor);
 }
