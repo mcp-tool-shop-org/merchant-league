@@ -26,15 +26,15 @@ use std::time::Duration;
 
 use league_core::{
     AssetId, CharterBidOrder, CharterRole, CheckProposal, CommitmentHash, ConverterRunOrder,
-    CouncilVoteBallot, DRAND_QUICKNET_GENESIS_UNIX, DrandSchedule, EscrowFinishUnlock,
-    EscrowProposal, HARD_TURN_CAP, MarketAction, OfferProposal, OfferSide, OrderReveal,
-    PreimageSecret, RevealSalt, SealedOrderBundle, Seat, TableId, TableSpec, Turn, TurnPhase,
-    UNIT_SCALE, compute_order_commitment, compute_preimage_condition,
+    CouncilPlatform, CouncilVoteBallot, DRAND_QUICKNET_GENESIS_UNIX, DrandBeaconAuthStatus,
+    DrandSchedule, EscrowFinishUnlock, EscrowProposal, HARD_TURN_CAP, MarketAction, OfferProposal,
+    OfferSide, OrderReveal, PreimageSecret, RevealSalt, SealedOrderBundle, Seat, TableId,
+    TableSpec, Turn, TurnPhase, UNIT_SCALE, compute_order_commitment, compute_preimage_condition,
 };
 use league_ledger::client::Transport;
 use league_standalone::client::StandAlone;
 use league_standalone::conformance::build_tx;
-use league_standalone::docker::{DockerSpec, StandAloneContainer};
+use league_standalone::docker::{CommandRunner, DockerSpec, OsDockerRunner, StandAloneContainer};
 use league_standalone::{OFFICIAL_XRPLD_PINNED_REF, STANDALONE_NETWORK_ID};
 use league_steward::codec::{
     LSF_ALLOW_TRUSTLINE_CLAWBACK, LSF_ALLOW_TRUSTLINE_LOCKING, LSF_DEFAULT_RIPPLE,
@@ -42,8 +42,8 @@ use league_steward::codec::{
     submit_raw_json_tx,
 };
 use league_steward::{
-    ASF_ALLOW_TRUSTLINE_CLAWBACK, COMMIT_MEMO_TYPE, GameTableSteward, IngressDropReason,
-    StewardError,
+    ASF_ALLOW_TRUSTLINE_CLAWBACK, ArchivistMirror, COMMIT_MEMO_TYPE, GameTableSteward,
+    IngressDropReason, StewardError,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -610,7 +610,7 @@ fn steward_xrpld_live_harness() -> Result<(), Box<dyn std::error::Error>> {
         max_lifetime: Duration::from_secs(600),
         ..DockerSpec::default()
     };
-    let container = StandAloneContainer::start(spec)?;
+    let container = StandAloneContainer::start(spec.clone())?;
     let client = container.client();
 
     let info = client.server_info()?;
@@ -651,8 +651,348 @@ fn steward_xrpld_live_harness() -> Result<(), Box<dyn std::error::Error>> {
                 "season_6_seat": season6,
             })
         );
+        container.teardown()?;
+
+        let phoenix_report = run_phoenix_turn15_kill_rehydrate_live(&spec)?;
+        println!("PHOENIX_LIVE_REPORT: {phoenix_report}");
+        return Ok(());
     }
 
     container.teardown()?;
     Ok(())
+}
+
+fn drive_phoenix_live_turn<T: Transport>(
+    steward: &mut GameTableSteward<'_, T>,
+    table_id: TableId,
+    t: u8,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if steward.phase() != TurnPhase::TalkAndMarket {
+        return Ok(true);
+    }
+    if t == 1 {
+        steward.submit_market_action(MarketAction::PostOffer {
+            seat: 0,
+            order: OfferProposal {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                amount: 2 * UNIT_SCALE,
+                price_per_unit_cred: 2 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        })?;
+        steward.submit_market_action(MarketAction::CancelOffer {
+            seat: 0,
+            offer_id: 1,
+        })?;
+        steward.submit_market_action(MarketAction::TownImport {
+            seat: 0,
+            good: AssetId::Raw(1),
+            amount: UNIT_SCALE,
+        })?;
+        steward.submit_market_action(MarketAction::CreateCheck {
+            seat: 0,
+            check: CheckProposal {
+                payee: 2,
+                asset: AssetId::Cred,
+                send_max: 2 * UNIT_SCALE,
+                deliver_min: 2 * UNIT_SCALE,
+                due_turn: 1,
+                expiration_turn: 3,
+            },
+        })?;
+        let cond = compute_preimage_condition(&PreimageSecret([0x5Au8; 32]))?;
+        steward.submit_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: 3 * UNIT_SCALE,
+                finish_after_turn: Some(1),
+                cancel_after_turn: 4,
+                condition_hash: Some(cond),
+                bond: None,
+            },
+        })?;
+    }
+    if t == 2 {
+        steward.submit_market_action(MarketAction::StandForOffice {
+            seat: 0,
+            platform: CouncilPlatform {
+                proposed_tariffs_bps: vec![(0, (400, 0))],
+                cartel_admissions: vec![(1, 0), (1, 1)],
+                cartel_revocations: Vec::new(),
+            },
+        })?;
+        steward.submit_market_action(MarketAction::StandForOffice {
+            seat: 1,
+            platform: CouncilPlatform {
+                proposed_tariffs_bps: Vec::new(),
+                cartel_admissions: vec![(1, 0), (1, 1), (1, 2)],
+                cartel_revocations: Vec::new(),
+            },
+        })?;
+        steward.submit_market_action(MarketAction::CreateCheck {
+            seat: 2,
+            check: CheckProposal {
+                payee: 0,
+                asset: AssetId::Cred,
+                send_max: 500 * UNIT_SCALE,
+                deliver_min: 500 * UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 5,
+            },
+        })?;
+    }
+    if t == 14 {
+        // Open Check (id 3) and native PREIMAGE-SHA-256 TokenEscrow (id 2) spanning the Turn-15
+        // container kill so Wave 3 re-creates and remaps them before Turn 16 settlement.
+        steward.submit_market_action(MarketAction::CreateCheck {
+            seat: 0,
+            check: CheckProposal {
+                payee: 2,
+                asset: AssetId::Cred,
+                send_max: 4 * UNIT_SCALE,
+                deliver_min: 4 * UNIT_SCALE,
+                due_turn: 16,
+                expiration_turn: 19,
+            },
+        })?;
+        let cond14 = compute_preimage_condition(&PreimageSecret([0x9Du8; 32]))?;
+        steward.submit_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: 5 * UNIT_SCALE,
+                finish_after_turn: Some(16),
+                cancel_after_turn: 19,
+                condition_hash: Some(cond14),
+                bond: None,
+            },
+        })?;
+    }
+
+    steward.advance_to_commit()?;
+    let mut reveals = Vec::new();
+    for s in 0..4_u8 {
+        if t == 16 && s == 3 {
+            continue;
+        }
+        let mut bundle = SealedOrderBundle::default();
+        if t == 1 && s == 1 {
+            bundle.escrow_finishes.push(EscrowFinishUnlock {
+                escrow_id: 1,
+                preimage: Some(PreimageSecret([0x5Au8; 32])),
+            });
+        }
+        if t == 1 && s == 2 {
+            bundle.check_cashes.push(1);
+        }
+        if t == 2 && s == 0 {
+            bundle.converter_runs.push(ConverterRunOrder {
+                recipe_idx: 0,
+                runs: 1,
+            });
+            bundle.check_cashes.push(2);
+        }
+        if t == 4 {
+            bundle.council_vote = Some(CouncilVoteBallot {
+                trade_minister: 0,
+                cartel_chair: 1,
+            });
+        }
+        if (t == 6 || t == 12) && s == 0 {
+            bundle.charter_bids.push(CharterBidOrder {
+                role: CharterRole::ClearinghouseBroker,
+                bid_cred: UNIT_SCALE,
+            });
+        }
+        if t == 16 && s == 1 {
+            bundle.escrow_finishes.push(EscrowFinishUnlock {
+                escrow_id: 2,
+                preimage: Some(PreimageSecret([0x9Du8; 32])),
+            });
+        }
+        if t == 16 && s == 2 {
+            bundle.check_cashes.push(3);
+        }
+        let (_, rev) =
+            submit_commit_bundle(steward, table_id, s, bundle, (s + 1).wrapping_mul(11))?;
+        reveals.push((s, rev));
+    }
+
+    steward.advance_to_reveal()?;
+    for (s, rev) in reveals {
+        steward.submit_seat_reveal_via_xrpld(s, rev)?;
+    }
+    if t == 16 {
+        let (_, res) = steward.exercise_regent_delegation_on_xrpld(3)?;
+        assert_eq!(res, "tesSUCCESS");
+    }
+
+    let round = steward.current_window().expected_drand_round;
+    let sig = quicknet_sig_for_round(round)?;
+    let summary = steward.sweep_turn(round, &sig)?;
+    assert_eq!(summary.turn, t);
+    Ok(summary.public_receipt.season_closed)
+}
+
+fn snapshot_seat_lines<T: Transport>(
+    steward: &GameTableSteward<'_, T>,
+    seat_count: u8,
+) -> Result<Vec<std::collections::BTreeMap<String, league_core::Units>>, Box<dyn std::error::Error>>
+{
+    let mut out = Vec::with_capacity(usize::from(seat_count));
+    for s in 0..seat_count {
+        out.push(steward.read_seat_balances_milli(s)?);
+    }
+    Ok(out)
+}
+
+fn run_phoenix_turn15_kill_rehydrate_live(
+    spec: &DockerSpec,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let schedule = DrandSchedule {
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 12,
+        turn_period_secs: 12,
+    };
+    let table_id = TableId(5015);
+    let (mut table_spec, deal) =
+        TableSpec::standard_game_chiral_ring_with_mandates(table_id, 4, 7, schedule)?;
+    for seat in &mut table_spec.seats {
+        seat.initial_cred = 100 * UNIT_SCALE;
+    }
+
+    // 1. Unwiped control season on fresh xrpld 3.4.1 container.
+    let ctrl_container = StandAloneContainer::start(spec.clone())?;
+    let (ctrl_report, ctrl_digests, ctrl_lines) = {
+        let mut ctrl = GameTableSteward::bootstrap(
+            ctrl_container.client(),
+            table_spec.clone(),
+            7,
+            deal.clone(),
+        )?;
+        for t in 1..=HARD_TURN_CAP {
+            if drive_phoenix_live_turn(&mut ctrl, table_id, t)? {
+                break;
+            }
+        }
+        let digests = ctrl.live_state_digests().to_vec();
+        let lines = snapshot_seat_lines(&ctrl, 4)?;
+        let report = ctrl.finalize_and_verify_replay()?;
+        (report, digests, lines)
+    };
+    ctrl_container.teardown()?;
+
+    // 2. Wiped season: play Turns 1..=15 on container_pre, kill container_pre, start fresh
+    // genesis xrpld 3.4.1 container_post, detect wipe, rehydrate in <= 3 closes, play 16..=Close.
+    let container_pre = StandAloneContainer::start(spec.clone())?;
+    let (archivist_bytes, keyring, reserve_pool, pre_wipe_ledger) = {
+        let mut pre = GameTableSteward::bootstrap(container_pre.client(), table_spec, 7, deal)?;
+        for t in 1..=15_u8 {
+            let closed = drive_phoenix_live_turn(&mut pre, table_id, t)?;
+            assert!(!closed, "season unexpectedly closed at turn {t}");
+        }
+        assert_eq!(pre.turn(), 16);
+        let archivist_bytes = pre.archivist().to_json_bytes()?;
+        let _ = ArchivistMirror::from_json_slice(&archivist_bytes)?;
+        let keyring = pre.keyring_clone()?;
+        let disconnected = pre.into_disconnected();
+        let (_, _, reserve_pool, pre_wipe_ledger, _) = disconnected.into_parts();
+        (archivist_bytes, keyring, reserve_pool, pre_wipe_ledger)
+    };
+    container_pre.teardown()?;
+
+    let container_post = StandAloneContainer::start(spec.clone())?;
+    let (phoenix_report, post_report, post_digests, post_lines) = {
+        let mut post = GameTableSteward::from_archivist_bytes(
+            container_post.client(),
+            &archivist_bytes,
+            keyring,
+            reserve_pool,
+            pre_wipe_ledger,
+        )?;
+        let phoenix = post
+            .rehydrate_if_wiped()?
+            .ok_or("expected WipeSignal on fresh genesis xrpld container")?;
+        assert!(
+            phoenix.wipe_code == "WIPE_AUTHORITY_MISSING"
+                || phoenix.wipe_code == "WIPE_LEDGER_REWIND",
+            "unexpected wipe signal: {}",
+            phoenix.wipe_code
+        );
+        assert!(
+            phoenix.phoenix.ledger_closes_used <= 3,
+            "exceeded 3 ledger_accept close budget: {}",
+            phoenix.phoenix.ledger_closes_used
+        );
+        assert!(
+            phoenix
+                .phoenix
+                .rehydrated_ledger
+                .saturating_sub(phoenix.phoenix.fresh_boot_ledger)
+                <= 3
+        );
+        for t in 16..=HARD_TURN_CAP {
+            if drive_phoenix_live_turn(&mut post, table_id, t)? {
+                break;
+            }
+        }
+        let digests = post.live_state_digests().to_vec();
+        let lines = snapshot_seat_lines(&post, 4)?;
+        let report = post.finalize_and_verify_replay()?;
+        (phoenix, report, digests, lines)
+    };
+    container_post.teardown()?;
+
+    assert_eq!(post_digests, ctrl_digests);
+    assert_eq!(post_lines, ctrl_lines);
+    assert_eq!(post_report.scoreboard, ctrl_report.scoreboard);
+    assert_eq!(post_report.scoreboard, post_report.replay_scoreboard);
+    assert_eq!(
+        post_report.drand_auth_status,
+        DrandBeaconAuthStatus::Authenticated
+    );
+
+    let ps_out = OsDockerRunner.run(
+        "docker",
+        &[
+            "ps",
+            "-aq",
+            "--filter",
+            "label=merchant-league.harness=standalone",
+        ],
+        Duration::from_secs(10),
+    )?;
+    assert!(
+        ps_out.stdout.trim().is_empty(),
+        "expected 0 lingering containers, found: {}",
+        ps_out.stdout.trim()
+    );
+
+    Ok(json!({
+        "image": OFFICIAL_XRPLD_PINNED_REF,
+        "network_id": STANDALONE_NETWORK_ID,
+        "table_id": post_report.table_id,
+        "killed_after_turn": 15,
+        "wipe_signal": phoenix_report.wipe_code,
+        "pre_wipe_ledger": phoenix_report.phoenix.previous_ledger,
+        "fresh_boot_ledger": phoenix_report.phoenix.fresh_boot_ledger,
+        "rehydrated_ledger": phoenix_report.phoenix.rehydrated_ledger,
+        "ledger_closes_used": phoenix_report.phoenix.ledger_closes_used,
+        "wave1_batches": phoenix_report.phoenix.wave1_batches,
+        "wave2_batches": phoenix_report.phoenix.wave2_batches,
+        "wave3_batches": phoenix_report.phoenix.wave3_batches,
+        "total_rehydration_batches": phoenix_report.phoenix.total_batches_verified,
+        "total_rehydration_inner_legs": phoenix_report.phoenix.total_inner_legs_verified,
+        "remapped_checks": phoenix_report.phoenix.remapped_check_ids.len(),
+        "remapped_escrows": phoenix_report.phoenix.remapped_escrow_sequences.len(),
+        "closed_turn": post_report.closed_turn,
+        "drand_auth_status": format!("{:?}", post_report.drand_auth_status),
+        "control_divergence_milli": 0,
+        "replay_divergence_milli": 0,
+        "containers_remaining": 0
+    }))
 }

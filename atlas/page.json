@@ -103,46 +103,53 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 2,
-      "changed": 11,
+      "added": 3,
+      "changed": 9,
       "moved": 0,
-      "parts": 4,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
-        "kind": "import-added",
-        "sentence": "league-relay now imports league-seat-types.",
-        "subjects": [
-          "league-relay",
-          "league-seat-types"
-        ]
-      },
-      {
         "kind": "door",
-        "sentence": "CI now also runs crates/league-relay/src/whisper_relay.rs.",
+        "sentence": "CI now also runs crates/league-steward/src/archivist.rs, crates/league-steward/src/phoenix.rs and crates/league-steward/src/reserve.rs.",
         "subjects": [
           ".github/workflows/ci.yml",
-          "crates/league-relay/src/whisper_relay.rs"
+          "crates/league-steward/src/archivist.rs",
+          "crates/league-steward/src/phoenix.rs",
+          "crates/league-steward/src/reserve.rs"
         ]
       },
       {
-        "kind": "landing",
-        "sentence": "crates/league-seat-types/ is now also read by crates/league-relay/Cargo.toml.",
+        "kind": "unassigned",
+        "sentence": "crates/league-steward/src/archivist.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
         "subjects": [
-          "crates/league-seat-types/",
-          "crates/league-relay/Cargo.toml"
+          "crates/league-steward/src/archivist.rs"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "crates/league-steward/src/phoenix.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "crates/league-steward/src/phoenix.rs"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "crates/league-steward/src/reserve.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "crates/league-steward/src/reserve.rs"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "2 files added and 11 changed content, across 4 parts.",
+        "sentence": "3 files added and 9 changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "62a27b7347c11dc625464dbff74973772233d4c0",
-      "generatedAt": "2026-11-28T04:37:02.383Z"
+      "commit": "7065ba09b84cc214f512ef8122a7c34e196056c0",
+      "generatedAt": "2026-11-28T07:08:02.173Z"
     },
     "unchanged": false
   },
@@ -228,9 +235,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 12 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "7065ba09b84cc214f512ef8122a7c34e196056c0",
+  "commit": "27d91222484387d76e9713b1edc582a048ebeb92",
   "defaultBranch": "main",
-  "derived": "16 parts, mostly Rust (431 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (434 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -372,17 +379,20 @@
         "crates/league-seat-ui/src/lib.rs",
         "crates/league-standalone/",
         "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/archivist.rs",
         "crates/league-steward/src/codec.rs",
         "crates/league-steward/src/error.rs",
         "crates/league-steward/src/firewall.rs",
+        "crates/league-steward/src/phoenix.rs",
+        "crates/league-steward/src/reserve.rs",
         "crates/league-steward/src/steward.rs",
         "crates/league-steward/tests/",
         "crates/league-tui/",
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 62,
-      "runsMore": 93,
+      "runsCount": 65,
+      "runsMore": 96,
       "sends": [
         "uploads coverage to Codecov"
       ],
@@ -792,7 +802,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-28T07:08:02.173Z",
+  "generatedAt": "2026-11-28T09:44:54.583Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "64 writes and 73 reads use paths built at run time and are not named here.",
@@ -801,7 +811,7 @@
     "2 writes and 1 read go to a temporary directory, not to this repository.",
     "4 commands are built at run time and not followed.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
-    "386 files belong to no part: crates/league-steward/Cargo.toml, crates/league-steward/src/amount.rs, crates/league-steward/src/codec.rs and 383 more.",
+    "389 files belong to no part: crates/league-steward/Cargo.toml, crates/league-steward/src/amount.rs, crates/league-steward/src/archivist.rs and 386 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -850,7 +860,7 @@
     "league-ledger": 9,
     "league-relay": 16,
     "league-scorer": 8,
-    "league-season": 1,
+    "league-season": 2,
     "league-seat-types": 10,
     "league-seat-ui": 1,
     "league-standalone": 6,
@@ -859,7 +869,6 @@
   },
   "testedCodeParts": 13,
   "testedInside": [
-    "league-season",
     "league-seat-ui",
     "league-tui"
   ],
@@ -869,7 +878,6 @@
   "unreadNote": [],
   "untested": [],
   "untestedNote": [
-    "league-season is tested only by the unit tests in its own files.",
     "league-seat-ui is tested only by the unit tests in its own files.",
     "league-tui is tested only by the unit tests in its own files."
   ],

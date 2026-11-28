@@ -17,9 +17,132 @@
 //!
 //! The season record and its signature arrive in a later milestone.
 
+use std::fmt;
+
 /// A server can lag behind the network by this many ledgers. A lower index
 /// within this distance is lag, not a reset. Same value as xrpl-lab.
 pub const LEDGER_LAG_TOLERANCE: u64 = 1_000;
+
+/// Signal indicating that a previously active ledger was wiped or reset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WipeSignal {
+    /// Previously funded table Authority/Steward account returned `actNotFound`.
+    AuthorityAccountMissing {
+        /// Classic `r...` address of the missing Authority account.
+        authority_address: String,
+    },
+    /// Validated ledger index fell below a previously observed index beyond [`LEDGER_LAG_TOLERANCE`].
+    LedgerRewind {
+        /// Highest validated ledger index seen before the reset.
+        previous_ledger: u64,
+        /// Newly observed validated ledger index.
+        observed_ledger: u64,
+    },
+    /// Observed ledger-1/genesis hash differs from the hash recorded before disconnect.
+    GenesisHashChanged {
+        /// Genesis hash previously recorded.
+        previous_genesis_hash: String,
+        /// Newly observed genesis hash.
+        observed_genesis_hash: String,
+    },
+}
+
+impl WipeSignal {
+    /// Stable `SCREAMING_SNAKE_CASE` identifier for the detected wipe reason.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::AuthorityAccountMissing { .. } => "WIPE_AUTHORITY_MISSING",
+            Self::LedgerRewind { .. } => "WIPE_LEDGER_REWIND",
+            Self::GenesisHashChanged { .. } => "WIPE_GENESIS_CHANGED",
+        }
+    }
+}
+
+impl fmt::Display for WipeSignal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AuthorityAccountMissing { authority_address } => write!(
+                f,
+                "authority account {authority_address} missing (actNotFound)"
+            ),
+            Self::LedgerRewind {
+                previous_ledger,
+                observed_ledger,
+            } => write!(
+                f,
+                "validated ledger rewound from {previous_ledger} to {observed_ledger}"
+            ),
+            Self::GenesisHashChanged {
+                previous_genesis_hash,
+                observed_genesis_hash,
+            } => write!(
+                f,
+                "genesis ledger hash changed from {previous_genesis_hash} to {observed_genesis_hash}"
+            ),
+        }
+    }
+}
+
+/// Inputs sampled from an XRPL node to check whether a prior table ledger was wiped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WipeProbeInput<'a> {
+    /// Classic `r...` address of the table's Authority/Steward account.
+    pub authority_address: &'a str,
+    /// `Some(false)` when `account_info` on `authority_address` returned `actNotFound`.
+    pub authority_exists: Option<bool>,
+    /// Highest validated ledger index observed prior to this probe.
+    pub previous_ledger: Option<u64>,
+    /// Current validated ledger index observed on the node.
+    pub observed_ledger: Option<u64>,
+    /// Previously recorded genesis/ledger-1 hash, if captured.
+    pub previous_genesis_hash: Option<&'a str>,
+    /// Current genesis/ledger-1 hash observed on the node, if captured.
+    pub observed_genesis_hash: Option<&'a str>,
+}
+
+/// Inspect node probe signals and return the highest-priority [`WipeSignal`], if wiped.
+#[must_use]
+pub fn detect_ledger_wipe(input: &WipeProbeInput<'_>) -> Option<WipeSignal> {
+    if input.authority_exists == Some(false) && !input.authority_address.is_empty() {
+        return Some(WipeSignal::AuthorityAccountMissing {
+            authority_address: input.authority_address.to_string(),
+        });
+    }
+    if ledger_went_backwards(input.previous_ledger, input.observed_ledger)
+        && let (Some(previous_ledger), Some(observed_ledger)) =
+            (input.previous_ledger, input.observed_ledger)
+    {
+        return Some(WipeSignal::LedgerRewind {
+            previous_ledger,
+            observed_ledger,
+        });
+    }
+    if let (Some(prev), Some(obs)) = (input.previous_genesis_hash, input.observed_genesis_hash)
+        && !prev.is_empty()
+        && !obs.is_empty()
+        && !prev.eq_ignore_ascii_case(obs)
+    {
+        return Some(WipeSignal::GenesisHashChanged {
+            previous_genesis_hash: prev.to_string(),
+            observed_genesis_hash: obs.to_string(),
+        });
+    }
+    None
+}
+
+/// Return the latest announced [`KnownReset`] spanning `[last_seen_unix, now_unix]`, if any.
+#[must_use]
+pub fn known_reset_spanning(last_seen_unix: i64, now_unix: i64) -> Option<KnownReset> {
+    if last_seen_unix > now_unix {
+        return None;
+    }
+    KNOWN_RESETS
+        .iter()
+        .rev()
+        .copied()
+        .find(|reset| last_seen_unix < reset.ends_unix() && now_unix >= reset.starts_unix())
+}
 
 /// An announced reset of the Testnet, on one day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,5 +259,102 @@ mod tests {
         assert!(!ledger_went_backwards(Some(22_310_595), None));
         assert!(!ledger_went_backwards(Some(0), Some(5)));
         assert!(!ledger_went_backwards(Some(22_310_595), Some(0)));
+    }
+
+    #[test]
+    fn wipe_detection_catches_missing_authority_rewind_and_genesis_change() {
+        let missing = detect_ledger_wipe(&WipeProbeInput {
+            authority_address: "rStewardAddr",
+            authority_exists: Some(false),
+            previous_ledger: Some(250),
+            observed_ledger: Some(2),
+            previous_genesis_hash: Some("AAAA"),
+            observed_genesis_hash: Some("AAAA"),
+        });
+        assert_eq!(
+            missing,
+            Some(WipeSignal::AuthorityAccountMissing {
+                authority_address: "rStewardAddr".to_string(),
+            })
+        );
+        if let Some(ref sig) = missing {
+            assert_eq!(sig.code(), "WIPE_AUTHORITY_MISSING");
+            assert!(sig.to_string().contains("actNotFound"));
+        }
+
+        let rewind = detect_ledger_wipe(&WipeProbeInput {
+            authority_address: "rStewardAddr",
+            authority_exists: Some(true),
+            previous_ledger: Some(22_310_595),
+            observed_ledger: Some(12),
+            previous_genesis_hash: None,
+            observed_genesis_hash: None,
+        });
+        assert_eq!(
+            rewind,
+            Some(WipeSignal::LedgerRewind {
+                previous_ledger: 22_310_595,
+                observed_ledger: 12,
+            })
+        );
+        if let Some(ref sig) = rewind {
+            assert_eq!(sig.code(), "WIPE_LEDGER_REWIND");
+            assert!(sig.to_string().contains("22310595"));
+        }
+
+        let genesis_changed = detect_ledger_wipe(&WipeProbeInput {
+            authority_address: "rStewardAddr",
+            authority_exists: Some(true),
+            previous_ledger: Some(300),
+            observed_ledger: Some(301),
+            previous_genesis_hash: Some("ABCD"),
+            observed_genesis_hash: Some("EF01"),
+        });
+        assert_eq!(
+            genesis_changed,
+            Some(WipeSignal::GenesisHashChanged {
+                previous_genesis_hash: "ABCD".to_string(),
+                observed_genesis_hash: "EF01".to_string(),
+            })
+        );
+        if let Some(ref sig) = genesis_changed {
+            assert_eq!(sig.code(), "WIPE_GENESIS_CHANGED");
+            assert!(sig.to_string().contains("ABCD"));
+        }
+
+        let healthy = detect_ledger_wipe(&WipeProbeInput {
+            authority_address: "rStewardAddr",
+            authority_exists: Some(true),
+            previous_ledger: Some(22_310_595),
+            observed_ledger: Some(22_310_000),
+            previous_genesis_hash: Some("abcd"),
+            observed_genesis_hash: Some("ABCD"),
+        });
+        assert_eq!(healthy, None);
+    }
+
+    #[test]
+    fn known_reset_spanning_checks_window_boundaries() {
+        let reset = KNOWN_RESETS[0];
+        assert_eq!(
+            known_reset_spanning(reset.starts_unix() - 10, reset.starts_unix()),
+            Some(reset)
+        );
+        assert_eq!(
+            known_reset_spanning(reset.ends_unix() - 1, reset.ends_unix() + 10),
+            Some(reset)
+        );
+        assert_eq!(
+            known_reset_spanning(reset.ends_unix(), reset.ends_unix() + 10),
+            None
+        );
+        assert_eq!(
+            known_reset_spanning(reset.starts_unix() - 20, reset.starts_unix() - 1),
+            None
+        );
+        assert_eq!(
+            known_reset_spanning(reset.ends_unix(), reset.starts_unix()),
+            None
+        );
     }
 }

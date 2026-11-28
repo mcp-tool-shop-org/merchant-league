@@ -2,6 +2,7 @@
 //! per `docs/game-mode-protocol.md` §§1–3.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fmt::Write as _;
 
 use league_core::{
@@ -12,14 +13,18 @@ use league_core::{
     compute_mandate_commitment, derive_drand_beacon, eval_vrf_alpha, replay_season,
 };
 use league_ledger::client::Transport;
-use league_season::ledger_went_backwards;
+use league_season::{WipeProbeInput, WipeSignal, detect_ledger_wipe, ledger_went_backwards};
 use league_standalone::client::{StandAlone, StandAloneAccount, StandAloneError};
 use league_standalone::conformance::PREIMAGE_32_FINISH_FEE_DROPS;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 use crate::amount::{asset_currency_code, format_milli_units, parse_iou_milli_exact};
+use crate::archivist::{
+    ArchivistEvent, ArchivistMirror, MaterializedArchivistState, MirroredCharter,
+    MirroredCommitEscrow, MirroredNativeCheck, MirroredNativeEscrow,
+};
 use crate::codec::{
     REGENT_DELEGATE_PERMISSIONS, TicketPool, clawback_iou_json, configure_steward_authority,
     delete_credential, issue_and_accept_credential, open_authorized_trust_line, payment_iou_json,
@@ -30,6 +35,10 @@ use crate::codec::{
 };
 use crate::error::StewardError;
 use crate::firewall::{MemoFirewall, VerifiedCommitIngress, encode_commit_memos_json};
+use crate::phoenix::{PhoenixRehydrationOutcome, execute_three_wave_phoenix};
+use crate::reserve::{
+    DEFAULT_TESTNET_FAUCET_GRANT_DROPS, ReserveParams, StewardReservePool, estimate_table_reserves,
+};
 
 const INITIAL_ACCOUNT_XRP_DROPS: u64 = 500_000_000;
 const DEFAULT_TRUST_LINE_LIMIT: &str = "1000000";
@@ -38,7 +47,7 @@ const TICKET_REPLENISH_THRESHOLD: usize = 6;
 const DEFAULT_TURN_SPAN_RIPPLE_SECS: u64 = 400;
 
 /// Validated `xrpld` ledger-time window for one active `TableMode::Game` turn (`docs/game-mode-protocol.md` §2.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StewardTurnWindow {
     /// Turn number (`1..=32`).
     pub turn: u8,
@@ -110,6 +119,138 @@ pub struct SeasonSettlementReport {
     pub replay_scoreboard: FinalScoreboard,
 }
 
+/// Redacting XRPL signing keyring for Steward, seats, and Standing Regents.
+pub struct StewardKeyRing {
+    /// Table Authority/Steward signing account.
+    pub steward_account: StandAloneAccount,
+    /// Seated player signing accounts (`0..seat_count`).
+    pub seat_accounts: Vec<StandAloneAccount>,
+    /// Optional Standing Regent delegate signing accounts (`0..seat_count`).
+    pub regent_accounts: Vec<Option<StandAloneAccount>>,
+}
+
+impl fmt::Debug for StewardKeyRing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let seat_addrs: Vec<&str> = self
+            .seat_accounts
+            .iter()
+            .map(StandAloneAccount::address)
+            .collect();
+        f.debug_struct("StewardKeyRing")
+            .field("steward_address", &self.steward_account.address())
+            .field("seat_addresses", &seat_addrs)
+            .field("keys", &"<redacted>")
+            .finish()
+    }
+}
+
+impl StewardKeyRing {
+    /// Clone this keyring via validated `ed25519` seed reconstruction.
+    pub fn try_clone(&self) -> Result<Self, StewardError> {
+        let steward_account = self.steward_account.clone_ed25519()?;
+        let mut seat_accounts = Vec::with_capacity(self.seat_accounts.len());
+        for acc in &self.seat_accounts {
+            seat_accounts.push(acc.clone_ed25519()?);
+        }
+        let mut regent_accounts = Vec::with_capacity(self.regent_accounts.len());
+        for reg in &self.regent_accounts {
+            regent_accounts.push(match reg {
+                Some(acc) => Some(acc.clone_ed25519()?),
+                None => None,
+            });
+        }
+        Ok(Self {
+            steward_account,
+            seat_accounts,
+            regent_accounts,
+        })
+    }
+}
+
+/// Client-detached Steward snapshot holding only the signing keyring, reserve pool, and
+/// event-sourced [`ArchivistMirror`] across node restarts or container kills.
+#[derive(Debug)]
+pub struct DisconnectedSteward {
+    keyring: StewardKeyRing,
+    archivist: ArchivistMirror,
+    reserve_pool: StewardReservePool,
+    last_observed_ledger: u64,
+    last_genesis_hash: Option<String>,
+}
+
+impl DisconnectedSteward {
+    /// Borrow the event-sourced [`ArchivistMirror`].
+    #[must_use]
+    pub fn archivist(&self) -> &ArchivistMirror {
+        &self.archivist
+    }
+
+    /// Borrow the mutable [`ArchivistMirror`] (for serialization round-trip replacement tests).
+    pub fn archivist_mut(&mut self) -> &mut ArchivistMirror {
+        &mut self.archivist
+    }
+
+    /// Borrow the Steward reserve pool ledger.
+    #[must_use]
+    pub fn reserve_pool(&self) -> &StewardReservePool {
+        &self.reserve_pool
+    }
+
+    /// Highest validated ledger index observed prior to disconnect.
+    #[must_use]
+    pub const fn last_observed_ledger(&self) -> u64 {
+        self.last_observed_ledger
+    }
+
+    /// Consume into `(keyring, archivist, reserve_pool, last_observed_ledger, last_genesis_hash)`.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        StewardKeyRing,
+        ArchivistMirror,
+        StewardReservePool,
+        u64,
+        Option<String>,
+    ) {
+        (
+            self.keyring,
+            self.archivist,
+            self.reserve_pool,
+            self.last_observed_ledger,
+            self.last_genesis_hash,
+        )
+    }
+
+    /// Materialize a live [`GameTableSteward`] bound to `client` strictly from `self.archivist`.
+    pub fn reconnect<'b, T: Transport>(
+        self,
+        client: &'b StandAlone<T>,
+    ) -> Result<GameTableSteward<'b, T>, StewardError> {
+        GameTableSteward::from_archivist_mirror(
+            client,
+            self.archivist,
+            self.keyring,
+            self.reserve_pool,
+            self.last_observed_ledger,
+            self.last_genesis_hash,
+        )
+    }
+}
+
+/// Summary returned by [`GameTableSteward::rehydrate_if_wiped`] after 3-wave Phoenix recovery.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhoenixRehydrationReport {
+    /// Wipe signal code (`WIPE_AUTHORITY_MISSING`, `WIPE_LEDGER_REWIND`, `WIPE_GENESIS_CHANGED`).
+    pub wipe_code: String,
+    /// Full 3-wave Phoenix execution metrics and remapped object IDs.
+    pub phoenix: PhoenixRehydrationOutcome,
+    /// Updated turn window anchored on the fresh ledger's `close_time`.
+    pub active_window: StewardTurnWindow,
+    /// Active turn (`1..=32`) at recovery.
+    pub turn: u8,
+}
+
 #[derive(Debug, Clone)]
 struct NativeEscrowRecord {
     owner_seat: u8,
@@ -156,7 +297,9 @@ pub struct GameTableSteward<'a, T: Transport> {
     cartel_domain_ids: BTreeMap<u8, String>,
     last_credit_tiers: Vec<CreditTier>,
     last_identities: Vec<SeatIdentity>,
+    last_charter_holders: BTreeMap<league_core::CharterRole, u8>,
     last_observed_ledger: u64,
+    last_genesis_hash: Option<String>,
     last_oracle_update_time: u32,
     turn_span_ripple_secs: u64,
     window: StewardTurnWindow,
@@ -172,6 +315,8 @@ pub struct GameTableSteward<'a, T: Transport> {
     turn_reveals: BTreeMap<u8, OrderReveal>,
     logged_turns: Vec<LoggedTurn>,
     live_state_digests: Vec<[u8; 32]>,
+    archivist: ArchivistMirror,
+    reserve_pool: StewardReservePool,
     total_batches_verified: usize,
     total_inner_legs_verified: usize,
     total_post_lock_cancel_refusals: usize,
@@ -404,6 +549,46 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
         )?;
         let firewall = MemoFirewall::new(steward_account.address().to_string(), &seat_addresses);
 
+        let regent_count = u8::try_from(regent_accounts.iter().filter(|r| r.is_some()).count())
+            .map_err(|_| StewardError::Protocol("regent count overflow".into()))?;
+        let reserve_params = ReserveParams::default();
+        let mut reserve_pool =
+            StewardReservePool::new(reserve_params, DEFAULT_TESTNET_FAUCET_GRANT_DROPS * 2);
+        let reserve_est = estimate_table_reserves(
+            &reserve_params,
+            spec.seat_count,
+            regent_count,
+            INITIAL_TICKET_COUNT,
+            24,
+        )?;
+        reserve_pool.allocate_table(reserve_est.total_table_estimate_drops)?;
+
+        let regent_addresses: Vec<Option<String>> = regent_accounts
+            .iter()
+            .map(|opt| opt.as_ref().map(|a| a.address().to_string()))
+            .collect();
+        let initial_state_digest = engine.state_digest()?;
+        let mut archivist = ArchivistMirror::new();
+        archivist.append(ArchivistEvent::TableBootstrapped {
+            table_id: spec.table_id.0,
+            spec: Box::new(spec),
+            layout_seed,
+            sealed_deal: sealed_deal.clone(),
+            mandate_commits: mandate_commits.clone(),
+            mandate_reveals: mandate_reveals.clone(),
+            turn_span_ripple_secs,
+            steward_address: steward_account.address().to_string(),
+            seat_addresses,
+            regent_addresses,
+            authority_flags,
+            table_domain_id: table_domain_id.clone(),
+            initial_ledger_index: last_observed_ledger,
+            initial_window: window,
+            initial_state_digest,
+            bootstrap_batches_verified: total_batches_verified,
+            bootstrap_inner_legs_verified: total_inner_legs_verified,
+        })?;
+
         let steward = Self {
             client,
             engine,
@@ -424,7 +609,9 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             cartel_domain_ids: BTreeMap::new(),
             last_credit_tiers,
             last_identities,
+            last_charter_holders: BTreeMap::new(),
             last_observed_ledger,
+            last_genesis_hash: None,
             last_oracle_update_time: 0,
             turn_span_ripple_secs,
             window,
@@ -440,12 +627,423 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             turn_reveals: BTreeMap::new(),
             logged_turns: Vec::new(),
             live_state_digests: Vec::new(),
+            archivist,
+            reserve_pool,
             total_batches_verified,
             total_inner_legs_verified,
             total_post_lock_cancel_refusals: 0,
         };
         steward.assert_account_lines_parity()?;
         Ok(steward)
+    }
+
+    /// Borrow the event-sourced [`ArchivistMirror`].
+    #[must_use]
+    pub fn archivist(&self) -> &ArchivistMirror {
+        &self.archivist
+    }
+
+    /// Borrow the Steward XRP reserve pool ledger.
+    #[must_use]
+    pub fn reserve_pool(&self) -> &StewardReservePool {
+        &self.reserve_pool
+    }
+
+    /// Borrow the mutable Steward XRP reserve pool ledger.
+    pub fn reserve_pool_mut(&mut self) -> &mut StewardReservePool {
+        &mut self.reserve_pool
+    }
+
+    /// Borrow the recorded post-Sweep canonical `EngineState` SHA-256 digests.
+    #[must_use]
+    pub fn live_state_digests(&self) -> &[[u8; 32]] {
+        &self.live_state_digests
+    }
+
+    /// Clone the Steward, seat, and Standing Regent signing keyring.
+    pub fn keyring_clone(&self) -> Result<StewardKeyRing, StewardError> {
+        let mut seat_accounts = Vec::with_capacity(self.seat_accounts.len());
+        for acc in &self.seat_accounts {
+            seat_accounts.push(acc.clone_ed25519()?);
+        }
+        let mut regent_accounts = Vec::with_capacity(self.regent_accounts.len());
+        for reg in &self.regent_accounts {
+            regent_accounts.push(match reg {
+                Some(acc) => Some(acc.clone_ed25519()?),
+                None => None,
+            });
+        }
+        Ok(StewardKeyRing {
+            steward_account: self.steward_account.clone_ed25519()?,
+            seat_accounts,
+            regent_accounts,
+        })
+    }
+
+    /// Detach this Steward from its RPC client borrow so the caller can tear down and replace
+    /// the underlying `xrpld` container before reconnecting via [`DisconnectedSteward::reconnect`].
+    #[must_use]
+    pub fn into_disconnected(self) -> DisconnectedSteward {
+        DisconnectedSteward {
+            keyring: StewardKeyRing {
+                steward_account: self.steward_account,
+                seat_accounts: self.seat_accounts,
+                regent_accounts: self.regent_accounts,
+            },
+            archivist: self.archivist,
+            reserve_pool: self.reserve_pool,
+            last_observed_ledger: self.last_observed_ledger,
+            last_genesis_hash: self.last_genesis_hash,
+        }
+    }
+
+    /// Reconstruct a [`GameTableSteward`] on `client` strictly from serialized [`ArchivistMirror`]
+    /// JSON bytes, a [`StewardKeyRing`], a [`StewardReservePool`], and the last observed ledger index.
+    pub fn from_archivist_bytes(
+        client: &'a StandAlone<T>,
+        archivist_json: &[u8],
+        keyring: StewardKeyRing,
+        reserve_pool: StewardReservePool,
+        previous_ledger: u64,
+    ) -> Result<Self, StewardError> {
+        let archivist = ArchivistMirror::from_json_slice(archivist_json)?;
+        Self::from_archivist_mirror(
+            client,
+            archivist,
+            keyring,
+            reserve_pool,
+            previous_ledger,
+            None,
+        )
+    }
+
+    fn from_archivist_mirror(
+        client: &'a StandAlone<T>,
+        archivist: ArchivistMirror,
+        keyring: StewardKeyRing,
+        reserve_pool: StewardReservePool,
+        previous_ledger: u64,
+        last_genesis_hash: Option<String>,
+    ) -> Result<Self, StewardError> {
+        let mat: MaterializedArchivistState = archivist.materialize()?;
+        let n = usize::from(mat.engine.state().spec.seat_count);
+        if keyring.seat_accounts.len() != n || keyring.regent_accounts.len() != n {
+            return Err(StewardError::ArchivistIntegrity(
+                "keyring seat/regent count mismatch during reconnect".into(),
+            ));
+        }
+        if keyring.steward_account.address() != mat.steward_address {
+            return Err(StewardError::ArchivistIntegrity(
+                "keyring steward address mismatch during reconnect".into(),
+            ));
+        }
+        for idx in 0..n {
+            if keyring.seat_accounts[idx].address() != mat.seat_addresses[idx] {
+                return Err(StewardError::ArchivistIntegrity(format!(
+                    "keyring seat {idx} address mismatch during reconnect"
+                )));
+            }
+        }
+
+        let cred_currency = asset_currency_code(AssetId::Cred)?;
+        let mut raw_currencies = Vec::with_capacity(n);
+        let mut refined_currencies = Vec::with_capacity(n);
+        for g in 0..mat.engine.state().spec.seat_count {
+            raw_currencies.push(asset_currency_code(AssetId::Raw(g))?);
+            refined_currencies.push(asset_currency_code(AssetId::Refined(g))?);
+        }
+
+        let native_escrows = mat
+            .native_escrows
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    k,
+                    NativeEscrowRecord {
+                        owner_seat: v.owner_seat,
+                        dest_seat: v.dest_seat,
+                        xrpl_sequence: v.xrpl_sequence,
+                        condition_hex: v.condition_hex,
+                        finish_after_ripple: v.finish_after_ripple,
+                        cancel_after_ripple: v.cancel_after_ripple,
+                    },
+                )
+            })
+            .collect();
+        let native_checks = mat
+            .native_checks
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    k,
+                    NativeCheckRecord {
+                        drawer_seat: v.drawer_seat,
+                        payee_seat: v.payee_seat,
+                        amount_milli: v.amount_milli,
+                        check_id: v.xrpl_check_id,
+                    },
+                )
+            })
+            .collect();
+        let active_commit_escrows = mat
+            .active_commit_escrows
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    k,
+                    CommitEscrowRecord {
+                        sequence: v.sequence,
+                        condition_hex: v.condition_hex,
+                        fulfillment_hex: v.fulfillment_hex,
+                    },
+                )
+            })
+            .collect();
+
+        let firewall = MemoFirewall::from_parts(
+            mat.steward_address,
+            &mat.seat_addresses,
+            mat.dropped_records,
+        );
+
+        let current_turn = mat.engine.state().turn;
+        let last_charter_holders = mat
+            .active_charters
+            .iter()
+            .filter(|ch| ch.expires_turn > current_turn)
+            .map(|ch| (ch.role, ch.holder))
+            .collect();
+        let mut steward = Self {
+            client,
+            engine: mat.engine,
+            layout_seed: mat.layout_seed,
+            sealed_deal: mat.sealed_deal,
+            mandate_commits: mat.mandate_commits,
+            mandate_reveals: mat.mandate_reveals,
+            steward_account: keyring.steward_account,
+            seat_accounts: keyring.seat_accounts,
+            regent_accounts: keyring.regent_accounts,
+            steward_tickets: TicketPool::default(),
+            seat_tickets: vec![TicketPool::default(); n],
+            cred_currency,
+            raw_currencies,
+            refined_currencies,
+            authority_flags: mat.authority_flags,
+            table_domain_id: mat.table_domain_id,
+            cartel_domain_ids: mat.cartel_domain_ids,
+            last_credit_tiers: mat.last_credit_tiers,
+            last_identities: mat.last_identities,
+            last_charter_holders,
+            last_observed_ledger: previous_ledger.max(mat.last_observed_ledger),
+            last_genesis_hash,
+            last_oracle_update_time: 0,
+            turn_span_ripple_secs: mat.turn_span_ripple_secs,
+            window: mat.window,
+            firewall,
+            native_escrows,
+            custody_escrows: mat.custody_escrows,
+            native_checks,
+            active_commit_escrows,
+            turn_market_actions: mat.turn_market_actions,
+            turn_cancel_lock_at: mat.turn_cancel_lock_at,
+            turn_rejected_count: mat.turn_rejected_count,
+            turn_commitments: mat.turn_commitments,
+            turn_reveals: mat.turn_reveals,
+            logged_turns: mat.logged_turns,
+            live_state_digests: mat.live_state_digests,
+            archivist,
+            reserve_pool,
+            total_batches_verified: mat.total_batches_verified,
+            total_inner_legs_verified: mat.total_inner_legs_verified,
+            total_post_lock_cancel_refusals: mat.total_post_lock_cancel_refusals,
+        };
+
+        // If the connected node still holds our table accounts (no wipe), refresh TicketPools.
+        if steward.detect_wipe()?.is_none() {
+            steward
+                .steward_tickets
+                .refresh_from_ledger(client, steward.steward_account.address())?;
+            for (idx, acc) in steward.seat_accounts.iter().enumerate() {
+                steward.seat_tickets[idx].refresh_from_ledger(client, acc.address())?;
+            }
+        }
+        Ok(steward)
+    }
+
+    /// Probe the connected `xrpld` node for a ledger wipe or reset using `league_season`.
+    pub fn detect_wipe(&self) -> Result<Option<WipeSignal>, StewardError> {
+        let (observed_ledger, _) = self.client.validated_close_time()?;
+        let authority_exists = match self.client.call(
+            "account_info",
+            json!({
+                "account": self.steward_account.address(),
+                "ledger_index": "validated"
+            }),
+        ) {
+            Ok(_) => Some(true),
+            Err(StandAloneError::Rpc { error, .. }) if error == "actNotFound" => Some(false),
+            Err(err) => return Err(StewardError::StandAlone(err)),
+        };
+        Ok(detect_ledger_wipe(&WipeProbeInput {
+            authority_address: self.steward_account.address(),
+            authority_exists,
+            previous_ledger: Some(self.last_observed_ledger),
+            observed_ledger: Some(observed_ledger),
+            previous_genesis_hash: self.last_genesis_hash.as_deref(),
+            observed_genesis_hash: None,
+        }))
+    }
+
+    /// Detect a ledger wipe via `league-season` and, if wiped, materialize the exact state from
+    /// [`ArchivistMirror`] and run the 3-wave `BatchV1_1` + `TicketCreate` Phoenix rehydrator in
+    /// `<= 3` `ledger_accept` closes, ending with a `0` milli-unit `account_lines` parity assertion.
+    pub fn rehydrate_if_wiped(&mut self) -> Result<Option<PhoenixRehydrationReport>, StewardError> {
+        let Some(wipe_signal) = self.detect_wipe()? else {
+            return Ok(None);
+        };
+        let mat = self.archivist.materialize()?;
+        let exec = execute_three_wave_phoenix(
+            self.client,
+            &wipe_signal,
+            &mat,
+            &self.steward_account,
+            &self.seat_accounts,
+            &self.regent_accounts,
+            &mut self.reserve_pool,
+        )?;
+        let outcome = exec.outcome;
+
+        self.engine = mat.engine;
+        self.steward_tickets = exec.steward_tickets;
+        self.seat_tickets = exec.seat_tickets;
+        self.table_domain_id = outcome.new_table_domain_id.clone();
+        self.cartel_domain_ids = outcome.remapped_cartel_domains.clone();
+        self.last_credit_tiers = mat.last_credit_tiers;
+        self.last_identities = mat.last_identities;
+        self.last_observed_ledger = outcome.rehydrated_ledger;
+        self.last_oracle_update_time = outcome.wave3_oracle_update_time;
+
+        let current_turn = self.engine.state().turn;
+        self.last_charter_holders = mat
+            .active_charters
+            .iter()
+            .filter(|ch| ch.expires_turn > current_turn)
+            .map(|ch| (ch.role, ch.holder))
+            .collect();
+        self.native_escrows.clear();
+        for (eid, esc) in mat.native_escrows {
+            let new_seq = outcome
+                .remapped_escrow_sequences
+                .get(&eid)
+                .copied()
+                .unwrap_or(esc.xrpl_sequence);
+            let finish_after_ripple = esc
+                .finish_after_turn
+                .filter(|&ft| ft > current_turn)
+                .map(|ft| outcome.rehydrated_ripple_close + u64::from(ft - current_turn) * 15);
+            let cancel_after_ripple = outcome.rehydrated_ripple_close
+                + u64::from(esc.cancel_after_turn.saturating_sub(current_turn).max(1)) * 60;
+            self.native_escrows.insert(
+                eid,
+                NativeEscrowRecord {
+                    owner_seat: esc.owner_seat,
+                    dest_seat: esc.dest_seat,
+                    xrpl_sequence: new_seq,
+                    condition_hex: esc.condition_hex,
+                    finish_after_ripple,
+                    cancel_after_ripple,
+                },
+            );
+        }
+        self.custody_escrows = mat.custody_escrows;
+
+        self.native_checks.clear();
+        for (cid, chk) in mat.native_checks {
+            let new_cid = outcome
+                .remapped_check_ids
+                .get(&cid)
+                .cloned()
+                .unwrap_or(chk.xrpl_check_id);
+            self.native_checks.insert(
+                cid,
+                NativeCheckRecord {
+                    drawer_seat: chk.drawer_seat,
+                    payee_seat: chk.payee_seat,
+                    amount_milli: chk.amount_milli,
+                    check_id: new_cid,
+                },
+            );
+        }
+
+        self.active_commit_escrows.clear();
+        for (seat, ce) in mat.active_commit_escrows {
+            let new_seq = outcome
+                .remapped_commit_sequences
+                .get(&seat)
+                .copied()
+                .unwrap_or(ce.sequence);
+            self.active_commit_escrows.insert(
+                seat,
+                CommitEscrowRecord {
+                    sequence: new_seq,
+                    condition_hex: ce.condition_hex,
+                    fulfillment_hex: ce.fulfillment_hex,
+                },
+            );
+        }
+
+        self.turn_market_actions = mat.turn_market_actions;
+        self.turn_cancel_lock_at = mat.turn_cancel_lock_at;
+        self.turn_rejected_count = mat.turn_rejected_count;
+        self.turn_commitments = mat.turn_commitments;
+        self.turn_reveals = mat.turn_reveals;
+        self.logged_turns = mat.logged_turns;
+        self.live_state_digests = mat.live_state_digests;
+        self.total_batches_verified = mat
+            .total_batches_verified
+            .saturating_add(outcome.total_batches_verified);
+        self.total_inner_legs_verified = mat
+            .total_inner_legs_verified
+            .saturating_add(outcome.total_inner_legs_verified);
+        self.total_post_lock_cancel_refusals = mat.total_post_lock_cancel_refusals;
+
+        let schedule = self.engine.state().spec.drand_schedule.ok_or_else(|| {
+            StewardError::Protocol("missing drand_schedule on active Game engine".into())
+        })?;
+        let new_window = build_turn_window(
+            current_turn,
+            outcome.rehydrated_ripple_close,
+            self.turn_span_ripple_secs,
+            self.engine.state().spec.cancel_lock_bps,
+            schedule,
+        )?;
+        self.window = new_window;
+
+        self.archivist.append(ArchivistEvent::PhoenixRehydrated {
+            at_turn: current_turn,
+            wipe_code: outcome.wipe_code.clone(),
+            previous_ledger: outcome.previous_ledger,
+            fresh_boot_ledger: outcome.fresh_boot_ledger,
+            rehydrated_ledger: outcome.rehydrated_ledger,
+            ledger_closes_used: outcome.ledger_closes_used,
+            new_table_domain_id: outcome.new_table_domain_id.clone(),
+            remapped_cartel_domains: outcome.remapped_cartel_domains.clone(),
+            remapped_escrow_sequences: outcome.remapped_escrow_sequences.clone(),
+            remapped_check_ids: outcome.remapped_check_ids.clone(),
+            remapped_commit_sequences: outcome.remapped_commit_sequences.clone(),
+            new_window,
+            wave_batches_verified: outcome.total_batches_verified,
+            wave_inner_legs_verified: outcome.total_inner_legs_verified,
+        })?;
+
+        self.assert_account_lines_parity()?;
+
+        Ok(Some(PhoenixRehydrationReport {
+            wipe_code: outcome.wipe_code.clone(),
+            phoenix: outcome,
+            active_window: new_window,
+            turn: current_turn,
+        }))
     }
 
     /// Borrow the underlying checked [`StandAlone`] client.
@@ -572,7 +1170,14 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
         {
             self.engine.begin_cancel_lock()?;
             if self.turn_cancel_lock_at.is_none() {
-                self.turn_cancel_lock_at = Some(self.turn_market_actions.len() as u32);
+                let lock_idx = self.turn_market_actions.len() as u32;
+                self.turn_cancel_lock_at = Some(lock_idx);
+                self.archivist.append(ArchivistEvent::CancelLockEngaged {
+                    turn: self.engine.state().turn,
+                    cancel_lock_at: lock_idx,
+                    ledger_index: ledger_seq,
+                    ripple_close,
+                })?;
             }
         }
         Ok((ledger_seq, ripple_close))
@@ -631,7 +1236,14 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
         self.turn_market_actions.push(action.clone());
         if let Err(err) = self.engine.apply_market_action(action.clone()) {
             self.turn_rejected_count += 1;
-            if matches!(err, EngineError::CancelLocked) {
+            let is_cancel_lock = matches!(err, EngineError::CancelLocked);
+            self.archivist
+                .append(ArchivistEvent::MarketActionRejected {
+                    turn,
+                    action,
+                    post_lock_cancel_refused: is_cancel_lock,
+                })?;
+            if is_cancel_lock {
                 self.total_post_lock_cancel_refusals += 1;
                 let logical_close = self.map_ripple_to_table_unix(ripple_close);
                 return Err(StewardError::CancelLocked {
@@ -643,7 +1255,14 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             return Err(StewardError::Engine(err));
         }
 
-        match action {
+        let mut opened_native_escrow = None;
+        let mut closed_native_escrow_id = None;
+        let mut opened_native_check = None;
+        let mut closed_native_check_id = None;
+        let mut batches_verified_delta = 0_usize;
+        let mut inner_legs_verified_delta = 0_usize;
+
+        match action.clone() {
             MarketAction::PostOffer { seat, .. } => {
                 if let Some(before) = pre_seat {
                     self.mirror_seat_free_delta_after_action(seat, &before)?;
@@ -693,6 +1312,8 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                     )?;
                     self.total_batches_verified += 1;
                     self.total_inner_legs_verified += res.inners.len();
+                    batches_verified_delta = 1;
+                    inner_legs_verified_delta = res.inners.len();
                 }
             }
             MarketAction::CreateEscrow { seat, escrow } => {
@@ -750,11 +1371,23 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                             owner_seat: seat,
                             dest_seat: escrow.destination,
                             xrpl_sequence: xrpl_seq,
-                            condition_hex: cond_hex,
+                            condition_hex: cond_hex.clone(),
                             finish_after_ripple,
                             cancel_after_ripple,
                         },
                     );
+                    opened_native_escrow = Some(MirroredNativeEscrow {
+                        escrow_id: next_escrow_id,
+                        owner_seat: seat,
+                        dest_seat: escrow.destination,
+                        amount_milli: escrow.amount,
+                        xrpl_sequence: xrpl_seq,
+                        condition_hex: cond_hex,
+                        finish_after_turn: escrow.finish_after_turn,
+                        cancel_after_turn: escrow.cancel_after_turn,
+                        finish_after_ripple,
+                        cancel_after_ripple,
+                    });
                 } else {
                     self.custody_escrows.insert(next_escrow_id);
                     if let Some(before) = pre_seat {
@@ -782,6 +1415,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                             result: res,
                         }));
                     }
+                    closed_native_escrow_id = Some(escrow_id);
                 } else {
                     let _ = escrow_before;
                     self.custody_escrows.remove(&escrow_id);
@@ -816,9 +1450,19 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                         drawer_seat: seat,
                         payee_seat: check.payee,
                         amount_milli: check.send_max,
-                        check_id,
+                        check_id: check_id.clone(),
                     },
                 );
+                opened_native_check = Some(MirroredNativeCheck {
+                    check_id_engine: next_check_id,
+                    drawer_seat: seat,
+                    payee_seat: check.payee,
+                    currency,
+                    amount_milli: check.send_max,
+                    due_turn: check.due_turn,
+                    expiration_turn: check.expiration_turn,
+                    xrpl_check_id: check_id,
+                });
             }
             MarketAction::CancelCheck { seat, check_id } => {
                 if let Some(rec) = self.native_checks.remove(&check_id) {
@@ -833,6 +1477,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                             result: res,
                         }));
                     }
+                    closed_native_check_id = Some(check_id);
                 }
             }
             MarketAction::FlagWashFreeze { inspector, .. } => {
@@ -843,6 +1488,17 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             MarketAction::RecordIntentPledge { .. } | MarketAction::StandForOffice { .. } => {}
         }
 
+        self.archivist
+            .append(ArchivistEvent::MarketActionAccepted {
+                turn,
+                action,
+                opened_native_escrow,
+                closed_native_escrow_id,
+                opened_native_check,
+                closed_native_check_id,
+                batches_verified_delta,
+                inner_legs_verified_delta,
+            })?;
         let _ = self.observe_validated_header()?;
         Ok(())
     }
@@ -850,7 +1506,10 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
     /// Advance `TurnEngine` from `TalkAndMarket` into `Commit`.
     pub fn advance_to_commit(&mut self) -> Result<(), StewardError> {
         let _ = self.observe_validated_header()?;
+        let turn = self.engine.state().turn;
         self.engine.advance_to_commit()?;
+        self.archivist
+            .append(ArchivistEvent::AdvancedToCommit { turn })?;
         Ok(())
     }
 
@@ -923,7 +1582,16 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
             .validated_close_time()
             .map_or(now_close, |(_, c)| c);
 
-        let verified = self.ingest_commit_tx(&tx_json, tx_close_ripple)?;
+        let verified = self.ingest_commit_tx_with_escrow(
+            &tx_json,
+            tx_close_ripple,
+            Some(MirroredCommitEscrow {
+                seat,
+                sequence: seq,
+                condition_hex: cond_hex.clone(),
+                fulfillment_hex: fulfil_hex.clone(),
+            }),
+        )?;
         self.active_commit_escrows.insert(
             seat,
             CommitEscrowRecord {
@@ -942,10 +1610,24 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
         tx_json: &Value,
         validated_tx_ripple_close: u64,
     ) -> Result<VerifiedCommitIngress, StewardError> {
-        let verified = self
-            .firewall
-            .inspect_tx(tx_json)
-            .map_err(StewardError::FirewallDropped)?;
+        self.ingest_commit_tx_with_escrow(tx_json, validated_tx_ripple_close, None)
+    }
+
+    fn ingest_commit_tx_with_escrow(
+        &mut self,
+        tx_json: &Value,
+        validated_tx_ripple_close: u64,
+        commit_escrow: Option<MirroredCommitEscrow>,
+    ) -> Result<VerifiedCommitIngress, StewardError> {
+        let verified = match self.firewall.inspect_tx(tx_json) {
+            Ok(v) => v,
+            Err(rec) => {
+                self.archivist.append(ArchivistEvent::FirewallDropped {
+                    record: rec.clone(),
+                })?;
+                return Err(StewardError::FirewallDropped(rec));
+            }
+        };
         let logical_close = self.map_ripple_to_table_unix(validated_tx_ripple_close);
         if validated_tx_ripple_close > self.window.commit_close_ripple {
             return Err(StewardError::CommitWindowClosed {
@@ -954,17 +1636,28 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                 deadline_unix: self.window.commit_close_unix,
             });
         }
+        let turn = self.engine.state().turn;
         self.engine
             .submit_order_commitment(Seat(verified.seat), verified.commitment)?;
         self.turn_commitments
             .insert(verified.seat, verified.commitment);
+        self.archivist.append(ArchivistEvent::SeatCommitAccepted {
+            turn,
+            seat: verified.seat,
+            commitment: verified.commitment,
+            tx_hash: verified.tx_hash.clone(),
+            commit_escrow,
+        })?;
         Ok(verified)
     }
 
     /// Advance `TurnEngine` from `Commit` to `Reveal`.
     pub fn advance_to_reveal(&mut self) -> Result<(), StewardError> {
         let _ = self.observe_validated_header()?;
+        let turn = self.engine.state().turn;
         self.engine.advance_to_reveal()?;
+        self.archivist
+            .append(ArchivistEvent::AdvancedToReveal { turn })?;
         Ok(())
     }
 
@@ -1007,9 +1700,12 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                 }));
             }
         }
+        let turn = self.engine.state().turn;
         self.engine
             .submit_order_reveal(Seat(seat), reveal.clone())?;
-        self.turn_reveals.insert(seat, reveal);
+        self.turn_reveals.insert(seat, reveal.clone());
+        self.archivist
+            .append(ArchivistEvent::SeatRevealAccepted { turn, seat, reveal })?;
         Ok(())
     }
 
@@ -1276,11 +1972,12 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
         let public_receipt = public_sweep_receipt_from_turn_engine_receipt(&receipt);
         let cancel_lock_engaged = self.turn_cancel_lock_at.is_some();
         let rejected_market_actions = self.turn_rejected_count;
+        let commit_deadline_unix = self.window.commit_close_unix;
         self.logged_turns.push(LoggedTurn {
             turn,
             market_actions: std::mem::take(&mut self.turn_market_actions),
             cancel_lock_at: self.turn_cancel_lock_at.take(),
-            commit_deadline_unix: Some(self.window.commit_close_unix),
+            commit_deadline_unix: Some(commit_deadline_unix),
             commitments: std::mem::take(&mut self.turn_commitments),
             reveals: std::mem::take(&mut self.turn_reveals),
             turn_beacon,
@@ -1292,18 +1989,48 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
         self.turn_rejected_count = 0;
 
         let (settled_ledger_index, new_ripple_close) = self.observe_validated_header()?;
-        if self.engine.state().phase == TurnPhase::TalkAndMarket {
+        let next_window = if self.engine.state().phase == TurnPhase::TalkAndMarket {
             let schedule = self.engine.state().spec.drand_schedule.ok_or_else(|| {
                 StewardError::Protocol("missing drand_schedule on active Game engine".into())
             })?;
-            self.window = build_turn_window(
+            let win = build_turn_window(
                 self.engine.state().turn,
                 new_ripple_close,
                 self.turn_span_ripple_secs,
                 self.engine.state().spec.cancel_lock_bps,
                 schedule,
             )?;
-        }
+            self.window = win;
+            Some(win)
+        } else {
+            None
+        };
+
+        let awarded_charters: Vec<MirroredCharter> = receipt
+            .charters_awarded
+            .iter()
+            .map(|&(role, holder)| MirroredCharter {
+                role,
+                holder,
+                expires_turn: receipt.turn.saturating_add(6),
+                uri_hex: hex::encode_upper(
+                    format!("turn:{}:seat:{holder}", receipt.turn).as_bytes(),
+                ),
+            })
+            .collect();
+        self.archivist.append(ArchivistEvent::TurnSwept {
+            turn,
+            drand_round,
+            drand_signature: drand_signature.to_vec(),
+            commit_deadline_unix,
+            post_state_digest: receipt.post_state_digest,
+            settled_ledger_index,
+            next_window,
+            cartel_domain_ids: self.cartel_domain_ids.clone(),
+            awarded_charters,
+            batch_count,
+            batch_inner_legs_verified,
+        })?;
 
         Ok(TurnSettlementSummary {
             turn,
@@ -1730,6 +2457,16 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                     league_core::CharterRole::CustomsInspector => "CHARTER_INSPECTOR",
                     league_core::CharterRole::OracleAuditor => "CHARTER_AUDITOR",
                 };
+                if let Some(&prev_holder) = self.last_charter_holders.get(&role)
+                    && let Some(prev_acc) = self.seat_accounts.get(usize::from(prev_holder))
+                {
+                    let _ = delete_credential(
+                        self.client,
+                        &self.steward_account,
+                        prev_acc.address(),
+                        cred_name,
+                    );
+                }
                 let uri_hex =
                     hex::encode_upper(format!("turn:{}:seat:{winner}", receipt.turn).as_bytes());
                 issue_and_accept_credential(
@@ -1740,6 +2477,7 @@ impl<'a, T: Transport> GameTableSteward<'a, T> {
                     Some(exp),
                     Some(&uri_hex),
                 )?;
+                self.last_charter_holders.insert(role, winner);
             }
         }
 
@@ -2022,6 +2760,8 @@ mod tests {
         close_time: u64,
         rewind_next: bool,
         force_batch_inner_fail: bool,
+        strict_accounts: bool,
+        funded_accounts: BTreeSet<String>,
         account_seq: BTreeMap<String, u32>,
         account_flags: BTreeMap<String, u32>,
         tickets: BTreeMap<String, Vec<u32>>,
@@ -2030,7 +2770,7 @@ mod tests {
         escrows: BTreeMap<(String, u32), (String, String, Units, String)>, // (owner, seq) -> (dest, currency, amt, cond)
         checks: BTreeMap<String, (String, String, String, Units)>, // check_id -> (drawer, dest, currency, max)
         txs: BTreeMap<String, Value>,
-        account_txs: BTreeMap<String, Vec<Value>>,
+        credentials: BTreeSet<(String, String, String)>,
         obj_seq: u64,
     }
 
@@ -2048,6 +2788,27 @@ mod tests {
                     ..SimState::default()
                 })),
             }
+        }
+
+        fn wipe_to_fresh_genesis(&self) {
+            let mut st = self.state.borrow_mut();
+            st.ledger_seq = 2;
+            st.close_time = 815_000_000;
+            st.rewind_next = false;
+            st.force_batch_inner_fail = false;
+            st.strict_accounts = true;
+            st.funded_accounts.clear();
+            st.funded_accounts
+                .insert(league_standalone::GENESIS_ACCOUNT_ADDRESS.to_string());
+            st.account_seq.clear();
+            st.account_flags.clear();
+            st.tickets.clear();
+            st.lines.clear();
+            st.escrows.clear();
+            st.checks.clear();
+            st.txs.clear();
+            st.credentials.clear();
+            st.obj_seq = 0;
         }
 
         fn apply_single_tx(
@@ -2165,6 +2926,16 @@ mod tests {
                                 .copied()
                                 .unwrap_or(0);
                             st.lines.insert((account.clone(), issuer, cur), prev - val);
+                        }
+                    } else if tx_json.get("Amount").and_then(Value::as_str).is_some() {
+                        let dest = tx_json
+                            .get("Destination")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string();
+                        if !dest.is_empty() {
+                            st.funded_accounts.insert(dest.clone());
+                            st.account_seq.entry(dest).or_insert(1);
                         }
                     }
                 }
@@ -2352,6 +3123,47 @@ mod tests {
                         }
                     }
                 }
+                "CheckCancel" => {
+                    let cid = tx_json
+                        .get("CheckID")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    st.checks.remove(cid);
+                }
+                "CredentialCreate" => {
+                    let subj = tx_json
+                        .get("Subject")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let ct = tx_json
+                        .get("CredentialType")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    if !st.credentials.insert((account.clone(), subj, ct)) {
+                        result_code = "tecDUPLICATE".to_string();
+                        meta = json!({ "TransactionResult": "tecDUPLICATE" });
+                    }
+                }
+                "CredentialDelete" => {
+                    let issuer = tx_json
+                        .get("Issuer")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&account)
+                        .to_string();
+                    let subj = tx_json
+                        .get("Subject")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let ct = tx_json
+                        .get("CredentialType")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    st.credentials.remove(&(issuer, subj, ct));
+                }
                 "PermissionedDomainSet" => {
                     st.obj_seq += 1;
                     let did = format!("{:064X}", st.obj_seq);
@@ -2384,8 +3196,7 @@ mod tests {
                 "hash": tx_hash,
                 "meta": meta
             });
-            st.txs.insert(tx_hash.to_string(), record.clone());
-            st.account_txs.entry(account).or_default().insert(0, record);
+            st.txs.insert(tx_hash.to_string(), record);
             (result_code, meta)
         }
     }
@@ -2465,6 +3276,14 @@ mod tests {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string();
+                    if st.strict_accounts && !st.funded_accounts.contains(&acct) {
+                        return Ok(json!({
+                            "result": {
+                                "status": "error",
+                                "error": "actNotFound"
+                            }
+                        }));
+                    }
                     let seq = st.account_seq.get(&acct).copied().unwrap_or(1);
                     let flags = st.account_flags.get(&acct).copied().unwrap_or(0);
                     Ok(json!({
@@ -2540,19 +3359,6 @@ mod tests {
                         }
                     }))
                 }
-                "account_tx" => {
-                    let acct = params
-                        .get("account")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let txs = st.account_txs.get(acct).cloned().unwrap_or_default();
-                    Ok(json!({
-                        "result": {
-                            "status": "success",
-                            "transactions": txs
-                        }
-                    }))
-                }
                 "tx" => {
                     let hash = params
                         .get("transaction")
@@ -2586,7 +3392,68 @@ mod tests {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_string();
-                        if let Some(s) = decoded.get("Sequence").and_then(Value::as_u64)
+                        if st.strict_accounts {
+                            let mut tmp_seq = st.account_seq.clone();
+                            if let Some(s) = decoded.get("Sequence").and_then(Value::as_u64)
+                                && s > 0
+                            {
+                                let expected = tmp_seq.get(&outer_acct).copied().unwrap_or(1);
+                                let got = s as u32;
+                                if got != expected {
+                                    let code = if got > expected {
+                                        "terPRE_SEQ"
+                                    } else {
+                                        "tefPAST_SEQ"
+                                    };
+                                    return Ok(json!({
+                                        "result": {
+                                            "status": "success",
+                                            "accepted": false,
+                                            "engine_result": code
+                                        }
+                                    }));
+                                }
+                                tmp_seq.insert(outer_acct.clone(), got + 1);
+                            }
+                            if let Some(inners) =
+                                decoded.get("RawTransactions").and_then(Value::as_array)
+                            {
+                                for wrapper in inners {
+                                    if let Some(inner) = wrapper.get("RawTransaction")
+                                        && let Some(s) =
+                                            inner.get("Sequence").and_then(Value::as_u64)
+                                        && s > 0
+                                    {
+                                        let acct = inner
+                                            .get("Account")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or_default();
+                                        let expected = tmp_seq.get(acct).copied().unwrap_or(1);
+                                        let got = s as u32;
+                                        if got != expected {
+                                            let code = if got > expected {
+                                                "terPRE_SEQ"
+                                            } else {
+                                                "tefPAST_SEQ"
+                                            };
+                                            return Ok(json!({
+                                                "result": {
+                                                    "status": "success",
+                                                    "accepted": false,
+                                                    "engine_result": code
+                                                }
+                                            }));
+                                        }
+                                        tmp_seq.insert(acct.to_string(), got + 1);
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(t) = decoded.get("TicketSequence").and_then(Value::as_u64) {
+                            if let Some(list) = st.tickets.get_mut(&outer_acct) {
+                                list.retain(|&v| u64::from(v) != t);
+                            }
+                        } else if let Some(s) = decoded.get("Sequence").and_then(Value::as_u64)
                             && s > 0
                         {
                             st.account_seq.insert(outer_acct.clone(), s as u32 + 1);
@@ -2627,6 +3494,31 @@ mod tests {
                             }
                         }))
                     } else {
+                        if st.strict_accounts
+                            && let Some(s) = decoded.get("Sequence").and_then(Value::as_u64)
+                            && s > 0
+                        {
+                            let acct = decoded
+                                .get("Account")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            let expected = st.account_seq.get(acct).copied().unwrap_or(1);
+                            let got = s as u32;
+                            if got != expected {
+                                let code = if got > expected {
+                                    "terPRE_SEQ"
+                                } else {
+                                    "tefPAST_SEQ"
+                                };
+                                return Ok(json!({
+                                    "result": {
+                                        "status": "success",
+                                        "accepted": false,
+                                        "engine_result": code
+                                    }
+                                }));
+                            }
+                        }
                         let (res, _) = Self::apply_single_tx(&mut st, &decoded, &tx_hash, None);
                         Ok(json!({
                             "result": {
@@ -3311,19 +4203,7 @@ mod tests {
                     .unwrap_or_default();
                 if method == "account_tx" {
                     *self.account_tx_calls.borrow_mut() += 1;
-                    return Ok(json!({
-                        "result": {
-                            "status": "success",
-                            "transactions": [{
-                                "tx_json": {
-                                    "Account": "rBogusConcurrentAccount",
-                                    "TransactionType": "AccountSet",
-                                    "Memos": [{"Memo": {"MemoData": "deadbeef"}}]
-                                },
-                                "hash": "BADCONCURRENTHASH"
-                            }]
-                        }
-                    }));
+                    return Err("unexpected account_tx".into());
                 }
                 if method == "tx" {
                     let h = body
@@ -3396,5 +4276,709 @@ mod tests {
             .unwrap_or_else(|e| panic!("ch1: {e}"));
         let err = steward.submit_seat_commit_via_xrpld(1, ch1, [0x55u8; 32]);
         assert!(matches!(err, Err(StewardError::Protocol(_))));
+    }
+
+    fn drive_phoenix_test_turn<T: Transport>(
+        steward: &mut GameTableSteward<'_, T>,
+        table_id: TableId,
+        t: u8,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        if steward.phase() != TurnPhase::TalkAndMarket {
+            return Ok(true);
+        }
+        if t == 1 {
+            steward.submit_market_action(MarketAction::PostOffer {
+                seat: 0,
+                order: OfferProposal {
+                    side: OfferSide::Buy,
+                    good: AssetId::Raw(1),
+                    amount: 2 * UNIT_SCALE,
+                    price_per_unit_cred: 2 * UNIT_SCALE,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            })?;
+            steward.submit_market_action(MarketAction::CancelOffer {
+                seat: 0,
+                offer_id: 1,
+            })?;
+            steward.submit_market_action(MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Raw(1),
+                amount: UNIT_SCALE,
+            })?;
+            steward.submit_market_action(MarketAction::CreateCheck {
+                seat: 0,
+                check: CheckProposal {
+                    payee: 2,
+                    asset: AssetId::Cred,
+                    send_max: 2 * UNIT_SCALE,
+                    deliver_min: 2 * UNIT_SCALE,
+                    due_turn: 1,
+                    expiration_turn: 3,
+                },
+            })?;
+            let cond = compute_preimage_condition(&PreimageSecret([0x5Au8; 32]))?;
+            steward.submit_market_action(MarketAction::CreateEscrow {
+                seat: 0,
+                escrow: EscrowProposal {
+                    destination: 1,
+                    asset: AssetId::Cred,
+                    amount: 3 * UNIT_SCALE,
+                    finish_after_turn: Some(1),
+                    cancel_after_turn: 4,
+                    condition_hash: Some(cond),
+                    bond: None,
+                },
+            })?;
+        }
+        if t == 2 {
+            steward.submit_market_action(MarketAction::StandForOffice {
+                seat: 0,
+                platform: CouncilPlatform {
+                    proposed_tariffs_bps: vec![(0, (400, 0))],
+                    cartel_admissions: vec![(1, 0), (1, 1)],
+                    cartel_revocations: Vec::new(),
+                },
+            })?;
+            steward.submit_market_action(MarketAction::StandForOffice {
+                seat: 1,
+                platform: CouncilPlatform {
+                    proposed_tariffs_bps: Vec::new(),
+                    cartel_admissions: vec![(1, 0), (1, 1), (1, 2)],
+                    cartel_revocations: Vec::new(),
+                },
+            })?;
+            steward.submit_market_action(MarketAction::CreateCheck {
+                seat: 2,
+                check: CheckProposal {
+                    payee: 0,
+                    asset: AssetId::Cred,
+                    send_max: 500 * UNIT_SCALE,
+                    deliver_min: 500 * UNIT_SCALE,
+                    due_turn: 2,
+                    expiration_turn: 5,
+                },
+            })?;
+        }
+        if t == 14 {
+            // Open native Check (id 3) and native PREIMAGE-SHA-256 TokenEscrow (id 2) spanning
+            // the Turn-15 wipe so Wave 3 must re-create and remap both before Turn 16 Sweep!
+            steward.submit_market_action(MarketAction::CreateCheck {
+                seat: 0,
+                check: CheckProposal {
+                    payee: 2,
+                    asset: AssetId::Cred,
+                    send_max: 4 * UNIT_SCALE,
+                    deliver_min: 4 * UNIT_SCALE,
+                    due_turn: 16,
+                    expiration_turn: 19,
+                },
+            })?;
+            let cond14 = compute_preimage_condition(&PreimageSecret([0x9Du8; 32]))?;
+            steward.submit_market_action(MarketAction::CreateEscrow {
+                seat: 0,
+                escrow: EscrowProposal {
+                    destination: 1,
+                    asset: AssetId::Cred,
+                    amount: 5 * UNIT_SCALE,
+                    finish_after_turn: Some(16),
+                    cancel_after_turn: 19,
+                    condition_hash: Some(cond14),
+                    bond: None,
+                },
+            })?;
+        }
+
+        steward.advance_to_commit()?;
+        let mut reveals = Vec::new();
+        for s in 0..4_u8 {
+            if t == 16 && s == 3 {
+                continue;
+            }
+            let mut bundle = SealedOrderBundle::default();
+            if t == 1 && s == 1 {
+                bundle.escrow_finishes.push(EscrowFinishUnlock {
+                    escrow_id: 1,
+                    preimage: Some(PreimageSecret([0x5Au8; 32])),
+                });
+            }
+            if t == 1 && s == 2 {
+                bundle.check_cashes.push(1);
+            }
+            if (t == 2 || t == 14) && s == 0 {
+                bundle.converter_runs.push(ConverterRunOrder {
+                    recipe_idx: 0,
+                    runs: 1,
+                });
+                if t == 2 {
+                    bundle.check_cashes.push(2);
+                }
+            }
+            if t == 4 {
+                bundle.council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 0,
+                    cartel_chair: 1,
+                });
+            }
+            if (t == 6 || t == 12) && s == 0 {
+                bundle.charter_bids.push(CharterBidOrder {
+                    role: CharterRole::ClearinghouseBroker,
+                    bid_cred: UNIT_SCALE,
+                });
+            }
+            if t == 16 && s == 1 {
+                bundle.escrow_finishes.push(EscrowFinishUnlock {
+                    escrow_id: 2,
+                    preimage: Some(PreimageSecret([0x9Du8; 32])),
+                });
+            }
+            if t == 16 && s == 2 {
+                bundle.check_cashes.push(3);
+            }
+            let rev = OrderReveal {
+                bundle,
+                salt: RevealSalt([s.wrapping_add(t).max(1); 32]),
+            };
+            let ch = compute_order_commitment(table_id, Turn(t), Seat(s), &rev)?;
+            steward.submit_seat_commit_via_xrpld(s, ch, [s.wrapping_add(t).max(1); 32])?;
+            reveals.push((s, rev));
+        }
+
+        steward.advance_to_reveal()?;
+        for (s, rev) in reveals {
+            steward.submit_seat_reveal_via_xrpld(s, rev)?;
+        }
+        if t == 16 {
+            let (_, res) = steward.exercise_regent_delegation_on_xrpld(3)?;
+            assert_eq!(res, "tesSUCCESS");
+        }
+        let round = steward.current_window().expected_drand_round;
+        let sig = quicknet_sig_for_round(round);
+        let summary = steward.sweep_turn(round, &sig)?;
+        Ok(summary.public_receipt.season_closed)
+    }
+
+    #[test]
+    fn scripted_turn15_wipe_and_three_wave_phoenix_rehydrates_zero_divergence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let schedule = DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 12,
+            turn_period_secs: 12,
+        };
+        let table_id = TableId(515);
+        let (mut spec, deal) =
+            TableSpec::standard_game_chiral_ring_with_mandates(table_id, 4, 7, schedule)?;
+        for s in &mut spec.seats {
+            s.initial_cred = 100 * UNIT_SCALE;
+        }
+
+        // 1. Unwiped control season.
+        let ctrl_node = ScriptedXrplNode::new();
+        let ctrl_client = StandAlone::with_transport("http://127.0.0.1:5005", ctrl_node)?;
+        let mut ctrl = GameTableSteward::bootstrap(&ctrl_client, spec.clone(), 7, deal.clone())?;
+        for t in 1..=HARD_TURN_CAP {
+            if drive_phoenix_test_turn(&mut ctrl, table_id, t)? {
+                break;
+            }
+        }
+        let ctrl_digests = ctrl.live_state_digests().to_vec();
+        let ctrl_report = ctrl.finalize_and_verify_replay()?;
+
+        // 2. Wiped season: play Turns 1..=15, serialize ArchivistMirror, wipe node to fresh
+        // genesis, reconnect, rehydrate in <= 3 closes, play Turns 16..=Close.
+        let wipe_node = ScriptedXrplNode::new();
+        let wipe_client = StandAlone::with_transport("http://127.0.0.1:5005", wipe_node.clone())?;
+        let mut pre = GameTableSteward::bootstrap(&wipe_client, spec, 7, deal)?;
+        assert!(pre.rehydrate_if_wiped()?.is_none());
+
+        for t in 1..=15_u8 {
+            let closed = drive_phoenix_test_turn(&mut pre, table_id, t)?;
+            assert!(!closed, "season unexpectedly closed at turn {t}");
+        }
+        assert_eq!(pre.turn(), 16);
+
+        let archivist_bytes = pre.archivist().to_json_bytes()?;
+        let keyring = pre.keyring_clone()?;
+        let disconnected = pre.into_disconnected();
+        let (_, _, reserve_pool, prev_ledger, _) = disconnected.into_parts();
+
+        wipe_node.wipe_to_fresh_genesis();
+        let post_client = StandAlone::with_transport("http://127.0.0.1:5005", wipe_node)?;
+        let mut post = GameTableSteward::from_archivist_bytes(
+            &post_client,
+            &archivist_bytes,
+            keyring,
+            reserve_pool,
+            prev_ledger,
+        )?;
+        let _ = post.reserve_pool();
+        let _ = post.reserve_pool_mut();
+
+        let phoenix = post
+            .rehydrate_if_wiped()?
+            .ok_or("expected WipeSignal on wiped node")?;
+        assert_eq!(phoenix.wipe_code, "WIPE_AUTHORITY_MISSING");
+        assert!(phoenix.phoenix.ledger_closes_used <= 3);
+        assert_eq!(phoenix.phoenix.remapped_escrow_sequences.len(), 1);
+        assert_eq!(phoenix.phoenix.remapped_check_ids.len(), 1);
+
+        for t in 16..=HARD_TURN_CAP {
+            if drive_phoenix_test_turn(&mut post, table_id, t)? {
+                break;
+            }
+        }
+        let post_digests = post.live_state_digests().to_vec();
+        let post_report = post.finalize_and_verify_replay()?;
+
+        assert_eq!(post_digests, ctrl_digests);
+        assert_eq!(post_report.scoreboard, ctrl_report.scoreboard);
+        assert_eq!(post_report.scoreboard, post_report.replay_scoreboard);
+        assert_eq!(
+            post_report.drand_auth_status,
+            DrandBeaconAuthStatus::Authenticated
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn scripted_mid_commit_wipe_and_disconnected_steward_guards()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let schedule = DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 12,
+            turn_period_secs: 12,
+        };
+        let table_id = TableId(516);
+        let (mut spec, deal) =
+            TableSpec::standard_game_chiral_ring_with_mandates(table_id, 4, 7, schedule)?;
+        for s in &mut spec.seats {
+            s.initial_cred = 100 * UNIT_SCALE;
+        }
+
+        let node = ScriptedXrplNode::new();
+        let client = StandAlone::with_transport("http://127.0.0.1:5005", node.clone())?;
+        let mut pre = GameTableSteward::bootstrap(&client, spec, 7, deal)?;
+
+        // Exercise CancelLockEngaged + post-lock MarketActionRejected archiving, plus
+        // mid-Commit 1-drop escrow tracking before a wipe.
+        pre.submit_market_action(MarketAction::PostOffer {
+            seat: 0,
+            order: OfferProposal {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                amount: UNIT_SCALE,
+                price_per_unit_cred: 2 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        })?;
+        let _ = pre.advance_to_cancel_lock()?;
+        assert!(matches!(
+            pre.submit_market_action(MarketAction::CancelOffer {
+                seat: 0,
+                offer_id: 1,
+            }),
+            Err(StewardError::CancelLocked { .. })
+        ));
+
+        pre.advance_to_commit()?;
+        let rev0 = OrderReveal {
+            bundle: SealedOrderBundle::default(),
+            salt: RevealSalt([1; 32]),
+        };
+        let ch0 = compute_order_commitment(table_id, Turn(1), Seat(0), &rev0)?;
+        pre.submit_seat_commit_via_xrpld(0, ch0, [1; 32])?;
+
+        let keyring = pre.keyring_clone()?;
+        let dbg_ring = format!("{keyring:?}");
+        assert!(dbg_ring.contains("<redacted>"));
+        assert!(!dbg_ring.contains("sEd"));
+
+        let arch_bytes = pre.archivist().to_json_bytes()?;
+
+        let mut disconnected = pre.into_disconnected();
+        assert!(!disconnected.archivist().is_empty());
+        assert!(!disconnected.archivist_mut().is_empty());
+        assert!(
+            disconnected.reserve_pool().available_drops > 0
+                || disconnected.reserve_pool().allocated_drops > 0
+        );
+        assert!(disconnected.last_observed_ledger() > 0);
+
+        // Keyring validation error paths on from_archivist_bytes.
+        let mut wrong_count_ring = keyring.try_clone()?;
+        wrong_count_ring.seat_accounts.pop();
+        assert!(matches!(
+            GameTableSteward::from_archivist_bytes(
+                &client,
+                &arch_bytes,
+                wrong_count_ring,
+                disconnected.reserve_pool().clone(),
+                disconnected.last_observed_ledger(),
+            ),
+            Err(StewardError::ArchivistIntegrity(_))
+        ));
+
+        let mut wrong_steward_ring = keyring.try_clone()?;
+        wrong_steward_ring.steward_account = StandAloneAccount::generate_ed25519()?;
+        assert!(matches!(
+            GameTableSteward::from_archivist_bytes(
+                &client,
+                &arch_bytes,
+                wrong_steward_ring,
+                disconnected.reserve_pool().clone(),
+                disconnected.last_observed_ledger(),
+            ),
+            Err(StewardError::ArchivistIntegrity(_))
+        ));
+
+        let mut wrong_seat_ring = keyring.try_clone()?;
+        wrong_seat_ring.seat_accounts[1] = StandAloneAccount::generate_ed25519()?;
+        assert!(matches!(
+            GameTableSteward::from_archivist_bytes(
+                &client,
+                &arch_bytes,
+                wrong_seat_ring,
+                disconnected.reserve_pool().clone(),
+                disconnected.last_observed_ledger(),
+            ),
+            Err(StewardError::ArchivistIntegrity(_))
+        ));
+
+        // Wipe mid-Commit, reconnect via DisconnectedSteward::reconnect, rehydrate in <= 3 closes,
+        // submit remaining commits + reveals (finishing remapped seat-0 1-drop commit escrow), sweep Turn 1.
+        node.wipe_to_fresh_genesis();
+        let post_client = StandAlone::with_transport("http://127.0.0.1:5005", node)?;
+        let mut post = disconnected.reconnect(&post_client)?;
+        let phoenix = post.rehydrate_if_wiped()?.ok_or("expected wipe report")?;
+        assert!(phoenix.phoenix.ledger_closes_used <= 3);
+        assert_eq!(phoenix.phoenix.remapped_commit_sequences.len(), 1);
+        assert!(phoenix.phoenix.remapped_commit_sequences.contains_key(&0));
+
+        // Folding PhoenixRehydrated via materialize() succeeds.
+        let mat_after = post.archivist().materialize()?;
+        assert_eq!(
+            mat_after.active_commit_escrows.get(&0).map(|c| c.sequence),
+            phoenix.phoenix.remapped_commit_sequences.get(&0).copied()
+        );
+
+        let mut rem_revs = Vec::new();
+        for s in 1..4_u8 {
+            let rev = OrderReveal {
+                bundle: SealedOrderBundle::default(),
+                salt: RevealSalt([s + 1; 32]),
+            };
+            let ch = compute_order_commitment(table_id, Turn(1), Seat(s), &rev)?;
+            post.submit_seat_commit_via_xrpld(s, ch, [s + 1; 32])?;
+            rem_revs.push((s, rev));
+        }
+
+        post.advance_to_reveal()?;
+        post.submit_seat_reveal_via_xrpld(0, rev0)?;
+        for (s, rev) in rem_revs {
+            post.submit_seat_reveal_via_xrpld(s, rev)?;
+        }
+        let round = post.current_window().expected_drand_round;
+        let sig = quicknet_sig_for_round(round);
+        assert!(post.sweep_turn(round, &sig).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn steward_contract_cancellations_firewall_and_parity_error_paths()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let schedule = DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 12,
+            turn_period_secs: 12,
+        };
+        let table_id = TableId(517);
+        let (mut spec, deal) =
+            TableSpec::standard_game_chiral_ring_with_mandates(table_id, 4, 7, schedule)?;
+        spec.seats[1].regent = None;
+        let node = ScriptedXrplNode::new();
+        let client = StandAlone::with_transport("http://127.0.0.1:5005", node.clone())?;
+        let mut steward = GameTableSteward::bootstrap(&client, spec, 7, deal)?;
+
+        // Premature finalize + invalid regent delegation errors.
+        assert!(steward.finalize_and_verify_replay().is_err());
+        assert!(steward.exercise_regent_delegation_on_xrpld(99).is_err());
+        assert!(steward.exercise_regent_delegation_on_xrpld(1).is_err());
+
+        // Turn 1: CreateCheck + CancelCheck, plus custody CreateEscrow (Raw) & native CreateEscrow (Cred).
+        steward.submit_market_action(MarketAction::CreateCheck {
+            seat: 0,
+            check: CheckProposal {
+                payee: 1,
+                asset: AssetId::Cred,
+                send_max: 2 * UNIT_SCALE,
+                deliver_min: 2 * UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 4,
+            },
+        })?;
+        steward.submit_market_action(MarketAction::CancelCheck {
+            seat: 0,
+            check_id: 1,
+        })?;
+        steward.submit_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: UNIT_SCALE,
+                finish_after_turn: Some(1),
+                cancel_after_turn: 2,
+                condition_hash: None,
+                bond: None,
+            },
+        })?;
+        let cond2 = compute_preimage_condition(&PreimageSecret([0x77u8; 32]))?;
+        steward.submit_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: UNIT_SCALE,
+                finish_after_turn: Some(1),
+                cancel_after_turn: 2,
+                condition_hash: Some(cond2),
+                bond: None,
+            },
+        })?;
+
+        // Check firewall rejection & CommitWindowClosed branch via ingest_commit_tx.
+        steward.advance_to_commit()?;
+        assert!(matches!(
+            steward.ingest_commit_tx(
+                &json!({ "Account": "rOutsiderNotSeated", "hash": "AA".repeat(32) }),
+                100,
+            ),
+            Err(StewardError::FirewallDropped(_))
+        ));
+        let rev0 = OrderReveal {
+            bundle: SealedOrderBundle::default(),
+            salt: RevealSalt([9; 32]),
+        };
+        let ch0 = compute_order_commitment(table_id, Turn(1), Seat(0), &rev0)?;
+        let late_tx = json!({
+            "Account": steward.seat_account(0).ok_or("seat 0")?.address(),
+            "TransactionType": "EscrowCreate",
+            "hash": "BB".repeat(32),
+            "Memos": encode_commit_memos_json(ch0)
+        });
+        assert!(matches!(
+            steward.ingest_commit_tx(&late_tx, u64::MAX / 2),
+            Err(StewardError::CommitWindowClosed { .. })
+        ));
+        steward.advance_to_reveal()?;
+        let r1 = steward.current_window().expected_drand_round;
+        let s1 = quicknet_sig_for_round(r1);
+        steward.sweep_turn(r1, &s1)?;
+
+        // Turn 2: both escrows have cancel_after_turn=2; cancel custody escrow (1) and native escrow (2).
+        steward.submit_market_action(MarketAction::CancelExpiredEscrow {
+            seat: 0,
+            escrow_id: 1,
+        })?;
+        steward.submit_market_action(MarketAction::CancelExpiredEscrow {
+            seat: 0,
+            escrow_id: 2,
+        })?;
+
+        // Exercise remaining BalanceDivergence branches (raw, refined, steward-only currency).
+        let s0_addr = steward
+            .seat_account(0)
+            .ok_or("seat 0")?
+            .address()
+            .to_string();
+        let st_addr = steward.steward_account().address().to_string();
+        let raw_code = asset_currency_code(AssetId::Raw(0))?;
+        let ref_code = asset_currency_code(AssetId::Refined(0))?;
+
+        let key_raw = (s0_addr.clone(), st_addr.clone(), raw_code.clone());
+        let orig_raw = node
+            .state
+            .borrow()
+            .lines
+            .get(&key_raw)
+            .copied()
+            .unwrap_or(0);
+        node.state
+            .borrow_mut()
+            .lines
+            .insert(key_raw.clone(), orig_raw + 1);
+        assert!(matches!(
+            steward.assert_account_lines_parity(),
+            Err(StewardError::BalanceDivergence { .. })
+        ));
+        node.state.borrow_mut().lines.insert(key_raw, orig_raw);
+
+        let key_ref = (s0_addr, st_addr.clone(), ref_code);
+        let orig_ref = node
+            .state
+            .borrow()
+            .lines
+            .get(&key_ref)
+            .copied()
+            .unwrap_or(0);
+        node.state
+            .borrow_mut()
+            .lines
+            .insert(key_ref.clone(), orig_ref + 1);
+        assert!(matches!(
+            steward.assert_account_lines_parity(),
+            Err(StewardError::BalanceDivergence { .. })
+        ));
+        node.state.borrow_mut().lines.insert(key_ref, orig_ref);
+
+        // Non-seat peer line on Steward for a table currency hits steward conservation check.
+        node.state
+            .borrow_mut()
+            .lines
+            .insert(("rBogusPeer".into(), st_addr, raw_code), 5_000);
+        assert!(matches!(
+            steward.assert_account_lines_parity(),
+            Err(StewardError::BalanceDivergence { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn scripted_phoenix_edge_variants_checks_and_strict_seq_guards()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let schedule = DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 12,
+            turn_period_secs: 12,
+        };
+
+        // Part A: 6-seat table (2 OracleSet docs) + 1 native Check (hits 1-check pair + extra oracle).
+        let (spec6, deal6) =
+            TableSpec::standard_game_chiral_ring_with_mandates(TableId(919), 6, 7, schedule)?;
+        let node6 = ScriptedXrplNode::new();
+        let client6 = StandAlone::with_transport("http://127.0.0.1:5005", node6.clone())?;
+        let mut pre6 = GameTableSteward::bootstrap(&client6, spec6, 7, deal6)?;
+        pre6.submit_market_action(MarketAction::CreateCheck {
+            seat: 0,
+            check: CheckProposal {
+                payee: 1,
+                asset: AssetId::Cred,
+                send_max: UNIT_SCALE,
+                deliver_min: UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 4,
+            },
+        })?;
+        let disc6 = pre6.into_disconnected();
+        node6.wipe_to_fresh_genesis();
+        let post_client6 = StandAlone::with_transport("http://127.0.0.1:5005", node6)?;
+        let mut post6 = disc6.reconnect(&post_client6)?;
+        let phx6 = post6
+            .rehydrate_if_wiped()?
+            .ok_or("expected wipe report 6")?;
+        assert_eq!(phx6.phoenix.remapped_check_ids.len(), 1);
+        assert!(phx6.phoenix.ledger_closes_used <= 3);
+
+        // Part B: 4-seat table + 2 native Checks from distinct drawers (hits >=2 check Batch arm).
+        let (spec4, deal4) =
+            TableSpec::standard_game_chiral_ring_with_mandates(TableId(920), 4, 7, schedule)?;
+        let node4 = ScriptedXrplNode::new();
+        let client4 = StandAlone::with_transport("http://127.0.0.1:5005", node4.clone())?;
+        let mut pre4 = GameTableSteward::bootstrap(&client4, spec4, 7, deal4)?;
+        pre4.submit_market_action(MarketAction::CreateCheck {
+            seat: 0,
+            check: CheckProposal {
+                payee: 1,
+                asset: AssetId::Cred,
+                send_max: UNIT_SCALE,
+                deliver_min: UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 4,
+            },
+        })?;
+        pre4.submit_market_action(MarketAction::CreateCheck {
+            seat: 1,
+            check: CheckProposal {
+                payee: 2,
+                asset: AssetId::Cred,
+                send_max: UNIT_SCALE,
+                deliver_min: UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 4,
+            },
+        })?;
+        let disc4 = pre4.into_disconnected();
+        node4.wipe_to_fresh_genesis();
+        let post_client4 = StandAlone::with_transport("http://127.0.0.1:5005", node4)?;
+        let mut post4 = disc4.reconnect(&post_client4)?;
+        let phx4 = post4
+            .rehydrate_if_wiped()?
+            .ok_or("expected wipe report 4")?;
+        assert_eq!(phx4.phoenix.remapped_check_ids.len(), 2);
+        assert!(phx4.phoenix.ledger_closes_used <= 3);
+
+        // Part C: strict_accounts sequence guards reject skipped or stale sequences.
+        let genesis = StandAloneAccount::genesis()?;
+        let cur_seq = post_client4.account_sequence(genesis.address())?;
+        let s0_addr = post4.seat_account(0).ok_or("seat 0")?.address().to_string();
+        assert!(
+            crate::codec::queue_raw_json_tx(
+                &post_client4,
+                &genesis,
+                json!({
+                    "TransactionType": "Payment",
+                    "Account": genesis.address(),
+                    "Destination": s0_addr,
+                    "Amount": "1000000"
+                }),
+                None,
+                crate::codec::SeqOrTicket::Sequence(cur_seq + 5),
+                200,
+            )
+            .is_err()
+        );
+        assert!(
+            crate::codec::queue_raw_json_tx(
+                &post_client4,
+                &genesis,
+                json!({
+                    "TransactionType": "Payment",
+                    "Account": genesis.address(),
+                    "Destination": s0_addr,
+                    "Amount": "1000000"
+                }),
+                None,
+                crate::codec::SeqOrTicket::Sequence(1),
+                200,
+            )
+            .is_err()
+        );
+        let mut bad_cursor = BTreeMap::from([(genesis.address().to_string(), cur_seq + 3)]);
+        assert!(
+            crate::codec::queue_batch_all_or_nothing(
+                &post_client4,
+                &genesis,
+                vec![
+                    json!({
+                        "TransactionType": "Payment",
+                        "Account": genesis.address(),
+                        "Destination": s0_addr,
+                        "Amount": "1000000"
+                    }),
+                    json!({
+                        "TransactionType": "Payment",
+                        "Account": genesis.address(),
+                        "Destination": s0_addr,
+                        "Amount": "1000000"
+                    }),
+                ],
+                &[],
+                crate::codec::SeqOrTicket::Sequence(cur_seq),
+                &mut bad_cursor,
+                10,
+                200,
+            )
+            .is_err()
+        );
+        Ok(())
     }
 }

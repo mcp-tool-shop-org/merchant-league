@@ -88,6 +88,10 @@ pub enum StewardError {
         /// Observed integer milli-unit balance from `xrpld`.
         observed_milli: Units,
     },
+    /// Event-sourced Archivist mirror integrity, replay digest, or deserialization error.
+    ArchivistIntegrity(String),
+    /// 3-wave Phoenix state rehydration failed or exceeded the 3-ledger-close budget.
+    PhoenixRehydrationFailed(String),
     /// Protocol or encoding invariant failure.
     Protocol(String),
 }
@@ -176,6 +180,10 @@ impl fmt::Display for StewardError {
                 f,
                 "balance divergence on {target} {currency}: expected {expected_milli} milli, observed {observed_milli} milli"
             ),
+            Self::ArchivistIntegrity(msg) => write!(f, "archivist mirror error: {msg}"),
+            Self::PhoenixRehydrationFailed(msg) => {
+                write!(f, "phoenix state rehydration failed: {msg}")
+            }
             Self::Protocol(msg) => write!(f, "steward protocol error: {msg}"),
         }
     }
@@ -200,6 +208,8 @@ impl StewardError {
             Self::BatchInnerFailed { .. } => "STEWARD_BATCH_INNER_FAILED",
             Self::InsufficientLineForClawback { .. } => "STEWARD_CLAWBACK_SHORTFALL",
             Self::BalanceDivergence { .. } => "STEWARD_BALANCE_DIVERGENCE",
+            Self::ArchivistIntegrity(_) => "STEWARD_ARCHIVIST_INTEGRITY",
+            Self::PhoenixRehydrationFailed(_) => "STEWARD_PHOENIX_FAILED",
             Self::Protocol(_) => "STEWARD_PROTOCOL",
         }
     }
@@ -274,6 +284,20 @@ impl ToStructuredError for StewardError {
                 "reconcile account_lines against TurnEngine integer milli-units before advancing the turn",
                 false,
             ),
+            Self::ArchivistIntegrity(msg) => StructuredError::new(
+                self.code(),
+                scrub_secret_text(&self.to_string()),
+                "verify the event-sourced Archivist mirror hash chain and post-sweep state digests",
+                false,
+            )
+            .with_cause(msg),
+            Self::PhoenixRehydrationFailed(msg) => StructuredError::new(
+                self.code(),
+                scrub_secret_text(&self.to_string()),
+                "inspect the 3-wave Phoenix rehydration batches, tickets, and 3-ledger close budget",
+                false,
+            )
+            .with_cause(msg),
             Self::Protocol(msg) => StructuredError::new(
                 self.code(),
                 scrub_secret_text(&self.to_string()),
@@ -388,6 +412,16 @@ mod tests {
                     observed_milli: 999,
                 },
                 "STEWARD_BALANCE_DIVERGENCE",
+                false,
+            ),
+            (
+                StewardError::ArchivistIntegrity(format!("tampered {ed_seed}")),
+                "STEWARD_ARCHIVIST_INTEGRITY",
+                false,
+            ),
+            (
+                StewardError::PhoenixRehydrationFailed(format!("budget exceeded {secp_seed}")),
+                "STEWARD_PHOENIX_FAILED",
                 false,
             ),
             (
