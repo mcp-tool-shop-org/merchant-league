@@ -178,6 +178,8 @@ pub struct VerifiedBatchInner {
     pub result: String,
     /// Validated ledger index holding this inner transaction.
     pub ledger_index: u64,
+    /// Full validated transaction metadata JSON (`meta` field from `tx`).
+    pub meta: Value,
 }
 
 /// Verified result of an atomic `BatchV1_1` (`tfAllOrNothing`) submission.
@@ -342,7 +344,7 @@ pub fn queue_batch_all_or_nothing<T: Transport>(
         let entry = seq_cursor
             .entry(outer_signer.address().to_string())
             .or_insert(s);
-        *entry = (*entry).max(s).saturating_add(1);
+        *entry = (*entry).max(s.saturating_add(1));
     }
 
     let mut raw_transactions = Vec::with_capacity(inner_templates.len());
@@ -573,6 +575,7 @@ pub fn verify_queued_batch<T: Transport>(
             parent_batch_id: parent_id,
             result: inner_result,
             ledger_index: inner_ledger,
+            meta: inner_tx.get("meta").cloned().unwrap_or(Value::Null),
         });
     }
 
@@ -875,6 +878,7 @@ pub fn submit_batch_all_or_nothing<T: Transport>(
             parent_batch_id: parent_id,
             result: inner_result,
             ledger_index: inner_ledger,
+            meta: inner_tx.get("meta").cloned().unwrap_or(Value::Null),
         });
     }
 

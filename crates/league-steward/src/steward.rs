@@ -3392,6 +3392,63 @@ mod tests {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_string();
+                        if st.strict_accounts {
+                            let mut tmp_seq = st.account_seq.clone();
+                            if let Some(s) = decoded.get("Sequence").and_then(Value::as_u64)
+                                && s > 0
+                            {
+                                let expected = tmp_seq.get(&outer_acct).copied().unwrap_or(1);
+                                let got = s as u32;
+                                if got != expected {
+                                    let code = if got > expected {
+                                        "terPRE_SEQ"
+                                    } else {
+                                        "tefPAST_SEQ"
+                                    };
+                                    return Ok(json!({
+                                        "result": {
+                                            "status": "success",
+                                            "accepted": false,
+                                            "engine_result": code
+                                        }
+                                    }));
+                                }
+                                tmp_seq.insert(outer_acct.clone(), got + 1);
+                            }
+                            if let Some(inners) =
+                                decoded.get("RawTransactions").and_then(Value::as_array)
+                            {
+                                for wrapper in inners {
+                                    if let Some(inner) = wrapper.get("RawTransaction")
+                                        && let Some(s) =
+                                            inner.get("Sequence").and_then(Value::as_u64)
+                                        && s > 0
+                                    {
+                                        let acct = inner
+                                            .get("Account")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or_default();
+                                        let expected = tmp_seq.get(acct).copied().unwrap_or(1);
+                                        let got = s as u32;
+                                        if got != expected {
+                                            let code = if got > expected {
+                                                "terPRE_SEQ"
+                                            } else {
+                                                "tefPAST_SEQ"
+                                            };
+                                            return Ok(json!({
+                                                "result": {
+                                                    "status": "success",
+                                                    "accepted": false,
+                                                    "engine_result": code
+                                                }
+                                            }));
+                                        }
+                                        tmp_seq.insert(acct.to_string(), got + 1);
+                                    }
+                                }
+                            }
+                        }
                         if let Some(t) = decoded.get("TicketSequence").and_then(Value::as_u64) {
                             if let Some(list) = st.tickets.get_mut(&outer_acct) {
                                 list.retain(|&v| u64::from(v) != t);
@@ -3437,6 +3494,31 @@ mod tests {
                             }
                         }))
                     } else {
+                        if st.strict_accounts
+                            && let Some(s) = decoded.get("Sequence").and_then(Value::as_u64)
+                            && s > 0
+                        {
+                            let acct = decoded
+                                .get("Account")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            let expected = st.account_seq.get(acct).copied().unwrap_or(1);
+                            let got = s as u32;
+                            if got != expected {
+                                let code = if got > expected {
+                                    "terPRE_SEQ"
+                                } else {
+                                    "tefPAST_SEQ"
+                                };
+                                return Ok(json!({
+                                    "result": {
+                                        "status": "success",
+                                        "accepted": false,
+                                        "engine_result": code
+                                    }
+                                }));
+                            }
+                        }
                         let (res, _) = Self::apply_single_tx(&mut st, &decoded, &tx_hash, None);
                         Ok(json!({
                             "result": {
@@ -4758,6 +4840,145 @@ mod tests {
             steward.assert_account_lines_parity(),
             Err(StewardError::BalanceDivergence { .. })
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn scripted_phoenix_edge_variants_checks_and_strict_seq_guards()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let schedule = DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 12,
+            turn_period_secs: 12,
+        };
+
+        // Part A: 6-seat table (2 OracleSet docs) + 1 native Check (hits 1-check pair + extra oracle).
+        let (spec6, deal6) =
+            TableSpec::standard_game_chiral_ring_with_mandates(TableId(919), 6, 7, schedule)?;
+        let node6 = ScriptedXrplNode::new();
+        let client6 = StandAlone::with_transport("http://127.0.0.1:5005", node6.clone())?;
+        let mut pre6 = GameTableSteward::bootstrap(&client6, spec6, 7, deal6)?;
+        pre6.submit_market_action(MarketAction::CreateCheck {
+            seat: 0,
+            check: CheckProposal {
+                payee: 1,
+                asset: AssetId::Cred,
+                send_max: UNIT_SCALE,
+                deliver_min: UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 4,
+            },
+        })?;
+        let disc6 = pre6.into_disconnected();
+        node6.wipe_to_fresh_genesis();
+        let post_client6 = StandAlone::with_transport("http://127.0.0.1:5005", node6)?;
+        let mut post6 = disc6.reconnect(&post_client6)?;
+        let phx6 = post6
+            .rehydrate_if_wiped()?
+            .ok_or("expected wipe report 6")?;
+        assert_eq!(phx6.phoenix.remapped_check_ids.len(), 1);
+        assert!(phx6.phoenix.ledger_closes_used <= 3);
+
+        // Part B: 4-seat table + 2 native Checks from distinct drawers (hits >=2 check Batch arm).
+        let (spec4, deal4) =
+            TableSpec::standard_game_chiral_ring_with_mandates(TableId(920), 4, 7, schedule)?;
+        let node4 = ScriptedXrplNode::new();
+        let client4 = StandAlone::with_transport("http://127.0.0.1:5005", node4.clone())?;
+        let mut pre4 = GameTableSteward::bootstrap(&client4, spec4, 7, deal4)?;
+        pre4.submit_market_action(MarketAction::CreateCheck {
+            seat: 0,
+            check: CheckProposal {
+                payee: 1,
+                asset: AssetId::Cred,
+                send_max: UNIT_SCALE,
+                deliver_min: UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 4,
+            },
+        })?;
+        pre4.submit_market_action(MarketAction::CreateCheck {
+            seat: 1,
+            check: CheckProposal {
+                payee: 2,
+                asset: AssetId::Cred,
+                send_max: UNIT_SCALE,
+                deliver_min: UNIT_SCALE,
+                due_turn: 2,
+                expiration_turn: 4,
+            },
+        })?;
+        let disc4 = pre4.into_disconnected();
+        node4.wipe_to_fresh_genesis();
+        let post_client4 = StandAlone::with_transport("http://127.0.0.1:5005", node4)?;
+        let mut post4 = disc4.reconnect(&post_client4)?;
+        let phx4 = post4
+            .rehydrate_if_wiped()?
+            .ok_or("expected wipe report 4")?;
+        assert_eq!(phx4.phoenix.remapped_check_ids.len(), 2);
+        assert!(phx4.phoenix.ledger_closes_used <= 3);
+
+        // Part C: strict_accounts sequence guards reject skipped or stale sequences.
+        let genesis = StandAloneAccount::genesis()?;
+        let cur_seq = post_client4.account_sequence(genesis.address())?;
+        let s0_addr = post4.seat_account(0).ok_or("seat 0")?.address().to_string();
+        assert!(
+            crate::codec::queue_raw_json_tx(
+                &post_client4,
+                &genesis,
+                json!({
+                    "TransactionType": "Payment",
+                    "Account": genesis.address(),
+                    "Destination": s0_addr,
+                    "Amount": "1000000"
+                }),
+                None,
+                crate::codec::SeqOrTicket::Sequence(cur_seq + 5),
+                200,
+            )
+            .is_err()
+        );
+        assert!(
+            crate::codec::queue_raw_json_tx(
+                &post_client4,
+                &genesis,
+                json!({
+                    "TransactionType": "Payment",
+                    "Account": genesis.address(),
+                    "Destination": s0_addr,
+                    "Amount": "1000000"
+                }),
+                None,
+                crate::codec::SeqOrTicket::Sequence(1),
+                200,
+            )
+            .is_err()
+        );
+        let mut bad_cursor = BTreeMap::from([(genesis.address().to_string(), cur_seq + 3)]);
+        assert!(
+            crate::codec::queue_batch_all_or_nothing(
+                &post_client4,
+                &genesis,
+                vec![
+                    json!({
+                        "TransactionType": "Payment",
+                        "Account": genesis.address(),
+                        "Destination": s0_addr,
+                        "Amount": "1000000"
+                    }),
+                    json!({
+                        "TransactionType": "Payment",
+                        "Account": genesis.address(),
+                        "Destination": s0_addr,
+                        "Amount": "1000000"
+                    }),
+                ],
+                &[],
+                crate::codec::SeqOrTicket::Sequence(cur_seq),
+                &mut bad_cursor,
+                10,
+                200,
+            )
+            .is_err()
+        );
         Ok(())
     }
 }

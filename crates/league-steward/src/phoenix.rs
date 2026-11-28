@@ -30,9 +30,9 @@ use crate::codec::{
 use crate::error::StewardError;
 use crate::reserve::StewardReservePool;
 
-const PHOENIX_ACCOUNT_XRP_DROPS: u64 = 500_000_000;
+const PHOENIX_ACCOUNT_XRP_DROPS: u64 = 2_000_000_000;
 const PHOENIX_TRUST_LINE_LIMIT: &str = "1000000";
-const PHOENIX_STEWARD_TICKETS: u32 = 240;
+const PHOENIX_STEWARD_TICKETS: u32 = 200;
 const PHOENIX_SEAT_TICKETS: u32 = 80;
 const RIPPLE_TO_UNIX_EPOCH_SECS: u64 = 946_684_800;
 
@@ -128,15 +128,11 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     // =========================================================================
     // WAVE 1 (ledger_accept #1):
     // - Fund Steward + all seats (first atomic Batch) + Regents via genesis BatchV1_1
-    // - Configure Steward Authority flags via atomic 5-leg BatchV1_1
-    // - Allocate TicketCreate pools for Steward and every seat
-    // - Recreate table + cartel PermissionedDomains & CredentialCreate objects
     // =========================================================================
     let mut wave1_batches = Vec::<QueuedBatch>::new();
-    let mut wave1_txs = Vec::<QueuedTx>::new();
 
     // First funding chunk always contains Steward + all seats (<= 7 accounts <= 8 max legs) so
-    // Steward and every seat are created atomically in one transaction before any CredentialCreate.
+    // Steward and every seat are created atomically in one transaction.
     let mut funding_legs = Vec::with_capacity(1 + 2 * n);
     funding_legs.push(xrp_payment_json(
         genesis.address(),
@@ -177,11 +173,31 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         wave1_batches.push(qb);
     }
 
-    // Read Steward's initial Sequence from the open ledger where genesis funding just landed.
+    // Close Wave 1 ledger (#1) so Steward, seat, and regent accounts exist on validated ledger.
+    let _ = client.ledger_accept()?;
+    let mut closes_used = 1_u64;
+
+    let wave1_batch_count = wave1_batches.len();
+    for qb in &wave1_batches {
+        let verified = verify_queued_batch(client, qb)?;
+        total_batches_verified += 1;
+        total_inner_legs_verified += verified.inners.len();
+    }
+
+    // =========================================================================
+    // WAVE 2 (ledger_accept #2):
+    // - Configure Steward Authority flags via atomic 5-leg BatchV1_1 (OwnerCount == 0)
+    // - Allocate TicketCreate pools for Steward and every seat
+    // - Recreate table + cartel PermissionedDomains & CredentialCreate objects
+    // - Configure seat DelegateSet for Standing Regents
+    // =========================================================================
+    let mut wave2_batches = Vec::<QueuedBatch>::new();
+    let mut wave2_txs = Vec::<QueuedTx>::new();
+
     let steward_start_seq = client.account_sequence(steward_account.address())?;
     seq_cursor.insert(steward_account.address().to_string(), steward_start_seq);
 
-    // 1b. Steward genesis flags (exact order: RequireAuth -> Clawback -> Locking -> DefaultRipple -> DisallowXRP).
+    // 2a. Steward genesis flags (exact order: RequireAuth -> Clawback -> Locking -> DefaultRipple -> DisallowXRP).
     let flag_legs: Vec<Value> = [
         ASF_REQUIRE_AUTH,
         ASF_ALLOW_TRUSTLINE_CLAWBACK,
@@ -199,7 +215,7 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     })
     .collect();
     let flags_outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
-    wave1_batches.push(queue_batch_all_or_nothing(
+    wave2_batches.push(queue_batch_all_or_nothing(
         client,
         steward_account,
         flag_legs,
@@ -210,9 +226,9 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         last_ledger,
     )?);
 
-    // 1c. Steward TicketCreate pool (note: TicketCreate consumes 1 + TicketCount sequence numbers).
+    // 2b. Steward TicketCreate pool (note: TicketCreate consumes 1 + TicketCount sequence numbers).
     let st_ticket_seq = take_next_seq(&mut seq_cursor, steward_account.address());
-    wave1_txs.push(queue_raw_json_tx(
+    wave2_txs.push(queue_raw_json_tx(
         client,
         steward_account,
         json!({
@@ -229,7 +245,7 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         st_ticket_seq.saturating_add(1 + PHOENIX_STEWARD_TICKETS),
     );
 
-    // 1d. Table PermissionedDomainSet + Cartel PermissionedDomainSet objects.
+    // 2c. Table PermissionedDomainSet + Cartel PermissionedDomainSet objects.
     let table_dom_seq = take_next_seq(&mut seq_cursor, steward_account.address());
     let table_dom_tx = queue_raw_json_tx(
         client,
@@ -243,7 +259,7 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         last_ledger,
     )?;
     let table_dom_hash = table_dom_tx.hash.clone();
-    wave1_txs.push(table_dom_tx);
+    wave2_txs.push(table_dom_tx);
 
     let mut cartel_dom_tx_hashes = Vec::<(u8, String)>::new();
     for dom in &state.domains {
@@ -258,10 +274,10 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
             last_ledger,
         )?;
         cartel_dom_tx_hashes.push((dom.domain_id, qtx.hash.clone()));
-        wave1_txs.push(qtx);
+        wave2_txs.push(qtx);
     }
 
-    // 1e. CredentialCreate objects (Identity, CreditTier, Cartel memberships, Active Charters).
+    // 2d. CredentialCreate objects (Identity, CreditTier, Cartel memberships, Active Charters).
     let mut cred_create_legs = Vec::<Value>::new();
     let mut seat_expected_creds = vec![Vec::<String>::new(); n];
     for (s_idx, seat_state) in state.seats.iter().enumerate().take(n) {
@@ -330,14 +346,14 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         &mut seq_cursor,
         base_fee,
         last_ledger,
-        &mut wave1_batches,
-        &mut wave1_txs,
+        &mut wave2_batches,
+        &mut wave2_txs,
     )?;
 
-    // 1f. Seat TicketCreate pools (60 tickets per seat).
-    for acc in seat_accounts {
+    // 2e. Seat TicketCreate pools + DelegateSet for Standing Regents (sequential Sequences per seat).
+    for (s_idx, acc) in seat_accounts.iter().enumerate().take(n) {
         let seat_seq = client.account_sequence(acc.address())?;
-        wave1_txs.push(queue_raw_json_tx(
+        wave2_txs.push(queue_raw_json_tx(
             client,
             acc,
             json!({
@@ -353,34 +369,55 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
             acc.address().to_string(),
             seat_seq.saturating_add(1 + PHOENIX_SEAT_TICKETS),
         );
+
+        if let Some(regent_acc) = &regent_accounts[s_idx] {
+            let del_seq = take_next_seq(&mut seq_cursor, acc.address());
+            let perms: Vec<Value> = REGENT_DELEGATE_PERMISSIONS
+                .iter()
+                .map(|p| json!({ "Permission": { "PermissionValue": p } }))
+                .collect();
+            wave2_txs.push(queue_raw_json_tx(
+                client,
+                acc,
+                json!({
+                    "TransactionType": "DelegateSet",
+                    "Account": acc.address(),
+                    "Authorize": regent_acc.address(),
+                    "Permissions": perms
+                }),
+                None,
+                SeqOrTicket::Sequence(del_seq),
+                last_ledger,
+            )?);
+        }
     }
 
-    // Close Wave 1 ledger (#1).
+    // Close Wave 2 ledger (#2).
     let _ = client.ledger_accept()?;
-    let mut closes_used = 1_u64;
+    closes_used += 1;
 
-    let wave1_batch_count = wave1_batches.len();
-    for qb in &wave1_batches {
+    let wave2_batch_count = wave2_batches.len();
+    for qb in &wave2_batches {
         let verified = verify_queued_batch(client, qb)?;
         total_batches_verified += 1;
         total_inner_legs_verified += verified.inners.len();
     }
-    let mut wave1_metas = BTreeMap::<String, Value>::new();
-    for qtx in &wave1_txs {
+    let mut wave2_metas = BTreeMap::<String, Value>::new();
+    for qtx in &wave2_txs {
         let meta = verify_queued_tx(client, qtx)?;
-        wave1_metas.insert(qtx.hash.clone(), meta);
+        wave2_metas.insert(qtx.hash.clone(), meta);
     }
 
-    // Verify Steward Authority flags and TransferRate on validated Wave 1 ledger.
+    // Verify Steward Authority flags and TransferRate on validated Wave 2 ledger.
     verify_steward_flags_after_wave1(client, steward_account.address())?;
 
-    let new_table_domain_id = wave1_metas
+    let new_table_domain_id = wave2_metas
         .get(&table_dom_hash)
         .ok_or_else(|| StewardError::PhoenixRehydrationFailed("missing table domain meta".into()))
         .and_then(|meta| extract_created_ledger_index(meta, "PermissionedDomain"))?;
     let mut remapped_cartel_domains = BTreeMap::<u8, String>::new();
     for (dom_id, tx_hash) in cartel_dom_tx_hashes {
-        let dom_hex = wave1_metas
+        let dom_hex = wave2_metas
             .get(&tx_hash)
             .ok_or_else(|| {
                 StewardError::PhoenixRehydrationFailed("missing cartel domain meta".into())
@@ -397,11 +434,19 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     }
 
     // =========================================================================
-    // WAVE 2 (ledger_accept #2):
-    // - Seat DelegateSet for Standing Regents
-    // - Seat CredentialAccept batches (consuming pre-allocated tickets)
-    // - Authorized NoRipple TrustLines across CRED + 2N commodities
+    // WAVE 3 (ledger_accept #3):
+    // - Seat CredentialAccept batches (via seat tickets, credentials validated in Wave 2)
+    // - Sequential Steward outer Sequence batches in strict ledger order:
+    //   3b. Paired [seat TrustSet(tfSetNoRipple), steward TrustSet(tfSetfAuth)]
+    //   3c. Atomic native PREIMAGE-SHA-256 TokenEscrow vaults (BatchV1_1)
+    //   3d. Mint pre-wipe free CRED + 2N commodity balances
+    //   3e. Native CheckCreate objects (BatchV1_1) & OracleSet Turn prices
+    // - 3f. Standalone mid-turn 1-drop XRP commit EscrowCreate objects (via seat tickets)
     // =========================================================================
+    let (_, wave2_ripple_close) = client.validated_close_time()?;
+    let steward_wave3_seq = client.account_sequence(steward_account.address())?;
+    seq_cursor.insert(steward_account.address().to_string(), steward_wave3_seq);
+
     let cred_currency = asset_currency_code(AssetId::Cred)?;
     let mut all_currencies = Vec::with_capacity(1 + 2 * n);
     all_currencies.push(cred_currency.clone());
@@ -410,35 +455,11 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         all_currencies.push(asset_currency_code(AssetId::Refined(g))?);
     }
 
-    let mut wave2_batches = Vec::<QueuedBatch>::new();
-    let mut wave2_txs = Vec::<QueuedTx>::new();
+    let mut wave3_batches = Vec::<QueuedBatch>::new();
+    let mut wave3_txs = Vec::<QueuedTx>::new();
 
-    for s_idx in 0..n {
-        let seat_acc = &seat_accounts[s_idx];
-
-        // 2a. DelegateSet for Standing Regent.
-        if let Some(regent_acc) = &regent_accounts[s_idx] {
-            let t = pop_ticket_or_err(&mut seat_tickets[s_idx], "seat DelegateSet")?;
-            let perms: Vec<Value> = REGENT_DELEGATE_PERMISSIONS
-                .iter()
-                .map(|p| json!({ "Permission": { "PermissionValue": p } }))
-                .collect();
-            wave2_txs.push(queue_raw_json_tx(
-                client,
-                seat_acc,
-                json!({
-                    "TransactionType": "DelegateSet",
-                    "Account": seat_acc.address(),
-                    "Authorize": regent_acc.address(),
-                    "Permissions": perms
-                }),
-                None,
-                SeqOrTicket::Ticket(t),
-                last_ledger,
-            )?);
-        }
-
-        // 2b. CredentialAccept via BatchV1_1 chunks using seat tickets.
+    // 3a. Seat CredentialAccept via BatchV1_1 chunks using seat tickets.
+    for (s_idx, seat_acc) in seat_accounts.iter().enumerate().take(n) {
         let accept_legs: Vec<Value> = seat_expected_creds[s_idx]
             .iter()
             .map(|cred_ascii| {
@@ -457,95 +478,68 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
             &mut seat_tickets[s_idx],
             base_fee,
             last_ledger,
-            &mut wave2_batches,
-            &mut wave2_txs,
-        )?;
-
-        // 2c. Seat TrustSet (tfSetNoRipple) via BatchV1_1 chunks using seat tickets.
-        let no_ripple_legs: Vec<Value> = all_currencies
-            .iter()
-            .map(|cur| {
-                json!({
-                    "TransactionType": "TrustSet",
-                    "Account": seat_acc.address(),
-                    "Flags": TF_SET_NO_RIPPLE,
-                    "LimitAmount": {
-                        "currency": cur,
-                        "issuer": steward_account.address(),
-                        "value": PHOENIX_TRUST_LINE_LIMIT
-                    }
-                })
-            })
-            .collect();
-        queue_batch_or_single_txs_with_tickets(
-            client,
-            seat_acc,
-            no_ripple_legs,
-            &mut seat_tickets[s_idx],
-            base_fee,
-            last_ledger,
-            &mut wave2_batches,
-            &mut wave2_txs,
+            &mut wave3_batches,
+            &mut wave3_txs,
         )?;
     }
 
-    // Close Wave 2 ledger (#2).
-    let _ = client.ledger_accept()?;
-    closes_used += 1;
-
-    let wave2_batch_count = wave2_batches.len();
-    for qb in &wave2_batches {
-        let verified = verify_queued_batch(client, qb)?;
-        total_batches_verified += 1;
-        total_inner_legs_verified += verified.inners.len();
-    }
-    for qtx in &wave2_txs {
-        let _ = verify_queued_tx(client, qtx)?;
-    }
-
-    // =========================================================================
-    // WAVE 3 (ledger_accept #3):
-    // - Steward TrustSet (tfSetfAuth) across all N * (1 + 2N) validated seat trust lines
-    // - Mint pre-wipe CRED + 2N commodity balances
-    // - Re-open native PREIMAGE-SHA-256 TokenEscrow vaults (atomically in BatchV1_1)
-    // - Re-open native CheckCreate objects & mid-turn commit escrows
-    // - Publish OracleSet Turn prices
-    // =========================================================================
-    let (_, wave2_ripple_close) = client.validated_close_time()?;
-    let mut wave3_batches = Vec::<QueuedBatch>::new();
-    let mut wave3_txs = Vec::<QueuedTx>::new();
-
-    // 3a. Steward TrustSet (tfSetfAuth) runs after all seat TrustSet(tfSetNoRipple) objects were
-    // validated in Close #2, and uses lower TicketSequence numbers so CanonicalTXSet applies
-    // every SetAuth before Steward mints and multi-signer BatchV1_1 transfers below.
-    let mut auth_legs = Vec::with_capacity(n * all_currencies.len());
-    for seat_acc in seat_accounts.iter().take(n) {
+    // 3b. Paired [seat TrustSet(tfSetNoRipple), steward TrustSet(tfSetfAuth)] multi-signer batches
+    // using ascending outer steward Sequence so every trust line is created and authorized strictly
+    // before any mint, native escrow, or check creation executes.
+    for (s_idx, seat_acc) in seat_accounts.iter().enumerate().take(n) {
+        let mut pairs = Vec::<[Value; 2]>::with_capacity(all_currencies.len());
         for cur in &all_currencies {
-            auth_legs.push(json!({
+            let seat_ticket =
+                pop_ticket_or_err(&mut seat_tickets[s_idx], "seat TrustSet NoRipple")?;
+            let auth_ticket = pop_ticket_or_err(&mut steward_tickets, "steward TrustSet SetAuth")?;
+            let seat_leg = json!({
+                "TransactionType": "TrustSet",
+                "Account": seat_acc.address(),
+                "Sequence": 0_u32,
+                "TicketSequence": seat_ticket,
+                "Flags": TF_SET_NO_RIPPLE,
+                "LimitAmount": {
+                    "currency": cur,
+                    "issuer": steward_account.address(),
+                    "value": PHOENIX_TRUST_LINE_LIMIT
+                }
+            });
+            let auth_leg = json!({
                 "TransactionType": "TrustSet",
                 "Account": steward_account.address(),
+                "Sequence": 0_u32,
+                "TicketSequence": auth_ticket,
                 "Flags": TF_SET_AUTH,
                 "LimitAmount": {
                     "currency": cur,
                     "issuer": seat_acc.address(),
                     "value": "0"
                 }
-            }));
+            });
+            pairs.push([seat_leg, auth_leg]);
+        }
+        for pair_chunk in pairs.chunks(4) {
+            let mut flat_legs = Vec::with_capacity(pair_chunk.len() * 2);
+            for [seat_leg, auth_leg] in pair_chunk {
+                flat_legs.push(seat_leg.clone());
+                flat_legs.push(auth_leg.clone());
+            }
+            let outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
+            wave3_batches.push(queue_batch_all_or_nothing(
+                client,
+                steward_account,
+                flat_legs,
+                &[seat_acc],
+                SeqOrTicket::Sequence(outer_seq),
+                &mut seq_cursor,
+                base_fee,
+                last_ledger,
+            )?);
         }
     }
-    queue_batch_or_single_txs_with_tickets(
-        client,
-        steward_account,
-        auth_legs,
-        &mut steward_tickets,
-        base_fee,
-        last_ledger,
-        &mut wave3_batches,
-        &mut wave3_txs,
-    )?;
 
-    // Group open native escrows by owner_seat so each owner's CRED mint + EscrowCreate(s) execute
-    // atomically inside one multi-signer BatchV1_1 (`tfAllOrNothing`).
+    // 3c. Group open native escrows by owner_seat so each owner's CRED mint + EscrowCreate(s)
+    // execute atomically inside one multi-signer BatchV1_1 (`tfAllOrNothing`) after 3b.
     let mut escrows_by_owner = BTreeMap::<u8, Vec<&crate::archivist::MirroredNativeEscrow>>::new();
     for esc in materialized.native_escrows.values() {
         escrows_by_owner
@@ -567,7 +561,7 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
 
             let mut atomic_legs = Vec::with_capacity(1 + owned_escrows.len());
             let mut leg_escrow_ids = Vec::with_capacity(owned_escrows.len());
-            let mut mint_leg = payment_iou_json_with_ticket(
+            let mint_leg = payment_iou_json_with_ticket(
                 steward_account.address(),
                 seat_acc.address(),
                 steward_account.address(),
@@ -575,7 +569,6 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
                 gross_cred,
                 pop_ticket_or_err(&mut steward_tickets, "atomic escrow mint")?,
             )?;
-            let _ = &mut mint_leg;
             atomic_legs.push(mint_leg);
 
             for esc in owned_escrows {
@@ -614,13 +607,13 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
             }
 
             if atomic_legs.len() <= 8 {
-                let outer_t = pop_ticket_or_err(&mut steward_tickets, "atomic escrow outer")?;
+                let outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
                 let qb = queue_batch_all_or_nothing(
                     client,
                     steward_account,
                     atomic_legs,
                     &[seat_acc],
-                    SeqOrTicket::Ticket(outer_t),
+                    SeqOrTicket::Sequence(outer_seq),
                     &mut seq_cursor,
                     base_fee,
                     last_ledger,
@@ -667,20 +660,38 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         }
     }
 
-    // Steward holds 0 net balance; seat balances plus locked native escrows equal total minted IOUs.
-    queue_batch_or_single_txs_with_tickets(
-        client,
-        steward_account,
-        mint_legs,
-        &mut steward_tickets,
-        base_fee,
-        last_ledger,
-        &mut wave3_batches,
-        &mut wave3_txs,
-    )?;
+    // 3d. Steward holds 0 net balance; seat balances plus locked native escrows equal total minted IOUs.
+    if mint_legs.len() == 1 {
+        let seq = take_next_seq(&mut seq_cursor, steward_account.address());
+        wave3_txs.push(queue_raw_json_tx(
+            client,
+            steward_account,
+            mint_legs.remove(0),
+            None,
+            SeqOrTicket::Sequence(seq),
+            last_ledger,
+        )?);
+    } else if !mint_legs.is_empty() {
+        let ticketed_mints = mut_legs_with_tickets(&mut mint_legs, &mut steward_tickets)?;
+        for chunk in split_batch_chunks(&ticketed_mints) {
+            let outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
+            wave3_batches.push(queue_batch_all_or_nothing(
+                client,
+                steward_account,
+                chunk,
+                &[],
+                SeqOrTicket::Sequence(outer_seq),
+                &mut seq_cursor,
+                base_fee,
+                last_ledger,
+            )?);
+        }
+    }
 
-    // Re-create open native Checks.
-    let mut queued_checks = Vec::<(u64, String)>::new();
+    // 3e. Re-create open native Checks inside Steward outer-Sequence BatchV1_1 after 3b + publish
+    // current-turn OracleSet state (<= 10 PriceDataSeries entries per doc).
+    let mut check_legs =
+        Vec::<(u64, usize, Value)>::with_capacity(materialized.native_checks.len());
     for (&cid, chk) in &materialized.native_checks {
         let d_idx = usize::from(chk.drawer_seat);
         let drawer_acc = &seat_accounts[d_idx];
@@ -693,12 +704,14 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         )
         .map_err(|_| StewardError::PhoenixRehydrationFailed("Check Expiration overflow".into()))?;
         let t = pop_ticket_or_err(&mut seat_tickets[d_idx], "CheckCreate")?;
-        let qtx = queue_raw_json_tx(
-            client,
-            drawer_acc,
+        check_legs.push((
+            cid,
+            d_idx,
             json!({
                 "TransactionType": "CheckCreate",
                 "Account": drawer_acc.address(),
+                "Sequence": 0_u32,
+                "TicketSequence": t,
                 "Destination": payee_addr,
                 "SendMax": {
                     "currency": chk.currency,
@@ -707,15 +720,155 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
                 },
                 "Expiration": exp_ripple
             }),
-            None,
-            SeqOrTicket::Ticket(t),
-            last_ledger,
-        )?;
-        queued_checks.push((cid, qtx.hash.clone()));
-        wave3_txs.push(qtx);
+        ));
     }
 
-    // Re-create mid-turn 1-drop commit escrows if wipe happened during Commit before Reveal.
+    let oracle_update_time = u32::try_from(wave2_ripple_close + RIPPLE_TO_UNIX_EPOCH_SECS)
+        .map_err(|_| StewardError::PhoenixRehydrationFailed("OracleSet time overflow".into()))?;
+    let mut prices = Vec::with_capacity(2 * n);
+    for g in 0..n {
+        let raw_code = asset_currency_code(AssetId::Raw(g as u8))?;
+        let ref_code = asset_currency_code(AssetId::Refined(g as u8))?;
+        prices.push((raw_code, state.parities.raw_per_unit[g]));
+        prices.push((ref_code, state.parities.refined_per_unit[g]));
+    }
+    let provider_hex = hex::encode_upper(b"merchant-league");
+    let asset_class_hex = hex::encode_upper(b"commodity");
+    let uri_digest = Sha256::digest(
+        format!(
+            "phoenix:turn:{current_turn}:beacon:{}:shocks:{}",
+            hex::encode(state.last_turn_beacon),
+            state.active_shocks.len()
+        )
+        .as_bytes(),
+    );
+    let uri_hex = hex::encode_upper(uri_digest);
+    let mut oracle_jsons = Vec::new();
+    for (chunk_idx, chunk) in prices.chunks(10).enumerate() {
+        let doc_id = u32::try_from(chunk_idx + 1).map_err(|_| {
+            StewardError::PhoenixRehydrationFailed("OracleDocumentID overflow".into())
+        })?;
+        let series: Vec<Value> = chunk
+            .iter()
+            .map(|(base, price)| {
+                let abs_price = (*price).max(1) as u64;
+                json!({
+                    "PriceData": {
+                        "BaseAsset": base,
+                        "QuoteAsset": cred_currency,
+                        "AssetPrice": format!("{abs_price:X}"),
+                        "Scale": 3_u8
+                    }
+                })
+            })
+            .collect();
+        oracle_jsons.push(json!({
+            "TransactionType": "OracleSet",
+            "Account": steward_account.address(),
+            "OracleDocumentID": doc_id,
+            "Provider": provider_hex,
+            "URI": uri_hex,
+            "AssetClass": asset_class_hex,
+            "LastUpdateTime": oracle_update_time,
+            "PriceDataSeries": series
+        }));
+    }
+
+    let mut remapped_check_batch_positions = Vec::<(usize, Vec<(usize, u64)>)>::new();
+    match check_legs.len() {
+        0 => {
+            for oracle in oracle_jsons {
+                let seq = take_next_seq(&mut seq_cursor, steward_account.address());
+                wave3_txs.push(queue_raw_json_tx(
+                    client,
+                    steward_account,
+                    oracle,
+                    None,
+                    SeqOrTicket::Sequence(seq),
+                    last_ledger,
+                )?);
+            }
+        }
+        1 => {
+            let (cid0, d_idx0, check0) = check_legs.remove(0);
+            let mut oracle_iter = oracle_jsons.into_iter();
+            if let Some(mut oracle0) = oracle_iter.next() {
+                let ot = pop_ticket_or_err(&mut steward_tickets, "OracleSet check pair")?;
+                if let Some(obj) = oracle0.as_object_mut() {
+                    obj.insert("Sequence".to_string(), Value::from(0_u32));
+                    obj.insert("TicketSequence".to_string(), Value::from(ot));
+                }
+                let outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
+                let qb = queue_batch_all_or_nothing(
+                    client,
+                    steward_account,
+                    vec![check0, oracle0],
+                    &[&seat_accounts[d_idx0]],
+                    SeqOrTicket::Sequence(outer_seq),
+                    &mut seq_cursor,
+                    base_fee,
+                    last_ledger,
+                )?;
+                let batch_idx = wave3_batches.len();
+                wave3_batches.push(qb);
+                remapped_check_batch_positions.push((batch_idx, vec![(0, cid0)]));
+            }
+            for oracle in oracle_iter {
+                let seq = take_next_seq(&mut seq_cursor, steward_account.address());
+                wave3_txs.push(queue_raw_json_tx(
+                    client,
+                    steward_account,
+                    oracle,
+                    None,
+                    SeqOrTicket::Sequence(seq),
+                    last_ledger,
+                )?);
+            }
+        }
+        _ => {
+            for chunk in split_batch_chunks(&check_legs) {
+                let mut inner_legs = Vec::with_capacity(chunk.len());
+                let mut signer_indices = std::collections::BTreeSet::<usize>::new();
+                let mut positions = Vec::with_capacity(chunk.len());
+                for (pos, (cid, d_idx, leg)) in chunk.into_iter().enumerate() {
+                    signer_indices.insert(d_idx);
+                    positions.push((pos, cid));
+                    inner_legs.push(leg);
+                }
+                let signers: Vec<&StandAloneAccount> = signer_indices
+                    .into_iter()
+                    .map(|i| &seat_accounts[i])
+                    .collect();
+                let outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
+                let qb = queue_batch_all_or_nothing(
+                    client,
+                    steward_account,
+                    inner_legs,
+                    &signers,
+                    SeqOrTicket::Sequence(outer_seq),
+                    &mut seq_cursor,
+                    base_fee,
+                    last_ledger,
+                )?;
+                let batch_idx = wave3_batches.len();
+                wave3_batches.push(qb);
+                remapped_check_batch_positions.push((batch_idx, positions));
+            }
+            for oracle in oracle_jsons {
+                let seq = take_next_seq(&mut seq_cursor, steward_account.address());
+                wave3_txs.push(queue_raw_json_tx(
+                    client,
+                    steward_account,
+                    oracle,
+                    None,
+                    SeqOrTicket::Sequence(seq),
+                    last_ledger,
+                )?);
+            }
+        }
+    }
+
+    // 3f. Re-create mid-turn 1-drop commit escrows if wipe happened during Commit before Reveal.
     let mut remapped_commit_sequences = BTreeMap::<u8, u32>::new();
     for (&seat, ce) in &materialized.active_commit_escrows {
         let s_idx = usize::from(seat);
@@ -742,79 +895,20 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
         wave3_txs.push(qtx);
     }
 
-    // Publish current-turn OracleSet state (<= 10 PriceDataSeries entries per doc).
-    let oracle_update_time = u32::try_from(wave2_ripple_close + RIPPLE_TO_UNIX_EPOCH_SECS)
-        .map_err(|_| StewardError::PhoenixRehydrationFailed("OracleSet time overflow".into()))?;
-    let mut prices = Vec::with_capacity(2 * n);
-    for g in 0..n {
-        let raw_code = asset_currency_code(AssetId::Raw(g as u8))?;
-        let ref_code = asset_currency_code(AssetId::Refined(g as u8))?;
-        prices.push((raw_code, state.parities.raw_per_unit[g]));
-        prices.push((ref_code, state.parities.refined_per_unit[g]));
-    }
-    let provider_hex = hex::encode_upper(b"merchant-league");
-    let asset_class_hex = hex::encode_upper(b"commodity");
-    let uri_digest = Sha256::digest(
-        format!(
-            "phoenix:turn:{current_turn}:beacon:{}:shocks:{}",
-            hex::encode(state.last_turn_beacon),
-            state.active_shocks.len()
-        )
-        .as_bytes(),
-    );
-    let uri_hex = hex::encode_upper(uri_digest);
-    for (chunk_idx, chunk) in prices.chunks(10).enumerate() {
-        let doc_id = u32::try_from(chunk_idx + 1).map_err(|_| {
-            StewardError::PhoenixRehydrationFailed("OracleDocumentID overflow".into())
-        })?;
-        let series: Vec<Value> = chunk
-            .iter()
-            .map(|(base, price)| {
-                let abs_price = (*price).max(1) as u64;
-                json!({
-                    "PriceData": {
-                        "BaseAsset": base,
-                        "QuoteAsset": cred_currency,
-                        "AssetPrice": format!("{abs_price:X}"),
-                        "Scale": 3_u8
-                    }
-                })
-            })
-            .collect();
-        let t = pop_ticket_or_err(&mut steward_tickets, "OracleSet")?;
-        wave3_txs.push(queue_raw_json_tx(
-            client,
-            steward_account,
-            json!({
-                "TransactionType": "OracleSet",
-                "Account": steward_account.address(),
-                "OracleDocumentID": doc_id,
-                "Provider": provider_hex,
-                "URI": uri_hex,
-                "AssetClass": asset_class_hex,
-                "LastUpdateTime": oracle_update_time,
-                "PriceDataSeries": series
-            }),
-            None,
-            SeqOrTicket::Ticket(t),
-            last_ledger,
-        )?);
-    }
-
     // Close Wave 3 ledger (#3).
     let _ = client.ledger_accept()?;
     closes_used += 1;
 
     let wave3_batch_count = wave3_batches.len();
+    let mut verified_wave3_batches = Vec::with_capacity(wave3_batches.len());
     for qb in &wave3_batches {
         let verified = verify_queued_batch(client, qb)?;
         total_batches_verified += 1;
         total_inner_legs_verified += verified.inners.len();
+        verified_wave3_batches.push(verified);
     }
-    let mut wave3_metas = BTreeMap::<String, Value>::new();
     for qtx in &wave3_txs {
-        let meta = verify_queued_tx(client, qtx)?;
-        wave3_metas.insert(qtx.hash.clone(), meta);
+        let _ = verify_queued_tx(client, qtx)?;
     }
 
     let mut remapped_escrow_sequences = BTreeMap::<u64, u32>::new();
@@ -828,14 +922,12 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     }
 
     let mut remapped_check_ids = BTreeMap::<u64, String>::new();
-    for (engine_cid, tx_hash) in queued_checks {
-        let new_cid = wave3_metas
-            .get(&tx_hash)
-            .ok_or_else(|| {
-                StewardError::PhoenixRehydrationFailed("missing CheckCreate meta".into())
-            })
-            .and_then(|meta| extract_created_ledger_index(meta, "Check"))?;
-        remapped_check_ids.insert(engine_cid, new_cid);
+    for (batch_idx, cid_positions) in remapped_check_batch_positions {
+        let verified = &verified_wave3_batches[batch_idx];
+        for (pos, engine_cid) in cid_positions {
+            let new_cid = extract_created_ledger_index(&verified.inners[pos].meta, "Check")?;
+            remapped_check_ids.insert(engine_cid, new_cid);
+        }
     }
 
     // Refresh ticket caches without closing any additional ledger.
