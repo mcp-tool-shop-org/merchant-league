@@ -251,9 +251,24 @@ pub struct QueuedBatch {
     pub inner_effective_seqs: Vec<u32>,
 }
 
+fn open_ledger_unit_fee_drops<T: Transport>(client: &StandAlone<T>, fallback_base_fee: u64) -> u64 {
+    let fallback = fallback_base_fee.max(12);
+    client
+        .call("fee", json!({}))
+        .ok()
+        .and_then(|v| {
+            v.get("drops")
+                .and_then(|d| d.get("open_ledger_fee"))
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<u64>().ok())
+        })
+        .map(|open| open.saturating_mul(2).max(fallback))
+        .unwrap_or(fallback)
+}
+
 /// Sign and submit an arbitrary JSON transaction into the open ledger **without** calling
-/// `ledger_accept`, failing immediately if the node rejects admission (`accepted == false` or
-/// `tem*`/`tef*`/`tel*`/`tec*`).
+/// `ledger_accept`, failing immediately if the node refuses immediate `openLedger` admission
+/// (`accepted == false` or non-`tes*` preliminary result such as `terQUEUED`/`tem*`/`tef*`).
 pub fn queue_raw_json_tx<T: Transport>(
     client: &StandAlone<T>,
     signer: &StandAloneAccount,
@@ -272,15 +287,16 @@ pub fn queue_raw_json_tx<T: Transport>(
         .and_then(Value::as_str)
         .ok_or_else(|| StewardError::Protocol("raw transaction JSON missing Account".into()))?
         .to_string();
+    let resolved_fee = match fee_drops {
+        Some(explicit) => explicit.to_string(),
+        None => open_ledger_unit_fee_drops(client, 12).to_string(),
+    };
     let obj = tx_json
         .as_object_mut()
         .ok_or_else(|| StewardError::Protocol("raw transaction must be JSON object".into()))?;
     obj.insert("NetworkID".to_string(), Value::from(STANDALONE_NETWORK_ID));
     obj.entry("Flags").or_insert_with(|| Value::from(0_u32));
-    obj.insert(
-        "Fee".to_string(),
-        Value::String(fee_drops.unwrap_or(BASE_FEE_DROPS).to_string()),
-    );
+    obj.insert("Fee".to_string(), Value::String(resolved_fee));
     obj.insert("LastLedgerSequence".to_string(), Value::from(last_ledger));
     let effective_sequence = match seq_or_ticket {
         SeqOrTicket::Sequence(seq) => {
@@ -305,11 +321,16 @@ pub fn queue_raw_json_tx<T: Transport>(
         .get("accepted")
         .and_then(Value::as_bool)
         .unwrap_or(true);
-    let queued_ok = preliminary.starts_with("tes") || preliminary.starts_with("ter");
+    let queued_ok = preliminary.starts_with("tes");
     if !accepted || !queued_ok {
+        let detail = submit_reply
+            .get("engine_result_message")
+            .and_then(Value::as_str)
+            .map(|m| format!("{preliminary}: {m}"))
+            .unwrap_or_else(|| preliminary.to_string());
         return Err(StewardError::StandAlone(StandAloneError::TxFailed {
             tx_type,
-            result: preliminary.to_string(),
+            result: detail,
         }));
     }
     Ok(QueuedTx {
@@ -419,8 +440,9 @@ pub fn queue_batch_all_or_nothing<T: Transport>(
     }
     batch_signers_with_keys.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let total_fee = ((2 + batch_signers_with_keys.len() + inner_hashes.len()) as u64)
-        .saturating_mul(base_fee.max(10))
+    let unit_fee = open_ledger_unit_fee_drops(client, base_fee);
+    let total_fee = ((2 + batch_signers_with_keys.len() * 2 + inner_hashes.len()) as u64)
+        .saturating_mul(unit_fee)
         .saturating_mul(2)
         .max(200);
     let mut batch_tx = json!({
@@ -459,11 +481,16 @@ pub fn queue_batch_all_or_nothing<T: Transport>(
         .get("engine_result")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    let queued_ok = preliminary.starts_with("tes") || preliminary.starts_with("ter");
+    let queued_ok = preliminary.starts_with("tes");
     if !accepted || !queued_ok {
+        let detail = submit_reply
+            .get("engine_result_message")
+            .and_then(Value::as_str)
+            .map(|m| format!("{preliminary}: {m}"))
+            .unwrap_or_else(|| preliminary.to_string());
         return Err(StewardError::StandAlone(StandAloneError::TxFailed {
             tx_type: "Batch".to_string(),
-            result: preliminary.to_string(),
+            result: detail,
         }));
     }
 
@@ -490,9 +517,14 @@ pub fn verify_queued_tx<T: Transport>(
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     if !validated || result != "tesSUCCESS" {
+        let detail = if !validated && result == "unknown" {
+            "unvalidated".to_string()
+        } else {
+            result.to_string()
+        };
         return Err(StewardError::StandAlone(StandAloneError::TxFailed {
             tx_type: queued.tx_type.clone(),
-            result: result.to_string(),
+            result: detail,
         }));
     }
     Ok(tx_reply.get("meta").cloned().unwrap_or(Value::Null))
@@ -519,9 +551,14 @@ pub fn verify_queued_batch<T: Transport>(
         .and_then(Value::as_u64)
         .unwrap_or(0);
     if !outer_validated || outer_result != "tesSUCCESS" {
+        let detail = if !outer_validated && outer_result == "unknown" {
+            "unvalidated".to_string()
+        } else {
+            outer_result.to_string()
+        };
         return Err(StewardError::StandAlone(StandAloneError::TxFailed {
             tx_type: "Batch".to_string(),
-            result: outer_result.to_string(),
+            result: detail,
         }));
     }
 
@@ -822,9 +859,14 @@ pub fn submit_batch_all_or_nothing<T: Transport>(
         .and_then(Value::as_u64)
         .unwrap_or(0);
     if !outer_validated || outer_result != "tesSUCCESS" {
+        let detail = if !outer_validated && outer_result == "unknown" {
+            "unvalidated".to_string()
+        } else {
+            outer_result.to_string()
+        };
         return Err(StewardError::StandAlone(StandAloneError::TxFailed {
             tx_type: "Batch".to_string(),
-            result: outer_result.to_string(),
+            result: detail,
         }));
     }
 
@@ -1526,9 +1568,9 @@ mod tests {
             "ledger_accept" => {
                 Ok(json!({ "result": { "status": "success", "ledger_current_index": 6 } }))
             }
-            "fee" => {
-                Ok(json!({ "result": { "status": "success", "drops": { "base_fee": "10" } } }))
-            }
+            "fee" => Ok(
+                json!({ "result": { "status": "success", "drops": { "base_fee": "10", "open_ledger_fee": "5000" } } }),
+            ),
             "account_info" => {
                 seq += 1;
                 let flags = if t_mode.get() == 1 {
@@ -1773,9 +1815,18 @@ mod tests {
                     Ok(json!({
                         "result": { "status": "success", "accepted": false, "engine_result": "temBAD" }
                     }))
+                } else if t_mode.get() == 5 {
+                    Ok(json!({
+                        "result": {
+                            "status": "success",
+                            "accepted": true,
+                            "engine_result": "terQUEUED",
+                            "engine_result_message": "Held until escalated fee drops."
+                        }
+                    }))
                 } else {
                     Ok(json!({
-                        "result": { "status": "success", "accepted": true, "engine_result": "terQUEUED" }
+                        "result": { "status": "success", "accepted": true, "engine_result": "tesSUCCESS" }
                     }))
                 }
             }
@@ -1865,6 +1916,18 @@ mod tests {
 
         t_mode.set(3);
         assert!(verify_queued_tx(&client, &q_ticket).is_err());
+        assert!(
+            queue_raw_json_tx(
+                &client,
+                &acct_a,
+                json!({ "TransactionType": "AccountSet", "Account": acct_a.address() }),
+                None,
+                SeqOrTicket::Sequence(11),
+                100,
+            )
+            .is_err()
+        );
+        t_mode.set(5);
         assert!(
             queue_raw_json_tx(
                 &client,

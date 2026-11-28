@@ -30,7 +30,7 @@ use crate::codec::{
 use crate::error::StewardError;
 use crate::reserve::StewardReservePool;
 
-const PHOENIX_ACCOUNT_XRP_DROPS: u64 = 2_000_000_000;
+const PHOENIX_ACCOUNT_XRP_DROPS: u64 = 5_000_000_000;
 const PHOENIX_TRUST_LINE_LIMIT: &str = "1000000";
 const PHOENIX_STEWARD_TICKETS: u32 = 200;
 const PHOENIX_SEAT_TICKETS: u32 = 80;
@@ -776,54 +776,30 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
 
     let mut remapped_check_batch_positions = Vec::<(usize, Vec<(usize, u64)>)>::new();
     match check_legs.len() {
-        0 => {
-            for oracle in oracle_jsons {
-                let seq = take_next_seq(&mut seq_cursor, steward_account.address());
-                wave3_txs.push(queue_raw_json_tx(
-                    client,
-                    steward_account,
-                    oracle,
-                    None,
-                    SeqOrTicket::Sequence(seq),
-                    last_ledger,
-                )?);
-            }
-        }
+        0 => {}
         1 => {
             let (cid0, d_idx0, check0) = check_legs.remove(0);
-            let mut oracle_iter = oracle_jsons.into_iter();
-            if let Some(mut oracle0) = oracle_iter.next() {
-                let ot = pop_ticket_or_err(&mut steward_tickets, "OracleSet check pair")?;
-                if let Some(obj) = oracle0.as_object_mut() {
-                    obj.insert("Sequence".to_string(), Value::from(0_u32));
-                    obj.insert("TicketSequence".to_string(), Value::from(ot));
-                }
-                let outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
-                let qb = queue_batch_all_or_nothing(
-                    client,
-                    steward_account,
-                    vec![check0, oracle0],
-                    &[&seat_accounts[d_idx0]],
-                    SeqOrTicket::Sequence(outer_seq),
-                    &mut seq_cursor,
-                    base_fee,
-                    last_ledger,
-                )?;
-                let batch_idx = wave3_batches.len();
-                wave3_batches.push(qb);
-                remapped_check_batch_positions.push((batch_idx, vec![(0, cid0)]));
-            }
-            for oracle in oracle_iter {
-                let seq = take_next_seq(&mut seq_cursor, steward_account.address());
-                wave3_txs.push(queue_raw_json_tx(
-                    client,
-                    steward_account,
-                    oracle,
-                    None,
-                    SeqOrTicket::Sequence(seq),
-                    last_ledger,
-                )?);
-            }
+            let ot = pop_ticket_or_err(&mut steward_tickets, "CheckCreate pair noop")?;
+            let noop_leg = json!({
+                "TransactionType": "AccountSet",
+                "Account": steward_account.address(),
+                "Sequence": 0_u32,
+                "TicketSequence": ot
+            });
+            let outer_seq = take_next_seq(&mut seq_cursor, steward_account.address());
+            let qb = queue_batch_all_or_nothing(
+                client,
+                steward_account,
+                vec![check0, noop_leg],
+                &[&seat_accounts[d_idx0]],
+                SeqOrTicket::Sequence(outer_seq),
+                &mut seq_cursor,
+                base_fee,
+                last_ledger,
+            )?;
+            let batch_idx = wave3_batches.len();
+            wave3_batches.push(qb);
+            remapped_check_batch_positions.push((batch_idx, vec![(0, cid0)]));
         }
         _ => {
             for chunk in split_batch_chunks(&check_legs) {
@@ -854,18 +830,18 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
                 wave3_batches.push(qb);
                 remapped_check_batch_positions.push((batch_idx, positions));
             }
-            for oracle in oracle_jsons {
-                let seq = take_next_seq(&mut seq_cursor, steward_account.address());
-                wave3_txs.push(queue_raw_json_tx(
-                    client,
-                    steward_account,
-                    oracle,
-                    None,
-                    SeqOrTicket::Sequence(seq),
-                    last_ledger,
-                )?);
-            }
         }
+    }
+    for oracle in oracle_jsons {
+        let seq = take_next_seq(&mut seq_cursor, steward_account.address());
+        wave3_txs.push(queue_raw_json_tx(
+            client,
+            steward_account,
+            oracle,
+            None,
+            SeqOrTicket::Sequence(seq),
+            last_ledger,
+        )?);
     }
 
     // 3f. Re-create mid-turn 1-drop commit escrows if wipe happened during Commit before Reveal.
