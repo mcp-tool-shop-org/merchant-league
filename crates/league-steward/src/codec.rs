@@ -483,11 +483,15 @@ pub fn queue_batch_all_or_nothing<T: Transport>(
         .unwrap_or("unknown");
     let queued_ok = preliminary.starts_with("tes");
     if !accepted || !queued_ok {
-        let detail = submit_reply
+        let base_msg = submit_reply
             .get("engine_result_message")
             .and_then(Value::as_str)
             .map(|m| format!("{preliminary}: {m}"))
             .unwrap_or_else(|| preliminary.to_string());
+        let detail = format!(
+            "{base_msg} (outer={outer_seq_or_ticket:?}, legs={})",
+            inner_hashes.len()
+        );
         return Err(StewardError::StandAlone(StandAloneError::TxFailed {
             tx_type: "Batch".to_string(),
             result: detail,
