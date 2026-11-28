@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use league_core::Units;
 use league_ledger::client::{Transport, decode_hex, transaction_hash};
 use league_standalone::STANDALONE_NETWORK_ID;
-use league_standalone::client::{BASE_FEE_DROPS, StandAlone, StandAloneAccount, StandAloneError};
+use league_standalone::client::{StandAlone, StandAloneAccount, StandAloneError};
 use league_standalone::conformance::build_tx;
 use serde_json::{Value, json};
 use xrpl::core::addresscodec::decode_classic_address;
@@ -251,7 +251,10 @@ pub struct QueuedBatch {
     pub inner_effective_seqs: Vec<u32>,
 }
 
-fn open_ledger_unit_fee_drops<T: Transport>(client: &StandAlone<T>, fallback_base_fee: u64) -> u64 {
+pub(crate) fn open_ledger_unit_fee_drops<T: Transport>(
+    client: &StandAlone<T>,
+    fallback_base_fee: u64,
+) -> u64 {
     let fallback = fallback_base_fee.max(12);
     client
         .call("fee", json!({}))
@@ -522,7 +525,7 @@ pub fn verify_queued_tx<T: Transport>(
         .unwrap_or("unknown");
     if !validated || result != "tesSUCCESS" {
         let detail = if !validated && result == "unknown" {
-            "unvalidated".to_string()
+            format!("verify_queued_tx_unvalidated(hash={})", queued.hash)
         } else {
             result.to_string()
         };
@@ -556,7 +559,11 @@ pub fn verify_queued_batch<T: Transport>(
         .unwrap_or(0);
     if !outer_validated || outer_result != "tesSUCCESS" {
         let detail = if !outer_validated && outer_result == "unknown" {
-            "unvalidated".to_string()
+            format!(
+                "verify_queued_batch_unvalidated(hash={}, legs={})",
+                queued.outer_hash,
+                queued.inner_hashes.len()
+            )
         } else {
             outer_result.to_string()
         };
@@ -644,15 +651,16 @@ pub fn submit_raw_json_tx<T: Transport>(
     let (validated_seq, _) = client.validated_close_time()?;
     let last_ledger = u32::try_from(validated_seq.saturating_add(20))
         .map_err(|_| StewardError::Protocol("ledger sequence exceeds u32".into()))?;
+    let resolved_fee = match fee_drops {
+        Some(explicit) => explicit.to_string(),
+        None => open_ledger_unit_fee_drops(client, 12).to_string(),
+    };
     let obj = tx_json
         .as_object_mut()
         .ok_or_else(|| StewardError::Protocol("raw transaction must be JSON object".into()))?;
     obj.insert("NetworkID".to_string(), Value::from(STANDALONE_NETWORK_ID));
     obj.entry("Flags").or_insert_with(|| Value::from(0_u32));
-    obj.insert(
-        "Fee".to_string(),
-        Value::String(fee_drops.unwrap_or(BASE_FEE_DROPS).to_string()),
-    );
+    obj.insert("Fee".to_string(), Value::String(resolved_fee));
     obj.insert("LastLedgerSequence".to_string(), Value::from(last_ledger));
     if let Some(ticket) = ticket_sequence {
         obj.insert("Sequence".to_string(), Value::from(0_u32));
@@ -684,6 +692,9 @@ pub fn submit_raw_json_tx<T: Transport>(
         ));
     }
     let _ = client.ledger_accept()?;
+    if preliminary == "terQUEUED" {
+        let _ = client.ledger_accept()?;
+    }
     match client.call("tx", json!({ "transaction": local_hash })) {
         Ok(tx_reply) => Ok((local_hash, tx_reply)),
         Err(StandAloneError::Rpc { error, .. }) if error == "txnNotFound" => Ok((
@@ -799,8 +810,9 @@ pub fn submit_batch_all_or_nothing<T: Transport>(
     batch_signers_with_keys.sort_by(|a, b| a.0.cmp(&b.0));
 
     let base_fee = client.fee_drops().unwrap_or(10).max(10);
-    let total_fee = ((2 + batch_signers_with_keys.len() + inner_hashes.len()) as u64)
-        .saturating_mul(base_fee)
+    let unit_fee = open_ledger_unit_fee_drops(client, base_fee);
+    let total_fee = ((2 + batch_signers_with_keys.len() * 2 + inner_hashes.len()) as u64)
+        .saturating_mul(unit_fee)
         .saturating_mul(2)
         .max(200);
     let (validated_seq, _) = client.validated_close_time()?;
@@ -840,13 +852,22 @@ pub fn submit_batch_all_or_nothing<T: Transport>(
         .get("engine_result")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    if !accepted {
+    let ok_prelim = preliminary.starts_with("tes") || preliminary == "terQUEUED";
+    if !accepted || !ok_prelim {
+        let base_msg = submit_reply
+            .get("engine_result_message")
+            .and_then(Value::as_str)
+            .map(|m| format!("{preliminary}: {m}"))
+            .unwrap_or_else(|| preliminary.to_string());
         return Err(StewardError::StandAlone(StandAloneError::TxFailed {
             tx_type: "Batch".to_string(),
-            result: preliminary.to_string(),
+            result: format!("submit_batch_rejected({base_msg})"),
         }));
     }
     let _ = client.ledger_accept()?;
+    if preliminary == "terQUEUED" {
+        let _ = client.ledger_accept()?;
+    }
 
     let outer_tx = client.call("tx", json!({ "transaction": outer_hash }))?;
     let outer_validated = outer_tx
@@ -864,7 +885,7 @@ pub fn submit_batch_all_or_nothing<T: Transport>(
         .unwrap_or(0);
     if !outer_validated || outer_result != "tesSUCCESS" {
         let detail = if !outer_validated && outer_result == "unknown" {
-            "unvalidated".to_string()
+            format!("submit_batch_unvalidated(prelim={preliminary}, hash={outer_hash})")
         } else {
             outer_result.to_string()
         };
@@ -1332,7 +1353,11 @@ pub fn submit_escrow_finish<T: Transport>(
         tx.common_fields.sequence = Some(0);
         tx.common_fields.ticket_sequence = Some(t);
     }
-    let receipt = client.submit_and_accept(&mut tx, signer, Some(fee_drops))?;
+    let floor = fee_drops.parse::<u64>().unwrap_or(500).max(500);
+    let scaled_fee = open_ledger_unit_fee_drops(client, floor)
+        .max(floor)
+        .to_string();
+    let receipt = client.submit_and_accept(&mut tx, signer, Some(&scaled_fee))?;
     Ok(receipt.final_result)
 }
 
@@ -1681,12 +1706,23 @@ mod tests {
         );
         // Valid 2-party BatchV1_1 outer + BatchSigners with outer_ticket fails only at ParentBatchID check below,
         // exercising both BatchSigners sorting/signing and ParentBatchID mismatch branch.
-        let batch_res =
-            submit_batch_all_or_nothing(&client, &acct_a, vec![p_a, p_b], &[&acct_b], Some(55));
+        let batch_res = submit_batch_all_or_nothing(
+            &client,
+            &acct_a,
+            vec![p_a.clone(), p_b.clone()],
+            &[&acct_b],
+            Some(55),
+        );
         assert!(matches!(
             batch_res,
             Err(StewardError::BatchInnerFailed { .. })
         ));
+        t_mode.set(3);
+        assert!(
+            submit_batch_all_or_nothing(&client, &acct_a, vec![p_a, p_b], &[&acct_b], Some(55))
+                .is_err()
+        );
+        t_mode.set(0);
 
         assert!(
             open_authorized_trust_line(
@@ -1810,6 +1846,12 @@ mod tests {
                         "server_state": "full"
                     }
                 }
+            })),
+            "ledger" => Ok(json!({
+                "result": { "status": "success", "ledger": { "ledger_index": 7, "close_time": 100 } }
+            })),
+            "ledger_accept" => Ok(json!({
+                "result": { "status": "success", "ledger_current_index": 8 }
             })),
             "account_info" => Ok(json!({
                 "result": { "status": "success", "account_data": { "Sequence": 15 } }
@@ -1942,6 +1984,32 @@ mod tests {
                 100,
             )
             .is_err()
+        );
+        assert!(
+            queue_batch_all_or_nothing(
+                &client,
+                &acct_a,
+                vec![
+                    json!({ "TransactionType": "AccountSet", "Account": acct_a.address() }),
+                    json!({ "TransactionType": "AccountSet", "Account": acct_a.address() }),
+                ],
+                &[],
+                SeqOrTicket::Sequence(11),
+                &mut BTreeMap::new(),
+                10,
+                100,
+            )
+            .is_err()
+        );
+        assert!(
+            submit_raw_json_tx(
+                &client,
+                &acct_a,
+                json!({ "TransactionType": "AccountSet", "Account": acct_a.address() }),
+                None,
+                None,
+            )
+            .is_ok()
         );
         t_mode.set(0);
 

@@ -24,8 +24,9 @@ use crate::codec::{
     ASF_DISALLOW_XRP, ASF_REQUIRE_AUTH, LSF_ALLOW_TRUSTLINE_CLAWBACK, LSF_ALLOW_TRUSTLINE_LOCKING,
     LSF_DEFAULT_RIPPLE, LSF_DISALLOW_XRP, LSF_REQUIRE_AUTH, QueuedBatch, QueuedTx,
     REGENT_DELEGATE_PERMISSIONS, SeqOrTicket, TF_SET_AUTH, TF_SET_NO_RIPPLE, TicketPool,
-    extract_created_ledger_index, payment_iou_json, queue_batch_all_or_nothing, queue_raw_json_tx,
-    split_batch_chunks, verify_queued_batch, verify_queued_tx,
+    extract_created_ledger_index, open_ledger_unit_fee_drops, payment_iou_json,
+    queue_batch_all_or_nothing, queue_raw_json_tx, split_batch_chunks, verify_queued_batch,
+    verify_queued_tx,
 };
 use crate::error::StewardError;
 use crate::reserve::StewardReservePool;
@@ -34,6 +35,7 @@ const PHOENIX_ACCOUNT_XRP_DROPS: u64 = 5_000_000_000;
 const PHOENIX_TRUST_LINE_LIMIT: &str = "1000000";
 const PHOENIX_STEWARD_TICKETS: u32 = 40;
 const PHOENIX_SEAT_TICKETS: u32 = 40;
+const PHOENIX_MIN_UNIT_FEE_DROPS: u64 = 100_000;
 const RIPPLE_TO_UNIX_EPOCH_SECS: u64 = 946_684_800;
 
 /// Output of one 3-wave Phoenix state rehydration against a fresh genesis node.
@@ -171,8 +173,10 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     let mut closes_used = 1_u64;
 
     let wave1_batch_count = wave1_batches.len();
-    for qb in &wave1_batches {
-        let verified = verify_queued_batch(client, qb)?;
+    for (idx, qb) in wave1_batches.iter().enumerate() {
+        let verified = verify_queued_batch(client, qb).map_err(|e| {
+            StewardError::PhoenixRehydrationFailed(format!("wave1 batch #{idx} verify: {e}"))
+        })?;
         total_batches_verified += 1;
         total_inner_legs_verified += verified.inners.len();
     }
@@ -360,14 +364,18 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     closes_used += 1;
 
     let wave2_batch_count = wave2_batches.len();
-    for qb in &wave2_batches {
-        let verified = verify_queued_batch(client, qb)?;
+    for (idx, qb) in wave2_batches.iter().enumerate() {
+        let verified = verify_queued_batch(client, qb).map_err(|e| {
+            StewardError::PhoenixRehydrationFailed(format!("wave2 batch #{idx} verify: {e}"))
+        })?;
         total_batches_verified += 1;
         total_inner_legs_verified += verified.inners.len();
     }
     let mut wave2_metas = BTreeMap::<String, Value>::new();
-    for qtx in &wave2_txs {
-        let meta = verify_queued_tx(client, qtx)?;
+    for (idx, qtx) in wave2_txs.iter().enumerate() {
+        let meta = verify_queued_tx(client, qtx).map_err(|e| {
+            StewardError::PhoenixRehydrationFailed(format!("wave2 tx #{idx} verify: {e}"))
+        })?;
         wave2_metas.insert(qtx.hash.clone(), meta);
     }
 
@@ -419,31 +427,39 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     let mut wave3_batches = Vec::<QueuedBatch>::new();
     let mut wave3_txs = Vec::<QueuedTx>::new();
 
-    // 3a. Seat CredentialAccept via outer-Steward pure-Sequence BatchV1_1 chunks.
+    // 3a. Seat CredentialAccept packed across seats into outer-Steward pure-Sequence BatchV1_1 chunks
+    // (always >= 2*n >= 4 entries since each seat holds Identity + CreditTier credentials).
+    let mut accept_entries = Vec::<(usize, Value)>::new();
     for (s_idx, seat_acc) in seat_accounts.iter().enumerate().take(n) {
-        let mut accept_legs: Vec<Value> = seat_expected_creds[s_idx]
-            .iter()
-            .map(|cred_ascii| {
+        for cred_ascii in &seat_expected_creds[s_idx] {
+            accept_entries.push((
+                s_idx,
                 json!({
                     "TransactionType": "CredentialAccept",
                     "Account": seat_acc.address(),
                     "Issuer": steward_account.address(),
                     "CredentialType": hex::encode_upper(cred_ascii.as_bytes())
-                })
-            })
-            .collect();
-        if accept_legs.len() == 1 {
-            accept_legs.push(json!({
-                "TransactionType": "AccountSet",
-                "Account": steward_account.address()
-            }));
+                }),
+            ));
         }
-        for chunk in split_batch_chunks(&accept_legs) {
+    }
+    if !accept_entries.is_empty() {
+        for chunk in split_batch_chunks(&accept_entries) {
+            let mut inner_legs = Vec::with_capacity(chunk.len());
+            let mut signer_indices = std::collections::BTreeSet::<usize>::new();
+            for (s_idx, leg) in chunk {
+                signer_indices.insert(s_idx);
+                inner_legs.push(leg);
+            }
+            let signers: Vec<&StandAloneAccount> = signer_indices
+                .into_iter()
+                .map(|i| &seat_accounts[i])
+                .collect();
             wave3_batches.push(queue_seq_batch(
                 client,
                 steward_account,
-                chunk,
-                &[seat_acc],
+                inner_legs,
+                &signers,
                 base_fee,
                 last_ledger,
             )?);
@@ -451,10 +467,10 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
     }
 
     // 3b. Paired [seat TrustSet(tfSetNoRipple), steward TrustSet(tfSetfAuth)] multi-signer batches
-    // using pure Sequence so every trust line is created and authorized strictly before any mint,
-    // native escrow, or check creation executes.
-    for seat_acc in seat_accounts.iter().take(n) {
-        let mut pairs = Vec::<[Value; 2]>::with_capacity(all_currencies.len());
+    // packed across seats (`chunks(4)` = 2..=8 legs per Batch) using pure Sequence so every trust line
+    // is created and authorized strictly before any mint, native escrow, or check creation executes.
+    let mut pair_entries = Vec::<(usize, [Value; 2])>::with_capacity(n * all_currencies.len());
+    for (s_idx, seat_acc) in seat_accounts.iter().enumerate().take(n) {
         for cur in &all_currencies {
             let seat_leg = json!({
                 "TransactionType": "TrustSet",
@@ -476,23 +492,29 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
                     "value": "0"
                 }
             });
-            pairs.push([seat_leg, auth_leg]);
+            pair_entries.push((s_idx, [seat_leg, auth_leg]));
         }
-        for pair_chunk in pairs.chunks(4) {
-            let mut flat_legs = Vec::with_capacity(pair_chunk.len() * 2);
-            for [seat_leg, auth_leg] in pair_chunk {
-                flat_legs.push(seat_leg.clone());
-                flat_legs.push(auth_leg.clone());
-            }
-            wave3_batches.push(queue_seq_batch(
-                client,
-                steward_account,
-                flat_legs,
-                &[seat_acc],
-                base_fee,
-                last_ledger,
-            )?);
+    }
+    for pair_chunk in pair_entries.chunks(4) {
+        let mut flat_legs = Vec::with_capacity(pair_chunk.len() * 2);
+        let mut signer_indices = std::collections::BTreeSet::<usize>::new();
+        for (s_idx, [seat_leg, auth_leg]) in pair_chunk {
+            signer_indices.insert(*s_idx);
+            flat_legs.push(seat_leg.clone());
+            flat_legs.push(auth_leg.clone());
         }
+        let signers: Vec<&StandAloneAccount> = signer_indices
+            .into_iter()
+            .map(|i| &seat_accounts[i])
+            .collect();
+        wave3_batches.push(queue_seq_batch(
+            client,
+            steward_account,
+            flat_legs,
+            &signers,
+            base_fee,
+            last_ledger,
+        )?);
     }
 
     // 3c. Group open native escrows by owner_seat so each owner's CRED mint + EscrowCreate(s)
@@ -790,14 +812,18 @@ pub(crate) fn execute_three_wave_phoenix<T: Transport>(
 
     let wave3_batch_count = wave3_batches.len();
     let mut verified_wave3_batches = Vec::with_capacity(wave3_batches.len());
-    for qb in &wave3_batches {
-        let verified = verify_queued_batch(client, qb)?;
+    for (idx, qb) in wave3_batches.iter().enumerate() {
+        let verified = verify_queued_batch(client, qb).map_err(|e| {
+            StewardError::PhoenixRehydrationFailed(format!("wave3 batch #{idx} verify: {e}"))
+        })?;
         total_batches_verified += 1;
         total_inner_legs_verified += verified.inners.len();
         verified_wave3_batches.push(verified);
     }
-    for qtx in &wave3_txs {
-        let _ = verify_queued_tx(client, qtx)?;
+    for (idx, qtx) in wave3_txs.iter().enumerate() {
+        let _ = verify_queued_tx(client, qtx).map_err(|e| {
+            StewardError::PhoenixRehydrationFailed(format!("wave3 tx #{idx} verify: {e}"))
+        })?;
     }
 
     let mut remapped_escrow_sequences = BTreeMap::<u64, u32>::new();
@@ -921,11 +947,12 @@ fn queue_seq_tx<T: Transport>(
     last_ledger: u32,
 ) -> Result<QueuedTx, StewardError> {
     let seq = client.account_sequence(signer.address())?;
+    let fee = open_ledger_unit_fee_drops(client, PHOENIX_MIN_UNIT_FEE_DROPS).to_string();
     queue_raw_json_tx(
         client,
         signer,
         tx_json,
-        None,
+        Some(&fee),
         SeqOrTicket::Sequence(seq),
         last_ledger,
     )
@@ -944,6 +971,7 @@ fn queue_seq_batch<T: Transport>(
         outer_signer.address().to_string(),
         outer_seq.saturating_add(1),
     )]);
+    let wave_unit_fee = base_fee.max(PHOENIX_MIN_UNIT_FEE_DROPS);
     queue_batch_all_or_nothing(
         client,
         outer_signer,
@@ -951,7 +979,7 @@ fn queue_seq_batch<T: Transport>(
         extra_signers,
         SeqOrTicket::Sequence(outer_seq),
         &mut batch_cursor,
-        base_fee,
+        wave_unit_fee,
         last_ledger,
     )
 }

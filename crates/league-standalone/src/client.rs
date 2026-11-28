@@ -748,6 +748,9 @@ impl<T: Transport> StandAlone<T> {
         }
 
         let _ = self.ledger_accept()?;
+        if preliminary == "terQUEUED" {
+            let _ = self.ledger_accept()?;
+        }
         let tx_reply = match self.call("tx", json!({ "transaction": local_hash })) {
             Ok(reply) => reply,
             Err(StandAloneError::Rpc { error, .. }) if error == "txnNotFound" => {
