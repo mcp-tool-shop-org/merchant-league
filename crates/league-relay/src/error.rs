@@ -137,6 +137,8 @@ pub enum RelayError {
     EvalThinkStrippingForbidden(String),
     /// Silent-market condition requested outside Evaluation Mode (`eval_mode == false`).
     SilentMarketEvalOnly(String),
+    /// Off-ledger Game/Club whisper relay requested for Track-1 `TableMode::Eval`.
+    WhisperRelayEvalForbidden(String),
 }
 
 impl RelayError {
@@ -160,6 +162,7 @@ impl RelayError {
             Self::ToolRoundStoreWriteFailed { .. } => "TOOL_ROUND_STORE_WRITE_FAILED",
             Self::EvalThinkStrippingForbidden(_) => "EVAL_THINK_STRIPPING_FORBIDDEN",
             Self::SilentMarketEvalOnly(_) => "SILENT_MARKET_EVAL_ONLY",
+            Self::WhisperRelayEvalForbidden(_) => "WHISPER_RELAY_EVAL_FORBIDDEN",
         }
     }
 
@@ -211,6 +214,9 @@ impl RelayError {
             Self::SilentMarketEvalOnly(_) => {
                 "run silent-market experiments via `league-eval play --communication silent`; omit `--communication silent` in Play mode"
             }
+            Self::WhisperRelayEvalForbidden(_) => {
+                "TableMode::Eval stays frozen on talk_rules_v2; use TableMode::Game or opt-in TableMode::Club for signed whisper relay"
+            }
         }
     }
 
@@ -234,7 +240,8 @@ impl RelayError {
             | Self::IncompatibleSetup(_)
             | Self::PreviewState { .. }
             | Self::EvalThinkStrippingForbidden(_)
-            | Self::SilentMarketEvalOnly(_) => 1,
+            | Self::SilentMarketEvalOnly(_)
+            | Self::WhisperRelayEvalForbidden(_) => 1,
             Self::Io(_)
             | Self::CorruptLog(_)
             | Self::TurnLocked { .. }
@@ -343,6 +350,9 @@ impl fmt::Display for RelayError {
             }
             RelayError::SilentMarketEvalOnly(msg) => {
                 write!(f, "silent market requires evaluation mode: {msg}")
+            }
+            RelayError::WhisperRelayEvalForbidden(msg) => {
+                write!(f, "whisper relay forbidden in Eval mode: {msg}")
             }
         }
     }

@@ -857,13 +857,13 @@ pub fn submit_delegated_tx<T: Transport>(
     submit_raw_json_tx(client, regent, tx_json, fee_drops, None)
 }
 
-/// Submit an `EscrowCreate` for a `CRED` IOU or 1-drop XRP commit lock and return `(sequence, meta)`.
+/// Submit an `EscrowCreate` for a `CRED` IOU or 1-drop XRP commit lock and return `(sequence, tx_hash, meta)`.
 pub fn submit_escrow_create<T: Transport>(
     client: &StandAlone<T>,
     owner: &StandAloneAccount,
     mut fields: Value,
     ticket: Option<u32>,
-) -> Result<(u32, Value), StewardError> {
+) -> Result<(u32, String, Value), StewardError> {
     let obj = fields
         .as_object_mut()
         .ok_or_else(|| StewardError::Protocol("EscrowCreate fields must be JSON object".into()))?;
@@ -882,7 +882,7 @@ pub fn submit_escrow_create<T: Transport>(
     } else {
         0
     };
-    let (_hash, reply) = submit_raw_json_tx(client, owner, fields, None, ticket)?;
+    let (tx_hash, reply) = submit_raw_json_tx(client, owner, fields, None, ticket)?;
     let validated = reply
         .get("validated")
         .and_then(Value::as_bool)
@@ -899,7 +899,7 @@ pub fn submit_escrow_create<T: Transport>(
         }));
     }
     let meta = reply.get("meta").cloned().unwrap_or(Value::Null);
-    Ok((ticket.unwrap_or(seq), meta))
+    Ok((ticket.unwrap_or(seq), tx_hash, meta))
 }
 
 /// Submit an `EscrowFinish` with preimage condition/fulfillment and explicit drop fee floor.
