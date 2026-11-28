@@ -13,8 +13,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha512};
 use strum::IntoEnumIterator;
-use xrpl::core::binarycodec::encode;
-use xrpl::core::keypairs::generate_seed;
+use xrpl::core::binarycodec::{encode, encode_for_signing, encode_for_signing_batch};
+use xrpl::core::keypairs::{generate_seed, sign as keypairs_sign};
 use xrpl::models::transactions::Transaction;
 use xrpl::models::transactions::payment::Payment;
 use xrpl::models::{Amount, FlagCollection, Model, XRPAmount};
@@ -131,6 +131,52 @@ impl StandAloneAccount {
 
     pub(crate) fn wallet(&self) -> &Wallet {
         &self.wallet
+    }
+
+    /// Sign a prepared JSON transaction object (`TransactionType`, `Account`, `Sequence`/`TicketSequence`,
+    /// `Fee`, `NetworkID`) using this account's keypair and return `(tx_blob_hex, local_tx_hash)`.
+    pub fn sign_tx_json(&self, tx_json: &mut Value) -> Result<(String, String), StandAloneError> {
+        let obj = tx_json
+            .as_object_mut()
+            .ok_or_else(|| StandAloneError::Build("transaction JSON must be an object".into()))?;
+        obj.insert(
+            "SigningPubKey".to_string(),
+            Value::String(self.wallet.public_key.clone()),
+        );
+        obj.remove("TxnSignature");
+        let signing_hex = encode_for_signing(obj)
+            .map_err(|err| StandAloneError::Build(format!("encode_for_signing failed: {err}")))?;
+        let signing_bytes = decode_hex(&signing_hex).map_err(StandAloneError::Build)?;
+        let signature = keypairs_sign(&signing_bytes, &self.wallet.private_key)
+            .map_err(|err| StandAloneError::Build(format!("keypairs sign failed: {err}")))?;
+        obj.insert("TxnSignature".to_string(), Value::String(signature));
+        let blob_hex = encode(obj)
+            .map_err(|err| StandAloneError::Build(format!("binary encode failed: {err}")))?;
+        let blob_bytes = decode_hex(&blob_hex).map_err(StandAloneError::Build)?;
+        let local_hash = transaction_hash(&blob_bytes);
+        Ok((blob_hex, local_hash))
+    }
+
+    /// Produce a `BatchSigner` entry authorizing `flags` over `inner_tx_hashes` (`XLS-56`).
+    pub fn sign_batch_payload(
+        &self,
+        flags: u32,
+        inner_tx_hashes: &[String],
+    ) -> Result<Value, StandAloneError> {
+        let id_refs: Vec<&str> = inner_tx_hashes.iter().map(String::as_str).collect();
+        let signing_hex = encode_for_signing_batch(flags, &id_refs).map_err(|err| {
+            StandAloneError::Build(format!("encode_for_signing_batch failed: {err}"))
+        })?;
+        let signing_bytes = decode_hex(&signing_hex).map_err(StandAloneError::Build)?;
+        let signature = keypairs_sign(&signing_bytes, &self.wallet.private_key)
+            .map_err(|err| StandAloneError::Build(format!("batch keypairs sign failed: {err}")))?;
+        Ok(json!({
+            "BatchSigner": {
+                "Account": self.wallet.classic_address,
+                "SigningPubKey": self.wallet.public_key,
+                "TxnSignature": signature
+            }
+        }))
     }
 }
 

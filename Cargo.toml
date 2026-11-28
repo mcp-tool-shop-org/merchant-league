@@ -14,6 +14,7 @@ members = [
     "crates/league-seat-types",
     "crates/league-seat-ui",
     "crates/league-standalone",
+    "crates/league-steward",
     "crates/league-tui",
 ]
 
