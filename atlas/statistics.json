@@ -411,7 +411,7 @@
       },
       {
         "commits": 90,
-        "lines": 1927,
+        "lines": 1928,
         "path": "atlas/README.md"
       },
       {
@@ -421,17 +421,17 @@
       },
       {
         "commits": 90,
-        "lines": 7163,
+        "lines": 7153,
         "path": "atlas/page.json"
       },
       {
         "commits": 90,
-        "lines": 25331,
+        "lines": 25488,
         "path": "atlas/statistics.json"
       },
       {
         "commits": 90,
-        "lines": 97828,
+        "lines": 97840,
         "path": "atlas/structure.json"
       },
       {
@@ -461,7 +461,7 @@
       },
       {
         "commits": 8,
-        "lines": 2282,
+        "lines": 2315,
         "path": "crates/league-core/src/commit.rs"
       },
       {
@@ -506,7 +506,7 @@
       },
       {
         "commits": 5,
-        "lines": 1155,
+        "lines": 1157,
         "path": "crates/league-core/src/predicates.rs"
       },
       {
@@ -516,7 +516,7 @@
       },
       {
         "commits": 5,
-        "lines": 1086,
+        "lines": 1132,
         "path": "crates/league-core/src/scoring.rs"
       },
       {
@@ -541,7 +541,7 @@
       },
       {
         "commits": 4,
-        "lines": 3467,
+        "lines": 3602,
         "path": "crates/league-core/tests/core_card2_randomness_scoring.rs"
       },
       {
@@ -566,17 +566,17 @@
       },
       {
         "commits": 11,
-        "lines": 8499,
+        "lines": 8524,
         "path": "crates/league-core/tests/replay_invariants.rs"
       },
       {
         "commits": 2,
-        "lines": 1449,
+        "lines": 1452,
         "path": "crates/league-core/tests/seat_types_reexport_parity.rs"
       },
       {
         "commits": 5,
-        "lines": 1805,
+        "lines": 1825,
         "path": "crates/league-core/tests/state_predicates.rs"
       },
       {
@@ -586,7 +586,7 @@
       },
       {
         "commits": 4,
-        "lines": 2334,
+        "lines": 2367,
         "path": "crates/league-core/tests/wave1_rules.rs"
       },
       {
@@ -956,7 +956,7 @@
       },
       {
         "commits": 3,
-        "lines": 1175,
+        "lines": 1242,
         "path": "crates/league-gen/src/mandates.rs"
       },
       {
@@ -1500,8 +1500,8 @@
         "path": "docs/decision-scorer.md"
       },
       {
-        "commits": 17,
-        "lines": 626,
+        "commits": 18,
+        "lines": 636,
         "path": "docs/design-v2.md"
       },
       {
@@ -1513,6 +1513,11 @@
         "commits": 10,
         "lines": 195,
         "path": "docs/eval-harness.md"
+      },
+      {
+        "commits": 1,
+        "lines": 134,
+        "path": "docs/game-mode-protocol.md"
       },
       {
         "commits": 1,
@@ -3810,9 +3815,9 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-27T22:51:45.856Z",
+  "generatedAt": "2026-11-28T01:01:39.154Z",
   "generatedFrom": {
-    "commit": "bedf2dc138b8d5ebe5d00492bc0306d9f47444be"
+    "commit": "5053d7058c2ae8329e87a76e9cecce4a648f6522"
   },
   "pairs": [
     {
@@ -4589,16 +4594,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-27T17:51:33-05:00",
-    "inScopeFiles": 703,
+    "headDate": "2026-11-27T20:01:25-05:00",
+    "inScopeFiles": 696,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 110,
+    "qualifyingCommits": 111,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-31T22:51:33.000Z",
+    "since": "2026-06-01T01:01:25.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

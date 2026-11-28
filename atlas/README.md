@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-27 from commit bedf2dc by Atlas 1.26.0.
+Mapped at 2026-11-28 from commit 5053d70 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,10 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 16 parts, mostly Rust (422 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-27 (62c55f3)
+## What changed since 2026-11-27 (bedf2dc)
 
-- CHANGELOG.md is now read by scripts/smoke-container.sh and scripts/test-guards.sh.
-- 1 file added and 10 changed content, across 4 parts.
+Nothing structural changed since 2026-11-27; 1 file added and 1 changed content.
 
 ## What comes in
 
