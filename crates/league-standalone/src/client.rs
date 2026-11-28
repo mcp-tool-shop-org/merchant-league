@@ -96,8 +96,13 @@ impl StandAloneAccount {
         Ok(Self { wallet })
     }
 
+    /// Clone an `ed25519` stand-alone account via its validated family seed.
+    pub fn clone_ed25519(&self) -> Result<Self, StandAloneError> {
+        Self::from_ed25519_seed(&self.wallet.seed)
+    }
+
     /// Derive the stand-alone genesis root account (`rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh`).
-    pub(crate) fn genesis() -> Result<Self, StandAloneError> {
+    pub fn genesis() -> Result<Self, StandAloneError> {
         let hash = Sha512::digest(b"masterpassphrase");
         let mut entropy = [0u8; 16];
         entropy.copy_from_slice(&hash[..16]);

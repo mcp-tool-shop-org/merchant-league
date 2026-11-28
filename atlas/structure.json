@@ -15262,9 +15262,11 @@
         },
         {
           "exports": [
+            "detect_ledger_wipe",
+            "known_reset_spanning",
             "ledger_went_backwards"
           ],
-          "hash": "c0175c71ee5bda689160cd804ebfacd971d6f8a8cc83e22d5c02a73fcaaa813a",
+          "hash": "c32d07429cd04ab20b5cb928ec12b24a43c953468fa98895b3f4658a80ecd699",
           "path": "crates/league-season/src/lib.rs",
           "testsInside": true
         }
@@ -15279,8 +15281,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 1,
-      "testedInside": true,
+      "testedBy": 2,
       "unresolvedSites": 0
     },
     {
@@ -16157,65 +16158,65 @@
             {
               "in": "genesis",
               "kind": "err",
-              "line": 112
+              "line": 117
             },
             {
               "in": "verify_v2_amendments",
               "kind": "err",
-              "line": 480
+              "line": 485
             },
             {
               "in": "verify_v2_amendments",
               "kind": "err",
-              "line": 511
+              "line": 516
             },
             {
               "in": "verify_v2_amendments",
               "kind": "err",
-              "line": 521
+              "line": 526
             },
             {
               "in": "account_lines",
               "kind": "err",
-              "line": 586
+              "line": 591
             },
             {
               "in": "account_offers",
               "kind": "err",
-              "line": 626
+              "line": 631
             },
             {
               "in": "submit_and_accept",
               "kind": "match-err",
-              "line": 748
+              "line": 753
             },
             {
               "in": "submit_and_accept",
               "kind": "match-err",
-              "line": 759
+              "line": 764
             },
             {
               "in": "submit_and_accept",
               "kind": "err",
-              "line": 759
+              "line": 764
             },
             {
               "in": "submit_and_accept_ok",
               "kind": "err",
-              "line": 801
+              "line": 806
             },
             {
               "in": "raw_rpc_call",
               "kind": "err",
-              "line": 871
+              "line": 876
             },
             {
               "in": "raw_rpc_call",
               "kind": "err",
-              "line": 878
+              "line": 883
             }
           ],
-          "hash": "9af93f95eae828059359371d9a474e942405c3e6080cf2bd9ffc7f6479727c5e",
+          "hash": "80e665de927e27b75936bf8d062e0d9d2d0886e14bad67261f9f16c865f6f1e7",
           "importsFiles": [
             "crates/league-ledger/src/client.rs",
             "crates/league-standalone/src/lib.rs"
@@ -19978,6 +19979,13 @@
         {
           "job": "check",
           "matched": true,
+          "path": "crates/league-steward/src/archivist.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
           "path": "crates/league-steward/src/codec.rs",
           "runKind": "executes",
           "via": "cargo test"
@@ -20009,6 +20017,20 @@
           "path": "crates/league-steward/src/lib.rs",
           "runKind": "checks",
           "via": "cargo clippy"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-steward/src/phoenix.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-steward/src/reserve.rs",
+          "runKind": "executes",
+          "via": "cargo test"
         },
         {
           "job": "check",
@@ -20086,7 +20108,7 @@
           "via": "astro build"
         }
       ],
-      "runsCount": 75,
+      "runsCount": 78,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -20101,14 +20123,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 87,
+          "files": 90,
           "job": "check",
           "runner": "cargo test",
           "step": "Test (doc tests)"
         },
         {
           "coverage": true,
-          "files": 87,
+          "files": 90,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -20121,7 +20143,7 @@
           "step": "Site build"
         },
         {
-          "files": 11,
+          "files": 14,
           "job": "check",
           "runner": "cargo test",
           "step": "Stand-alone xrpld harness"
@@ -20948,8 +20970,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "7065ba09b84cc214f512ef8122a7c34e196056c0",
-    "tracked": 701
+    "commit": "27d91222484387d76e9713b1edc582a048ebeb92",
+    "tracked": 704
   },
   "landings": [
     {
@@ -22429,13 +22451,61 @@
           "line": 152
         }
       ],
-      "hash": "343eaf291e7298aa0b90316a30f73af8eeeb94acecca79ebc432b23785a78792",
+      "hash": "a9288ee20fa37ae1be29aca15bae959bd47a3451cfa9f69f692e7eaf571df377",
       "importsFiles": [
         "crates/league-core/src/lib.rs",
         "crates/league-standalone/src/lib.rs",
         "crates/league-steward/src/error.rs"
       ],
       "path": "crates/league-steward/src/amount.rs",
+      "testsInside": true
+    },
+    {
+      "failurePaths": [
+        {
+          "in": "verify_hash_chain",
+          "kind": "err",
+          "line": 393
+        },
+        {
+          "in": "materialize",
+          "kind": "err",
+          "line": 441
+        },
+        {
+          "in": "materialize",
+          "kind": "err",
+          "line": 448
+        },
+        {
+          "in": "materialize",
+          "kind": "err",
+          "line": 465
+        },
+        {
+          "in": "apply_event",
+          "kind": "err",
+          "line": 518
+        },
+        {
+          "in": "apply_event",
+          "kind": "err",
+          "line": 641
+        },
+        {
+          "in": "ensure_turn",
+          "kind": "err",
+          "line": 739
+        }
+      ],
+      "hash": "23273eeadac42153933ff6d67274632246786d23e186a85b6b600d0117f5dd03",
+      "importsFiles": [
+        "crates/league-core/src/lib.rs",
+        "crates/league-steward/src/error.rs",
+        "crates/league-steward/src/firewall.rs",
+        "crates/league-steward/src/steward.rs"
+      ],
+      "path": "crates/league-steward/src/archivist.rs",
       "testsInside": true
     },
     {
@@ -22448,6 +22518,8 @@
         "open_authorized_trust_line",
         "payment_iou_json",
         "publish_oracle_prices",
+        "queue_batch_all_or_nothing",
+        "queue_raw_json_tx",
         "set_permissioned_domain",
         "split_batch_chunks",
         "submit_batch_all_or_nothing",
@@ -22461,7 +22533,9 @@
         "submit_escrow_finish",
         "submit_raw_json_tx",
         "submit_single_clawback",
-        "submit_single_payment"
+        "submit_single_payment",
+        "verify_queued_batch",
+        "verify_queued_tx"
       ],
       "failurePaths": [
         {
@@ -22480,82 +22554,122 @@
           "line": 161
         },
         {
+          "in": "queue_raw_json_tx",
+          "kind": "err",
+          "line": 308
+        },
+        {
+          "in": "queue_batch_all_or_nothing",
+          "kind": "err",
+          "line": 336
+        },
+        {
+          "in": "queue_batch_all_or_nothing",
+          "kind": "err",
+          "line": 462
+        },
+        {
+          "in": "verify_queued_tx",
+          "kind": "err",
+          "line": 491
+        },
+        {
+          "in": "verify_queued_batch",
+          "kind": "err",
+          "line": 520
+        },
+        {
+          "in": "verify_queued_batch",
+          "kind": "match-err",
+          "line": 530
+        },
+        {
+          "in": "verify_queued_batch",
+          "kind": "err",
+          "line": 531
+        },
+        {
+          "in": "verify_queued_batch",
+          "kind": "err",
+          "line": 565
+        },
+        {
           "in": "submit_raw_json_tx",
           "kind": "match-err",
-          "line": 278
+          "line": 645
         },
         {
           "in": "submit_raw_json_tx",
           "kind": "match-err",
-          "line": 286
+          "line": 653
         },
         {
           "in": "submit_raw_json_tx",
           "kind": "err",
-          "line": 286
+          "line": 653
         },
         {
           "in": "submit_batch_all_or_nothing",
           "kind": "err",
-          "line": 301
+          "line": 668
         },
         {
           "in": "submit_batch_all_or_nothing",
           "kind": "err",
-          "line": 433
+          "line": 800
         },
         {
           "in": "submit_batch_all_or_nothing",
           "kind": "err",
-          "line": 455
+          "line": 822
         },
         {
           "in": "submit_batch_all_or_nothing",
           "kind": "match-err",
-          "line": 465
+          "line": 832
         },
         {
           "in": "submit_batch_all_or_nothing",
           "kind": "err",
-          "line": 466
+          "line": 833
         },
         {
           "in": "submit_batch_all_or_nothing",
           "kind": "err",
-          "line": 500
+          "line": 867
         },
         {
           "in": "configure_steward_authority",
           "kind": "err",
-          "line": 647
+          "line": 1014
         },
         {
           "in": "configure_steward_authority",
           "kind": "err",
-          "line": 662
+          "line": 1029
         },
         {
           "in": "configure_steward_authority",
           "kind": "err",
-          "line": 669
+          "line": 1036
         },
         {
           "in": "submit_escrow_create",
           "kind": "err",
-          "line": 896
+          "line": 1263
         },
         {
           "in": "publish_oracle_prices",
           "kind": "err",
-          "line": 1060
+          "line": 1427
         },
         {
           "in": "extract_created_ledger_index",
           "kind": "err",
-          "line": 1087
+          "line": 1454
         }
       ],
-      "hash": "f5b5b8a518ccab9861a3d965a53365dd667adabbeb0d57784925368a4750d2b5",
+      "hash": "c11c5cc2535d6c9e171b5eddb82745f97fbab275cf1dec7b5faf8bc5a781067f",
       "importOrder": [
         "crates/league-core/src/lib.rs",
         "crates/league-ledger/src/client.rs",
@@ -22578,7 +22692,7 @@
       "testsInside": true
     },
     {
-      "hash": "a2d5b4b8ebb04c81682189c05239ad3bd86610b660be67c493a5523a0c52921b",
+      "hash": "fec34351330bdc6643cbe9d8e43c9742eb316a538057acd67ddb8b6cc0b458e5",
       "importsFiles": [
         "crates/league-core/src/lib.rs",
         "crates/league-error/src/lib.rs",
@@ -22596,100 +22710,100 @@
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 152
+          "line": 163
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 156
+          "line": 167
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 159
+          "line": 170
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 162
+          "line": 173
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 169
+          "line": 180
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 175
+          "line": 186
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 184
+          "line": 195
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 187
+          "line": 198
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 190
+          "line": 201
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 197
+          "line": 208
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 204
+          "line": 215
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 211
+          "line": 222
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 221
+          "line": 232
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 224
+          "line": 235
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 229
+          "line": 240
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 238
+          "line": 249
         },
         {
           "in": "inspect_tx",
           "kind": "err",
-          "line": 246
-        },
-        {
-          "in": "inspect_tx",
-          "kind": "err",
-          "line": 253
+          "line": 257
         },
         {
           "in": "inspect_tx",
           "kind": "err",
           "line": 264
+        },
+        {
+          "in": "inspect_tx",
+          "kind": "err",
+          "line": 275
         }
       ],
-      "hash": "49d60c8c33cc29008aea0d32418d2259a9b753b81f84e3f2f4c303240b4db7a4",
+      "hash": "19b710486927f0b1c887bcb9dbf986614bfa0673f5962bd55f5f54740099ba28",
       "importsFiles": [
         "crates/league-core/src/lib.rs",
         "crates/league-ledger/src/client.rs"
@@ -22698,189 +22812,353 @@
       "testsInside": true
     },
     {
-      "hash": "8f7bdcb68e503adbc3662224d6f644fc179755472c0773b9b914be2230e093c2",
+      "hash": "84c9f0abb3e505600f715d2854a21fb6e34baa595a4b054199ace6844e4935dd",
       "importOrder": [
         "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/archivist.rs",
         "crates/league-steward/src/codec.rs",
         "crates/league-steward/src/error.rs",
         "crates/league-steward/src/firewall.rs",
+        "crates/league-steward/src/phoenix.rs",
+        "crates/league-steward/src/reserve.rs",
         "crates/league-steward/src/steward.rs",
-        "crates/league-error/src/lib.rs"
+        "crates/league-error/src/lib.rs",
+        "crates/league-season/src/lib.rs"
       ],
       "importsFiles": [
         "crates/league-error/src/lib.rs",
+        "crates/league-season/src/lib.rs",
         "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/archivist.rs",
         "crates/league-steward/src/codec.rs",
         "crates/league-steward/src/error.rs",
         "crates/league-steward/src/firewall.rs",
+        "crates/league-steward/src/phoenix.rs",
+        "crates/league-steward/src/reserve.rs",
         "crates/league-steward/src/steward.rs"
       ],
       "path": "crates/league-steward/src/lib.rs"
+    },
+    {
+      "exports": [
+        "execute_three_wave_phoenix"
+      ],
+      "failurePaths": [
+        {
+          "in": "execute_three_wave_phoenix",
+          "kind": "err",
+          "line": 99
+        },
+        {
+          "in": "execute_three_wave_phoenix",
+          "kind": "err",
+          "line": 104
+        },
+        {
+          "in": "execute_three_wave_phoenix",
+          "kind": "err",
+          "line": 110
+        },
+        {
+          "in": "execute_three_wave_phoenix",
+          "kind": "err",
+          "line": 629
+        },
+        {
+          "in": "execute_three_wave_phoenix",
+          "kind": "err",
+          "line": 846
+        },
+        {
+          "in": "verify_steward_flags_after_wave1",
+          "kind": "err",
+          "line": 1070
+        },
+        {
+          "in": "verify_steward_flags_after_wave1",
+          "kind": "err",
+          "line": 1085
+        },
+        {
+          "in": "verify_steward_flags_after_wave1",
+          "kind": "err",
+          "line": 1092
+        }
+      ],
+      "hash": "b30eb403d935ea78f65b6d5a2c77cfff59aacab61c5ce4e927968b9d404ea805",
+      "importOrder": [
+        "crates/league-core/src/lib.rs",
+        "crates/league-ledger/src/client.rs",
+        "crates/league-season/src/lib.rs",
+        "crates/league-standalone/src/client.rs",
+        "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/archivist.rs",
+        "crates/league-steward/src/codec.rs",
+        "crates/league-steward/src/error.rs",
+        "crates/league-steward/src/reserve.rs",
+        "crates/league-standalone/src/lib.rs",
+        "crates/league-steward/src/steward.rs"
+      ],
+      "importsFiles": [
+        "crates/league-core/src/lib.rs",
+        "crates/league-ledger/src/client.rs",
+        "crates/league-season/src/lib.rs",
+        "crates/league-standalone/src/client.rs",
+        "crates/league-standalone/src/lib.rs",
+        "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/archivist.rs",
+        "crates/league-steward/src/codec.rs",
+        "crates/league-steward/src/error.rs",
+        "crates/league-steward/src/reserve.rs",
+        "crates/league-steward/src/steward.rs"
+      ],
+      "path": "crates/league-steward/src/phoenix.rs",
+      "testsInside": true
+    },
+    {
+      "exports": [
+        "estimate_table_reserves"
+      ],
+      "failurePaths": [
+        {
+          "in": "estimate_table_reserves",
+          "kind": "err",
+          "line": 125
+        },
+        {
+          "in": "estimate_table_reserves",
+          "kind": "err",
+          "line": 130
+        },
+        {
+          "in": "allocate_table",
+          "kind": "err",
+          "line": 237
+        },
+        {
+          "in": "replenish_from_testnet_faucet_if_low",
+          "kind": "match-err",
+          "line": 291
+        },
+        {
+          "in": "replenish_from_testnet_faucet_if_low",
+          "kind": "err",
+          "line": 303
+        }
+      ],
+      "hash": "2632008ad56b06591438d0c6db14ac06ae09014615c07dd30f18eca325252264",
+      "importsFiles": [
+        "crates/league-ledger/src/client.rs",
+        "crates/league-standalone/src/client.rs",
+        "crates/league-steward/src/error.rs"
+      ],
+      "path": "crates/league-steward/src/reserve.rs",
+      "testsInside": true
     },
     {
       "failurePaths": [
         {
           "in": "bootstrap_with_ripple_turn_span",
           "kind": "err",
-          "line": 211
+          "line": 355
         },
         {
           "in": "bootstrap_with_ripple_turn_span",
           "kind": "err",
-          "line": 217
+          "line": 361
         },
         {
           "in": "bootstrap_with_ripple_turn_span",
           "kind": "err",
-          "line": 264
+          "line": 408
+        },
+        {
+          "in": "from_archivist_mirror",
+          "kind": "err",
+          "line": 729
+        },
+        {
+          "in": "from_archivist_mirror",
+          "kind": "err",
+          "line": 734
+        },
+        {
+          "in": "from_archivist_mirror",
+          "kind": "err",
+          "line": 740
+        },
+        {
+          "in": "detect_wipe",
+          "kind": "match-err",
+          "line": 874
+        },
+        {
+          "in": "detect_wipe",
+          "kind": "match-err",
+          "line": 875
+        },
+        {
+          "in": "detect_wipe",
+          "kind": "err",
+          "line": 875
         },
         {
           "in": "observe_validated_header",
           "kind": "err",
-          "line": 562
+          "line": 1144
         },
         {
           "in": "advance_to_cancel_lock",
           "kind": "err",
-          "line": 593
+          "line": 1182
         },
         {
           "in": "submit_market_action",
           "kind": "match-err",
-          "line": 632
+          "line": 1221
         },
         {
           "in": "submit_market_action",
           "kind": "err",
-          "line": 637
+          "line": 1233
         },
         {
           "in": "submit_market_action",
           "kind": "err",
-          "line": 643
+          "line": 1239
         },
         {
           "in": "submit_market_action",
           "kind": "err",
-          "line": 704
+          "line": 1309
         },
         {
           "in": "submit_market_action",
           "kind": "err",
-          "line": 780
+          "line": 1397
         },
         {
           "in": "submit_market_action",
           "kind": "err",
-          "line": 831
+          "line": 1459
         },
         {
           "in": "submit_seat_commit_via_xrpld",
           "kind": "err",
-          "line": 906
+          "line": 1549
         },
         {
-          "in": "ingest_commit_tx",
+          "in": "ingest_commit_tx_with_escrow",
+          "kind": "match-err",
+          "line": 1608
+        },
+        {
+          "in": "ingest_commit_tx_with_escrow",
           "kind": "err",
-          "line": 951
+          "line": 1612
+        },
+        {
+          "in": "ingest_commit_tx_with_escrow",
+          "kind": "err",
+          "line": 1617
         },
         {
           "in": "submit_seat_reveal_via_xrpld",
           "kind": "err",
-          "line": 1004
+          "line": 1681
         },
         {
           "in": "exercise_regent_delegation_on_xrpld",
           "kind": "err",
-          "line": 1060
+          "line": 1740
         },
         {
           "in": "sweep_turn",
           "kind": "err",
-          "line": 1099
+          "line": 1779
         },
         {
           "in": "sweep_turn",
           "kind": "err",
-          "line": 1148
+          "line": 1828
         },
         {
           "in": "sweep_turn",
           "kind": "err",
-          "line": 1172
+          "line": 1852
         },
         {
           "in": "sweep_turn",
           "kind": "err",
-          "line": 1211
+          "line": 1891
         },
         {
           "in": "sweep_turn",
           "kind": "err",
-          "line": 1245
+          "line": 1925
         },
         {
           "in": "finalize_and_verify_replay",
           "kind": "err",
-          "line": 1325
+          "line": 2036
         },
         {
           "in": "finalize_and_verify_replay",
           "kind": "err",
-          "line": 1351
+          "line": 2062
         },
         {
           "in": "finalize_and_verify_replay",
           "kind": "err",
-          "line": 1356
+          "line": 2067
         },
         {
           "in": "finalize_and_verify_replay",
           "kind": "err",
-          "line": 1361
+          "line": 2072
         },
         {
           "in": "finalize_and_verify_replay",
           "kind": "err",
-          "line": 1371
+          "line": 2082
         },
         {
           "in": "finalize_and_verify_replay",
           "kind": "err",
-          "line": 1380
+          "line": 2091
         },
         {
           "in": "assert_account_lines_parity",
           "kind": "err",
-          "line": 1413
+          "line": 2124
         },
         {
           "in": "assert_account_lines_parity",
           "kind": "err",
-          "line": 1428
+          "line": 2139
         },
         {
           "in": "assert_account_lines_parity",
           "kind": "err",
-          "line": 1440
+          "line": 2151
         },
         {
           "in": "assert_account_lines_parity",
           "kind": "err",
-          "line": 1461
+          "line": 2172
         },
         {
           "in": "mirror_seat_free_delta_after_action",
           "kind": "err",
-          "line": 1506
+          "line": 2217
         },
         {
           "in": "reconcile_balances_via_batch",
           "kind": "err",
-          "line": 1575
+          "line": 2286
         }
       ],
-      "hash": "9c9fe48ae971f46c474da7c06f21e81c320b2765ccd593839b61890b92c5058e",
+      "hash": "024bf59a5a09b47f3637adaaf456bd5ba89f54442ea19db85100af65e2a7d9f8",
       "importOrder": [
         "crates/league-core/src/lib.rs",
         "crates/league-ledger/src/client.rs",
@@ -22888,9 +23166,12 @@
         "crates/league-standalone/src/client.rs",
         "crates/league-standalone/src/conformance.rs",
         "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/archivist.rs",
         "crates/league-steward/src/codec.rs",
         "crates/league-steward/src/error.rs",
         "crates/league-steward/src/firewall.rs",
+        "crates/league-steward/src/phoenix.rs",
+        "crates/league-steward/src/reserve.rs",
         "crates/league-standalone/src/lib.rs"
       ],
       "importsFiles": [
@@ -22901,15 +23182,18 @@
         "crates/league-standalone/src/conformance.rs",
         "crates/league-standalone/src/lib.rs",
         "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/archivist.rs",
         "crates/league-steward/src/codec.rs",
         "crates/league-steward/src/error.rs",
-        "crates/league-steward/src/firewall.rs"
+        "crates/league-steward/src/firewall.rs",
+        "crates/league-steward/src/phoenix.rs",
+        "crates/league-steward/src/reserve.rs"
       ],
       "path": "crates/league-steward/src/steward.rs",
       "testsInside": true
     },
     {
-      "hash": "e0a1005fbdc1d00de996bef2ed6e5fd13dc8dd93be1b3592d26c3960a2d819a7",
+      "hash": "608ffed28c7813927fe49617d7ee8cb3381527c9fa8c61c7b20e4b2ac4a31984",
       "importsFiles": [
         "crates/league-core/src/lib.rs",
         "crates/league-ledger/src/client.rs",

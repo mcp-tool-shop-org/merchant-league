@@ -13,6 +13,7 @@ use std::fmt;
 
 use league_core::CommitmentHash;
 use league_ledger::client::decode_hex;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Normative `MemoType` ASCII identifier (`docs/game-mode-protocol.md` §3.2).
@@ -25,7 +26,7 @@ pub const COMMIT_MEMO_FORMAT_TEXT: &str = "text/plain";
 pub const COMMIT_MEMO_FORMAT_RAW32: &str = "application/x-ml-sha256";
 
 /// Machine-readable reason a transaction was dropped at the `MemoData` ingress firewall.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IngressDropReason {
     /// Outer `Account` is not in the table's active seated account allowlist.
     UnseatedSender,
@@ -68,7 +69,7 @@ impl fmt::Display for IngressDropReason {
 /// Sanitized telemetry record emitted when the ingress firewall drops a transaction.
 ///
 /// Carries only `(tx_hash, sender, reason)` — never raw `MemoData` or prompt payload bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IngressDropRecord {
     /// Transaction hash (or `"unknown"` if absent).
     pub tx_hash: String,
@@ -103,6 +104,16 @@ impl MemoFirewall {
     /// Construct a firewall for `steward_address` and ordered `seat_addresses` (`0..seat_count`).
     #[must_use]
     pub fn new(steward_address: String, seat_addresses: &[String]) -> Self {
+        Self::from_parts(steward_address, seat_addresses, Vec::new())
+    }
+
+    /// Reconstruct a firewall with previously recorded sanitized [`IngressDropRecord`]s.
+    #[must_use]
+    pub fn from_parts(
+        steward_address: String,
+        seat_addresses: &[String],
+        dropped_log: Vec<IngressDropRecord>,
+    ) -> Self {
         let mut seat_by_address = BTreeMap::new();
         for (idx, addr) in seat_addresses.iter().enumerate() {
             if let Ok(seat) = u8::try_from(idx) {
@@ -112,7 +123,7 @@ impl MemoFirewall {
         Self {
             steward_address,
             seat_by_address,
-            dropped_log: Vec::new(),
+            dropped_log,
         }
     }
 

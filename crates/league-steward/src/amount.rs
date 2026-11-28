@@ -207,8 +207,11 @@ mod tests {
         assert!(parse_iou_milli_exact("0.00005").is_err());
         assert!(parse_iou_milli_exact("0.0001").is_err());
         assert!(parse_iou_milli_exact("1e-4").is_err());
+        assert!(parse_iou_milli_exact("1e-5").is_err());
         assert!(parse_iou_milli_exact("1e25").is_err());
+        assert!(parse_iou_milli_exact("1e40").is_err());
         assert!(parse_iou_milli_exact("9999999999999999999").is_err());
+        assert!(parse_iou_milli_exact("9999999999999999999999999999999999999999").is_err());
         assert!(
             parse_iou_milli_exact(&format!("1.{}", "0".repeat(30))).is_err()
                 || parse_iou_milli_exact(&format!("0.{}1", "0".repeat(4))).is_err()
