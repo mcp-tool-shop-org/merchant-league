@@ -826,6 +826,7 @@ impl EvalHost {
             turn,
             market_actions: std::mem::take(&mut self.current_market_actions),
             cancel_lock_at: self.current_cancel_lock_at.take(),
+            commit_deadline_unix: None,
             commitments: std::mem::take(&mut self.current_commitments),
             reveals: std::mem::take(&mut self.current_reveals),
             turn_beacon: beacon,

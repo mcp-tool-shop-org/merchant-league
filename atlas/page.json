@@ -102,24 +102,102 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 1,
+      "added": 8,
+      "changed": 13,
       "moved": 0,
-      "parts": 1,
+      "parts": 4,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-steward/src/amount.rs, crates/league-steward/src/codec.rs, crates/league-steward/src/error.rs and 3 more.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-steward/src/amount.rs",
+          "crates/league-steward/src/codec.rs",
+          "crates/league-steward/src/error.rs",
+          "crates/league-steward/src/firewall.rs",
+          "crates/league-steward/src/steward.rs",
+          "crates/league-steward/tests/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also checks crates/league-steward/src/lib.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-steward/src/lib.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-core/ is now also read by crates/league-steward/Cargo.toml.",
+        "subjects": [
+          "crates/league-core/",
+          "crates/league-steward/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-core/tests/vectors/drand_quicknet_vectors.json is now also read by crates/league-core/src/replay.rs, crates/league-steward/src/steward.rs and crates/league-steward/tests/steward_live.rs.",
+        "subjects": [
+          "crates/league-core/tests/vectors/drand_quicknet_vectors.json",
+          "crates/league-core/src/replay.rs",
+          "crates/league-steward/src/steward.rs",
+          "crates/league-steward/tests/steward_live.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-error/ is now also read by crates/league-steward/Cargo.toml.",
+        "subjects": [
+          "crates/league-error/",
+          "crates/league-steward/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "And 4 more new writers and readers of places.",
+        "subjects": []
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "crates/league-steward/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "crates/league-steward/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "crates/league-steward/src/amount.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "crates/league-steward/src/amount.rs"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "crates/league-steward/src/codec.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "crates/league-steward/src/codec.rs"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "And 5 more new files that belong to no part.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-27; 1 file added and 1 changed content.",
+        "sentence": "8 files added and 13 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "bedf2dc138b8d5ebe5d00492bc0306d9f47444be",
-      "generatedAt": "2026-11-27T22:51:45.856Z"
+      "commit": "5053d7058c2ae8329e87a76e9cecce4a648f6522",
+      "generatedAt": "2026-11-28T01:01:39.154Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -203,9 +281,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 12 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "5053d7058c2ae8329e87a76e9cecce4a648f6522",
+  "commit": "62a27b7347c11dc625464dbff74973772233d4c0",
   "defaultBranch": "main",
-  "derived": "16 parts, mostly Rust (422 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (429 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -215,10 +293,11 @@
         "crates/league-relay/src/lib.rs",
         "crates/league-relay/src/main.rs",
         "crates/league-scorer/src/lib.rs",
-        "crates/league-scorer/src/main.rs"
+        "crates/league-scorer/src/main.rs",
+        "crates/league-steward/src/lib.rs"
       ],
-      "checksCount": 7,
-      "checksMore": 4,
+      "checksCount": 8,
+      "checksMore": 5,
       "file": ".github/workflows/ci.yml",
       "id": ".github/workflows/ci.yml",
       "landings": [],
@@ -344,12 +423,18 @@
         "crates/league-seat-types/src/view.rs",
         "crates/league-seat-ui/src/lib.rs",
         "crates/league-standalone/",
+        "crates/league-steward/src/amount.rs",
+        "crates/league-steward/src/codec.rs",
+        "crates/league-steward/src/error.rs",
+        "crates/league-steward/src/firewall.rs",
+        "crates/league-steward/src/steward.rs",
+        "crates/league-steward/tests/",
         "crates/league-tui/",
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 55,
-      "runsMore": 85,
+      "runsCount": 61,
+      "runsMore": 91,
       "sends": [
         "uploads coverage to Codecov"
       ],
@@ -754,7 +839,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-28T01:01:39.154Z",
+  "generatedAt": "2026-11-28T04:37:02.383Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "57 writes and 69 reads use paths built at run time and are not named here.",
@@ -763,7 +848,7 @@
     "2 writes and 1 read go to a temporary directory, not to this repository.",
     "4 commands are built at run time and not followed.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
-    "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
+    "386 files belong to no part: crates/league-steward/Cargo.toml, crates/league-steward/src/amount.rs, crates/league-steward/src/codec.rs and 383 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -803,19 +888,19 @@
   "startReason": "This path follows league-eval (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 141,
+  "testFiles": 142,
   "testedBy": {
-    "league-core": 35,
-    "league-error": 11,
+    "league-core": 36,
+    "league-error": 12,
     "league-eval": 17,
     "league-gen": 10,
-    "league-ledger": 8,
+    "league-ledger": 9,
     "league-relay": 14,
     "league-scorer": 8,
     "league-season": 1,
     "league-seat-types": 9,
     "league-seat-ui": 1,
-    "league-standalone": 5,
+    "league-standalone": 6,
     "league-tui": 2,
     "scripts": 1
   },

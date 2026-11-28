@@ -10,9 +10,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser::Serialize
 use sha2::{Digest, Sha256};
 
 use crate::commit::{
-    CommitmentHash, DrandBeaconAuthStatus, MandateReveal, OrderReveal, SealedEvalSeed,
-    SealedMandateDeal, draw_shocks_for_turn, validate_eval_vrf_pubkey,
-    verify_drand_quicknet_beacon, verify_eval_vrf_beacon, verify_sealed_mandate_deal,
+    CommitmentHash, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_PERIOD_SECS, DrandBeaconAuthStatus,
+    MandateReveal, OrderReveal, SealedEvalSeed, SealedMandateDeal, draw_shocks_for_turn,
+    validate_eval_vrf_pubkey, verify_drand_quicknet_beacon, verify_eval_vrf_beacon,
+    verify_sealed_mandate_deal,
 };
 use crate::contracts::MarketAction;
 use crate::engine::{SweepReceipt, TurnEngine, TurnPhase};
@@ -495,6 +496,11 @@ pub struct LoggedTurn {
     /// `2026-11-17`). Absent / `None` leaves cancel lock disengaged for the turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_lock_at: Option<u32>,
+    /// Optional validated Phase-2 commit close deadline in Unix seconds (`#51`,
+    /// `docs/game-mode-protocol.md` §2.2). When present in `TableMode::Game`, `replay_season`
+    /// requires `t_round(drand_round) > commit_deadline_unix`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_deadline_unix: Option<u64>,
     /// Phase 2 cryptographic order commitments keyed by seat index.
     pub commitments: BTreeMap<u8, CommitmentHash>,
     /// Phase 2 order reveals keyed by seat index.
@@ -1288,7 +1294,10 @@ fn replay_season_inner(
         }
         let verified_source = match log.mode {
             TableMode::Eval | TableMode::Club => {
-                if logged.drand_round.is_some() || logged.drand_signature.is_some() {
+                if logged.drand_round.is_some()
+                    || logged.drand_signature.is_some()
+                    || logged.commit_deadline_unix.is_some()
+                {
                     return Err(EngineError::InvalidOrder(format!(
                         "turn {} carries drand fields in {:?} mode",
                         logged.turn, log.mode
@@ -1352,6 +1361,24 @@ fn replay_season_inner(
                         drand_signature,
                         logged.turn_beacon,
                     )?;
+                if let Some(deadline_unix) = logged.commit_deadline_unix {
+                    let round_unix = round
+                        .checked_sub(1)
+                        .and_then(|offset| offset.checked_mul(DRAND_QUICKNET_PERIOD_SECS))
+                        .and_then(|secs| DRAND_QUICKNET_GENESIS_UNIX.checked_add(secs))
+                        .ok_or_else(|| {
+                            EngineError::InvalidOrder(format!(
+                                "turn {} drand_round {round} timestamp overflow",
+                                logged.turn
+                            ))
+                        })?;
+                    if round_unix <= deadline_unix {
+                        return Err(EngineError::InvalidOrder(format!(
+                            "turn {} drand_round {round} timestamp ({round_unix}) is not strictly after commit_deadline_unix ({deadline_unix})",
+                            logged.turn
+                        )));
+                    }
+                }
                 drand_beacon_auth_status = Some(auth_status);
                 prev_drand_round = Some(round);
                 TurnSource::Drand(round, drand_signature.as_slice())
@@ -1573,6 +1600,7 @@ mod tests {
                 turn: t,
                 market_actions: Vec::new(),
                 cancel_lock_at: None,
+                commit_deadline_unix: None,
                 commitments,
                 reveals,
                 turn_beacon: beacon,
@@ -1621,6 +1649,7 @@ mod tests {
             turn: next_t,
             market_actions: Vec::new(),
             cancel_lock_at: None,
+            commit_deadline_unix: None,
             commitments: BTreeMap::new(),
             reveals: BTreeMap::new(),
             turn_beacon: [0; 32],
@@ -1640,6 +1669,114 @@ mod tests {
         assert!(matches!(
             replay_season(&bad_idx),
             Err(EngineError::SeasonEnded(_))
+        ));
+    }
+
+    #[test]
+    fn replay_enforces_post_commit_drand_round_51_in_game_mode() {
+        #[derive(Deserialize)]
+        struct BeaconVec {
+            round: u64,
+            signature: String,
+        }
+        #[derive(Deserialize)]
+        struct VectorFile {
+            beacons: Vec<BeaconVec>,
+        }
+        let vectors: VectorFile =
+            serde_json::from_str(include_str!("../tests/vectors/drand_quicknet_vectors.json"))
+                .unwrap_or_else(|e| panic!("vectors parse: {e}"));
+        let sig_for_round = |target: u64| -> Vec<u8> {
+            let entry = vectors
+                .beacons
+                .iter()
+                .find(|b| b.round == target)
+                .unwrap_or_else(|| panic!("missing round {target}"));
+            hex::decode(&entry.signature).unwrap_or_else(|e| panic!("hex decode: {e}"))
+        };
+
+        let schedule = crate::commit::DrandSchedule {
+            turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 3,
+            turn_period_secs: 3,
+        };
+        let tid = TableId(5151);
+        let (spec, deal) = TableSpec::standard_game_chiral_ring_with_mandates(tid, 4, 7, schedule)
+            .unwrap_or_else(|e| panic!("game spec: {e}"));
+        let mut engine = TurnEngine::new(spec.clone()).unwrap_or_else(|e| panic!("engine: {e}"));
+        let mut turns = Vec::new();
+        for t in 1..=crate::types::HARD_TURN_CAP {
+            if engine.state().phase != TurnPhase::TalkAndMarket {
+                break;
+            }
+            assert!(engine.advance_to_commit().is_ok());
+            let mut commitments = BTreeMap::new();
+            let mut reveals = BTreeMap::new();
+            for s in 0..4u8 {
+                let ord_rev = OrderReveal {
+                    bundle: SealedOrderBundle::default(),
+                    salt: RevealSalt([s.wrapping_add(t).max(1); 32]),
+                };
+                let ch = compute_order_commitment(tid, Turn(t), Seat(s), &ord_rev)
+                    .unwrap_or_else(|e| panic!("commit: {e}"));
+                assert!(engine.submit_order_commitment(Seat(s), ch).is_ok());
+                commitments.insert(s, ch);
+                reveals.insert(s, ord_rev);
+            }
+            assert!(engine.advance_to_reveal().is_ok());
+            for (&s, r) in &reveals {
+                assert!(engine.submit_order_reveal(Seat(s), r.clone()).is_ok());
+            }
+            let round = schedule
+                .expected_round_for_turn(Turn(t))
+                .unwrap_or_else(|e| panic!("round: {e}"));
+            let sig = sig_for_round(round);
+            let beacon =
+                crate::commit::derive_drand_beacon(&sig).unwrap_or_else(|e| panic!("beacon: {e}"));
+            let receipt = engine
+                .sweep_turn_with_drand(round, &sig)
+                .unwrap_or_else(|e| panic!("sweep: {e}"));
+            let round_unix = DRAND_QUICKNET_GENESIS_UNIX + (round - 1) * DRAND_QUICKNET_PERIOD_SECS;
+            turns.push(LoggedTurn {
+                turn: t,
+                market_actions: Vec::new(),
+                cancel_lock_at: None,
+                commit_deadline_unix: Some(round_unix - 1),
+                commitments,
+                reveals,
+                turn_beacon: beacon,
+                drand_round: Some(round),
+                drand_signature: Some(sig),
+                eval_vrf_proof: None,
+                drawn_shocks: receipt.newly_drawn_shocks,
+            });
+            if receipt.season_closed {
+                break;
+            }
+        }
+        let live_board = engine
+            .finalize_season()
+            .unwrap_or_else(|e| panic!("finalize: {e}"));
+        let clear_seed = ReplayLayoutSeed::try_clear(7).unwrap_or_else(|e| panic!("seed: {e}"));
+        let log = SeasonReplayLog {
+            spec,
+            mode: TableMode::Game,
+            seed: clear_seed,
+            beacon_mode: ReplayBeaconMode::ExternalDrand,
+            eval_vrf_pubkey: None,
+            sealed_mandate_deal: deal,
+            mandate_commits: vec![None; 4],
+            turns,
+            mandate_reveals: vec![None; 4],
+        };
+        let out = replay_season(&log).unwrap_or_else(|e| panic!("replay ok: {e}"));
+        assert_eq!(out.scoreboard, live_board);
+
+        let mut bad_equal = log.clone();
+        bad_equal.turns[0].commit_deadline_unix =
+            Some(DRAND_QUICKNET_GENESIS_UNIX + DRAND_QUICKNET_PERIOD_SECS);
+        assert!(matches!(
+            replay_season(&bad_equal),
+            Err(EngineError::InvalidOrder(_))
         ));
     }
 }

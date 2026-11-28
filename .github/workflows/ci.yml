@@ -204,7 +204,7 @@ jobs:
           LEAGUE_XRPLD_LIVE: full
           DOCKER_BUILDKIT: "0"
         run: |
-          timeout 300 cargo test -p league-standalone --test standalone_live --locked -- --nocapture --test-threads=1
+          timeout 480 cargo test -p league-standalone -p league-steward --locked -- --nocapture --test-threads=1
           test -z "$(docker ps -aq --filter label=merchant-league.harness=standalone)"
 
       - name: Club Mode container smoke gate (offline, no push)

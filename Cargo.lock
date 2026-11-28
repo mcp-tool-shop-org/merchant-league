@@ -1553,6 +1553,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "league-steward"
+version = "0.2.0"
+dependencies = [
+ "hex",
+ "league-core",
+ "league-error",
+ "league-ledger",
+ "league-season",
+ "league-standalone",
+ "serde",
+ "serde_json",
+ "sha2",
+ "strum 0.26.3",
+ "xrpl-rust",
+]
+
+[[package]]
 name = "league-tui"
 version = "0.2.0"
 dependencies = [

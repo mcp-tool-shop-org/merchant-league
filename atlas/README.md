@@ -1,20 +1,30 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-28 from commit 5053d70 by Atlas 1.26.0.
+Mapped at 2026-11-28 from commit 62a27b7 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-16 parts, mostly Rust (422 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+16 parts, mostly Rust (429 files), JavaScript (5), shell (5), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-27 (bedf2dc)
+## What changed since 2026-11-28 (5053d70)
 
-Nothing structural changed since 2026-11-27; 1 file added and 1 changed content.
+- CI now also runs crates/league-steward/src/amount.rs, crates/league-steward/src/codec.rs, crates/league-steward/src/error.rs and 3 more.
+- CI now also checks crates/league-steward/src/lib.rs.
+- crates/league-core/ is now also read by crates/league-steward/Cargo.toml.
+- crates/league-core/tests/vectors/drand_quicknet_vectors.json is now also read by crates/league-core/src/replay.rs, crates/league-steward/src/steward.rs and crates/league-steward/tests/steward_live.rs.
+- crates/league-error/ is now also read by crates/league-steward/Cargo.toml.
+- And 4 more new writers and readers of places.
+- crates/league-steward/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.
+- crates/league-steward/src/amount.rs is new and belongs to no part, so atlas check fails on it against the previous map.
+- crates/league-steward/src/codec.rs is new and belongs to no part, so atlas check fails on it against the previous map.
+- And 5 more new files that belong to no part.
+- 8 files added and 13 changed content, across 4 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 16 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 85 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
+1. **CI.** On a pull request; on a push to main touching 16 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 91 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 5 more.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-eval** (a command people run). Runs crates/league-eval/src/main.rs.
 4. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
@@ -27,7 +37,7 @@ Nothing structural changed since 2026-11-27; 1 file added and 1 changed content.
 
 ## What happens through CI
 
-1. The workflow runs 6 files in scripts, 20 files in league-core, crates/league-error/ in league-error, 18 files in league-eval, 10 files in league-gen, and 32 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
+1. The workflow runs 6 files in scripts, 20 files in league-core, crates/league-error/ in league-error, 18 files in league-eval, 10 files in league-gen, and 38 files in 16 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer, and crates/league-steward/src/lib.rs.
 2. It writes to site/audit-report.json, which is not tracked.
 3. It uploads coverage to Codecov.
 
@@ -119,7 +129,7 @@ Read those in order to follow one run of league-eval end to end. This path follo
 - 2 writes and 1 read go to a temporary directory, not to this repository.
 - 4 commands are built at run time and not followed.
 - There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.
-- 378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.
+- 386 files belong to no part: crates/league-steward/Cargo.toml, crates/league-steward/src/amount.rs, crates/league-steward/src/codec.rs and 383 more.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.

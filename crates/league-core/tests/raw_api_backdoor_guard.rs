@@ -133,9 +133,10 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 44] = [
 
 const TUI_HOST_MODULES: [&str; 2] = ["src/host.rs", "src/main.rs"];
 
-const NON_SEAT_WORKSPACE_CRATES: [&str; 9] = [
+const NON_SEAT_WORKSPACE_CRATES: [&str; 10] = [
     "league-core",
     "league-standalone",
+    "league-steward",
     "league-error",
     "league-eval",
     "league-ledger",
@@ -9317,6 +9318,7 @@ fn check_workspace_manifests_and_crate_sources(
         "league-seat-types",
         "league-seat-ui",
         "league-standalone",
+        "league-steward",
         "league-tui",
     ] {
         if !seen.contains(expected) {
@@ -9394,6 +9396,7 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         "league-seat-types",
         "league-seat-ui",
         "league-standalone",
+        "league-steward",
         "league-tui",
     ];
     let members_toml: String = member_names
@@ -9471,6 +9474,7 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         "league-ledger",
         "league-relay",
         "league-season",
+        "league-steward",
     ] {
         fs::write(
             root.join("crates").join(name).join("Cargo.toml"),
@@ -10108,6 +10112,7 @@ members = [
     "crates/league-seat-types",
     "crates/league-seat-ui",
     "crates/league-standalone",
+    "crates/league-steward",
     "crates/league-tui",
     "tools/extra-seat",
 ]
@@ -10295,7 +10300,7 @@ fn planted_b2_relay_and_ledger_all_dep_routes_and_c4_root_key_fail() {
     );
     let _ = fs::write(
         root.join("Cargo.toml"),
-        "[workspace]\nmembers = [\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-eval\",\n    \"crates/league-gen\",\n    \"crates/league-helper\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
+        "[workspace]\nmembers = [\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-eval\",\n    \"crates/league-gen\",\n    \"crates/league-helper\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-steward\",\n    \"crates/league-tui\",\n]\n",
     );
     let _ = fs::write(
         root.join("crates/league-ledger/Cargo.toml"),
@@ -10760,7 +10765,7 @@ fn planted_c3_league_relay_and_future_ai_seat_crate_enforced_by_seat_rule() {
     );
     let _ = fs::write(
         seat_ws.join("Cargo.toml"),
-        "[workspace]\nmembers = [\n    \"crates/league-ai-seat\",\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-eval\",\n    \"crates/league-gen\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
+        "[workspace]\nmembers = [\n    \"crates/league-ai-seat\",\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-eval\",\n    \"crates/league-gen\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-steward\",\n    \"crates/league-tui\",\n]\n",
     );
     let _ = fs::write(
         ai_seat_dir.join("src/lib.rs"),
